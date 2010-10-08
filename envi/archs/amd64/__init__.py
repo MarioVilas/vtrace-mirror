@@ -238,15 +238,41 @@ class Amd64RegisterContext(e_reg.RegisterContext):
             index = index & 0xffff
         e_reg.RegisterContext.setRegister(self, index, value)
 
+class Amd64Call(envi.CallingConvention):
+
+    def getCallArgs(self, emu, count):
+        ret = []
+        if count == 0: return ret
+        ret.append(emu.getRegister(REG_RCX))
+        if count == 1: return ret
+        ret.append(emu.getRegister(REG_RDX))
+        if count == 2: return ret
+        ret.append(emu.getRegister(REG_R8))
+        if count == 3: return ret
+        ret.append(emu.getRegister(REG_R9))
+        if count == 4: return ret
+        rsp = emu.getStackCounter()
+        stargs = emu.readMemoryFormat(rsp, "<12Q")
+        ret.extend(stargs[4:])
+        return ret[:count]
+
+    def setReturnValue(self, emu, value, argc):
+        rsp = emu.getStackCounter()
+        rsp += 8
+        emu.setStackCounter(rsp)
+        emu.setRegister(REG_RAX, value)
+
+amd64call = Amd64Call()
+
 class Amd64Emulator(Amd64Module, Amd64RegisterContext, e_i386.IntelEmulator):
     def __init__(self):
         e_i386.IntelEmulator.__init__(self)
         # The above sets up the intel reg context, so we smash over it
         Amd64RegisterContext.__init__(self)
         Amd64Module.__init__(self)
-
         # For the format calls in reading memory
         self.imem_psize = 8
+        self.addCallingConvention("amd64call", amd64call)
 
 MODE_16 = 0
 MODE_32 = 1

@@ -419,20 +419,22 @@ class Trace(e_mem.IMemory, e_reg.RegisterContext, e_resolv.SymbolResolver, objec
         self.requireNotRunning()
         self.platformWriteMemory(long(address), bytes)
 
-    def searchMemory(self, needle):
+    def searchMemory(self, needle, regex=False):
         """
         Search all of process memory for a sequence of bytes.
         """
-        ret = e_mem.IMemory.searchMemory(self, needle)
-        self.setMeta("search", ret)
+        ret = e_mem.IMemory.searchMemory(self, needle, regex=regex)
+        self.setMeta('search', ret)
+        self.setVariable('search', ret)
         return ret
 
-    def searchMemoryRange(self, needle, address, size):
+    def searchMemoryRange(self, needle, address, size, regex=False):
         """
         Search a memory range for the specified sequence of bytes
         """
-        ret = e_mem.IMemory.searchMemoryRange(self, needle, address, size)
-        self.setMeta("search", ret)
+        ret = e_mem.IMemory.searchMemoryRange(self, needle, address, size, regex=regex)
+        self.setMeta('search', ret)
+        self.setVariable('search', ret)
         return ret
 
     def setMeta(self, name, value):
@@ -857,7 +859,7 @@ class Trace(e_mem.IMemory, e_reg.RegisterContext, e_resolv.SymbolResolver, objec
         Example:
         trace.setVariable("whereiam", trace.getProgramCounter())
         """
-        self.localvars[name] = long(value)
+        self.localvars[name] = value
 
     def getVariable(self, name):
         """

@@ -15,7 +15,7 @@ IF_CALL   = 0x04 # Set if this instruction branches to a procedure
 IF_BRANCH = 0x08 # Set if this instruction branches
 IF_RET    = 0x10 # Set if this instruction terminates a procedure
 
-# Branch flags
+# Branch flags (flags returned by the getBranches() method on an opcode)
 BR_PROC  = 1<<0 # The branch target is a procedure (call <foo>)
 BR_COND  = 1<<1 # The branch target is conditional (jz <foo>)
 BR_DEREF = 1<<2 # the branch target is *dereferenced* into PC (call [0x41414141])

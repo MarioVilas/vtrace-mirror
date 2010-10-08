@@ -306,8 +306,9 @@ class EnviCli(Cmd):
 
         Usage: search [options] <pattern>
         -X The specified pattern is in hex (ie.  414141424242 is AAABBB)
-        -E The specified patter is an expression (search for numeric values)
+        -E The specified pattern is an expression (search for numeric values)
         -R <baseexpr:sizeexpr> Search a specific range only.
+        -r The specified pattern is a regular expression
         """
         if len(line) == 0:
             return self.do_help("search")
@@ -315,10 +316,11 @@ class EnviCli(Cmd):
         range = None
         dohex = False
         doexpr = False
+        regex = False
 
         argv = splitargs(line)
         try:
-            opts,args = getopt(argv, "ER:X")
+            opts,args = getopt(argv, "ER:rX")
         except:
             return self.do_help("search")
 
@@ -327,6 +329,8 @@ class EnviCli(Cmd):
                 doexpr = True
             elif opt == "-R":
                 range = optarg
+            elif opt == '-r':
+                regex = True
             elif opt == "-X":
                 dohex = True
 
@@ -346,10 +350,10 @@ class EnviCli(Cmd):
             self.canvas.addText("Searching from ")
             self.canvas.addVaText("0x%.8x", addr)
             self.canvas.addText(" for %d bytes\n" % size)
-            res = self.memobj.searchMemoryRange(pattern, addr, size)
+            res = self.memobj.searchMemoryRange(pattern, addr, size, regex=regex)
         else:
             self.vprint("Searching all memory...")
-            res = self.memobj.searchMemory(pattern)
+            res = self.memobj.searchMemory(pattern, regex=regex)
 
         if len(res) == 0:
             self.vprint('Pattern Not Found: %s' % pattern.encode('hex'))

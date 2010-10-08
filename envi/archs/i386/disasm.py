@@ -549,9 +549,6 @@ class i386Opcode(envi.Opcode):
             else:
                 tova = oper0.getOperValue(self, emu=emu)
 
-            # FIXME check for SIB decodes and if we have an emulator,
-            # FIXME lets do switch case decoding here!
-
             ret.append((tova, flags))
 
         return ret

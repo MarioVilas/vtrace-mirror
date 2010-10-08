@@ -1,3 +1,5 @@
+import re
+
 import struct
 import envi
 
@@ -155,7 +157,7 @@ class IMemory:
             return False
         return True
 
-    def searchMemory(self, needle):
+    def searchMemory(self, needle, regex=False):
         """
         A quick cheater way to searchMemoryRange() for each
         of the current memory maps.
@@ -165,13 +167,13 @@ class IMemory:
             if not perm & MM_READ:
                 continue
             try:
-                results.extend(self.searchMemoryRange(needle, va, size))
+                results.extend(self.searchMemoryRange(needle, va, size, regex=regex))
             except:
                 pass # Some platforms dont let debuggers read non-readable mem
 
         return results
 
-    def searchMemoryRange(self, needle, address, size):
+    def searchMemoryRange(self, needle, address, size, regex=False):
         """
         Search the specified memory range (address -> size)
         for the string needle.   Return a list of addresses
@@ -179,13 +181,18 @@ class IMemory:
         """
         results = []
         memory = self.readMemory(address, size)
-        offset = 0
-        while offset < size:
-            loc = memory.find(needle, offset)
-            if loc == -1: # No more to be found ;)
-                break
-            results.append(address+loc)
-            offset = loc+len(needle) # Skip one past our matcher
+        if regex:
+            for match in re.finditer(needle, memory):
+                off = match.start()
+                results.append(address+off)
+        else:
+            offset = 0
+            while offset < size:
+                loc = memory.find(needle, offset)
+                if loc == -1: # No more to be found ;)
+                    break
+                results.append(address+loc)
+                offset = loc+len(needle) # Skip one past our matcher
 
         return results
 
@@ -198,7 +205,7 @@ class MemoryObject(IMemory):
         """
         IMemory.__init__(self)
         self._mem_pagesize = pagesize
-        self._mem_mask = (0-pagesize) & 0xffffffff
+        self._mem_mask = (0-pagesize) & 0xffffffffffffffff
         self._mem_maps = []
         self._mem_maplookup = {}
         self._mem_bytelookup = {}

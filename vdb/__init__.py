@@ -408,7 +408,13 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
             vnames.sort()
             for n in vnames:
                 val = vars.get(n)
-                self.vprint("%20s = 0x%.8x" % (n,val))
+                if type(val) in (int, long):
+                    self.vprint("%20s = 0x%.8x" % (n,val))
+                else:
+                    rstr = repr(val)
+                    if len(rstr) > 30:
+                        rstr = rstr[:30] + '...'
+                    self.vprint("%20s = %s" % (n,rstr))
 
     def do_alloc(self, args):
         #"""

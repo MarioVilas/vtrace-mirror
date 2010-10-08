@@ -48,11 +48,21 @@ class v_prim(v_base):
         method will be called by parsers to assign the value
         of a primitive from a struct.unpack call.
         """
-        self.vsSetValue(value)
+        self._vs_value = value
+
+    def vsGetFmtValue(self):
+        """
+        The emit function uses this to ask each primitive for the
+        object to be put into the struct pack sequence.
+        Most objects just return their value...
+        """
+        return self._vs_value
 
     def vsGetValue(self):
         """
         Get the type specific value for this field.
+        (Used by the structure dereference method to return
+        a python native for the field by name)
         """
         return self._vs_value
 
@@ -219,6 +229,14 @@ class v_size_t(v_number):
 class v_ptr(v_size_t):
     pass
 
+class v_ptr32(v_ptr):
+    _vs_builder = True
+    _vs_fmt = "L"
+
+class v_ptr64(v_ptr):
+    _vs_builder = True
+    _vs_fmt = "Q"
+
 class v_bytes(v_prim):
 
     _vs_builder = True
@@ -235,6 +253,11 @@ class v_bytes(v_prim):
         return self._vs_value.encode('hex')
 
 class v_str(v_prim):
+    '''
+    A string placeholder class which will automagically return
+    up to a null terminator (and will keep it's size by null
+    padding when assigned to)
+    '''
 
     _vs_builder = True
 
@@ -243,11 +266,52 @@ class v_str(v_prim):
         self._vs_length = size
         self._vs_value = "A"*size
 
+    def vsGetValue(self):
+        val = v_prim.vsGetValue(self)
+        return val.split("\x00")[0]
+
+    def vsSetValue(self, val):
+        realval = val.ljust(len(self), '\x00')
+        v_prim.vsSetValue(self, realval)
+
     def vsGetFormat(self):
         return "%ds" % len(self)
 
     def __len__(self):
         return len(self._vs_value)
+
+class v_wstr(v_str):
+    '''
+    Unicode variant of the above string class
+
+    NOTE: the size paramater is in WCHARs!
+    '''
+
+    _vs_builder = True
+
+    def __init__(self, size=4, encode='utf-16le'):
+        v_prim.__init__(self)
+        b = ('A'*size).encode(encode)
+        self._vs_length = len(b)
+        self._vs_value = b
+        self._vs_encode = encode
+
+    def vsGetValue(self):
+        val = v_prim.vsGetValue(self)
+        val = val.decode(self._vs_encode)
+        return val.split("\x00")[0]
+
+    def vsSetValue(self, val):
+        rbytes = val.encode(self._vs_encode)
+        rbytes = rbytes.ljust(len(self), '\x00')
+        v_prim.vsSetValue(self, rbytes)
+
+    def vsGetFormat(self):
+        return "%ds" % len(self)
+
+    def __len__(self):
+        return len(self._vs_value)
+    
 
 class GUID(v_prim):
 

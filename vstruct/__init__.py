@@ -38,7 +38,7 @@ class VStruct(vs_prims.v_base):
         fmt = self.vsGetFormat()
         r = []
         for p in self.vsGetPrims():
-            r.append(p.vsGetValue())
+            r.append(p.vsGetFmtValue())
         return struct.pack(fmt, *r)
 
     def vsGetFormat(self):

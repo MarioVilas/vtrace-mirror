@@ -487,6 +487,78 @@ def pe(vdb, line):
         else:
             vdb.vprint('0x%.8x - %.30s %s' % (base, libname, path))
 
+def bindiff(mem1, mem2):
+    ret = []
+    i = 0
+    imax = len(mem1)
+    while i < imax:
+        r = i
+        while mem1[r] != mem2[r] and r < imax:
+            r += 1
+        # We found a discrepency
+        if r != i:
+            size = (r-i)
+            ret.append((i,size))
+            i+=r
+        i+=1
+    return ret
+
+def hooks(vdb, line):
+    '''
+    Check the executable regions of the target process for any
+    hooks by comparing against the PE on disk.  This will
+    account for relocations and import entries.
+    '''
+    t = vdb.getTrace()
+    bases = t.getMeta("LibraryBases")
+    paths = t.getMeta("LibraryPaths")
+    found = False
+    for bname in bases.keys():
+        base = bases.get(bname)
+        fpath = paths.get(base)
+        pobj = PE.PE(file(fpath,'rb'))
+        filebase = pobj.IMAGE_NT_HEADERS.OptionalHeader.ImageBase
+
+        skips = {}
+        # Get relocations for skipping
+        r = (0,1,2,3)
+        for relrva, reltype in pobj.getRelocations():
+            for i in r:
+                skips[base+relrva+i] = True
+        # Add the import entries to skip
+        for iva,libname,name in pobj.getImports():
+            for i in r:
+                skips[base+iva+i] = True
+
+        for sec in pobj.getSections():
+            if sec.Characteristics & PE.IMAGE_SCN_MEM_EXECUTE:
+                size = sec.VirtualSize
+                va = base + sec.VirtualAddress
+                fileva = filebase + sec.VirtualAddress
+                filebytes = pobj.readAtRva(sec.VirtualAddress, sec.VirtualSize)
+                procbytes = t.readMemory(va, size)
+                for off,size in bindiff(filebytes, procbytes):
+                    difva = va + off
+                    fdifva = fileva + off
+                    # Check for a relocation covering this...
+                    if skips.get(difva):
+                        continue
+                    found = True
+                    dmem = procbytes[off:off+size].encode('hex')[:10]
+                    dfil = filebytes[off:off+size].encode('hex')[:10]
+
+                    vdb.canvas.addVaText('0x%.8x' % difva, difva)
+                    vdb.canvas.addText(' (0x%.8x) (%d)' % (fdifva,size))
+                    vdb.canvas.addText(' mem: %s file: %s ' % (dmem, dfil))
+
+                    sym = vdb.symobj.getSymByAddr(difva, exact=False)
+                    if sym != None:
+                        vdb.canvas.addText(' ')
+                        vdb.canvas.addVaText('%s + %d' % (repr(sym),difva-long(sym)), difva)
+                    vdb.canvas.addText('\n')
+
+    if not found: vdb.canvas.addText('No Hooks Found!\n')
+
 # The necissary module extension function
 def vdbExtension(vdb, trace):
     vdb.registerCmdExtension(pe)
@@ -500,4 +572,5 @@ def vdbExtension(vdb, trace):
     vdb.registerCmdExtension(pagewatch)
     vdb.registerCmdExtension(stealth)
     vdb.registerCmdExtension(aslr)
+    vdb.registerCmdExtension(hooks)
 
