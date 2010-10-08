@@ -41,10 +41,18 @@ class MainWindow(vw_layout.LayoutWindow):
         entry.connect("activate", self.cli_activate)
         entry.connect("key-press-event", self.entrykeypressed)
         self.vbox.pack_start(entry, expand=False)
+        self.entry = entry
 
         self.history = []
         self.histidx = 0
         entry.grab_focus()
+
+    @idlethread
+    def _sensitive_entry(self, sensitive):
+        # For the fired thread
+        self.entry.set_sensitive(sensitive)
+        if sensitive:
+            self.entry.grab_focus()
 
     def getMainToolbar(self):
         return None
@@ -72,15 +80,20 @@ class MainWindow(vw_layout.LayoutWindow):
             return True
         return False
 
+    @firethread
     def onecmd(self, cmd):
         '''
         Issue a single command with proper history tracking etc...
         (fires a thread to do it...)
         '''
-        cmd = self.cli.precmd(cmd)
-        self.canvas.write("%s %s\n" % (self.cli.prompt,cmd))
-        self.cli.onecmd(cmd)
-        self.addHistory(cmd)
+        self._sensitive_entry(False)
+        try:
+            cmd = self.cli.precmd(cmd)
+            self.canvas.write("%s %s\n" % (self.cli.prompt,cmd))
+            self.cli.onecmd(cmd)
+            self.addHistory(cmd)
+        finally:
+            self._sensitive_entry(True)
 
     def keypressed(self, window, event):
         fkbase = 65469

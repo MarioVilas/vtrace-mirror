@@ -153,9 +153,12 @@ class IMemory:
         return None
 
     def isValidPointer(self, va):
-        if self.getMemoryMap(va) == None:
+        try:
+            if self.getMemoryMap(va) == None:
+                return False
+            return True
+        except Exception, e:
             return False
-        return True
 
     def searchMemory(self, needle, regex=False):
         """

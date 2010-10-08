@@ -28,8 +28,6 @@ import envi.config as e_config
 import envi.resolver as e_resolv
 import envi.memcanvas as e_canvas
 
-from envi.threads import firethread
-
 import vstruct
 import vstruct.primitives as vs_prims
 
@@ -122,6 +120,12 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
         self.arch = envi.getArchModule(arch)
         self.difftracks = {}
 
+        # We hangn on to an opcode renderer instance
+        self.opcoderend = None
+
+        # If a VdbGui instance is present it will set this.
+        self.gui = None
+
         self.setMode("NonBlocking", True)
 
         self.manageTrace(trace)
@@ -164,7 +168,8 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
         self.canvas.addRenderer("u_int_16", e_render.ShortRend())
         self.canvas.addRenderer("u_int_32", e_render.LongRend())
         self.canvas.addRenderer("u_int_64", e_render.QuadRend())
-        self.canvas.addRenderer("disasm", v_rend.OpcodeRenderer(self.trace))
+        self.opcoderend = v_rend.OpcodeRenderer(self.trace)
+        self.canvas.addRenderer("disasm", self.opcoderend)
         drend = v_rend.DerefRenderer(self.trace)
         self.canvas.addRenderer("Deref View", drend)
 
@@ -373,10 +378,8 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
         if argc > 1:
             size = self.parseExpression(argv[1])
 
-        import vdb.renderers as v_rend
-        rend = v_rend.OpcodeRenderer(self.trace)
         self.vprint("Dissassembly:")
-        self.canvas.render(addr, size, rend=rend)
+        self.canvas.render(addr, size, rend=self.opcoderend)
 
     def do_var(self, line):
         """
@@ -475,7 +478,6 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
             t.setMeta("PendingSignal", newsig)
             self.vprint("New signal: %d" % newsig)
 
-    @firethread
     def do_snapshot(self, line):
         """
         Take a process snapshot of the current (stopped) trace and
@@ -543,6 +545,7 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
         if len(line) > 0:
             thrid = int(line, 0)
             self.trace.selectThread(thrid)
+            if self.gui != None: self.gui.setTraceWindowsActive(True)
 
         self.vprint("Current Threads:")
         self.vprint("[thrid] [thrinfo]  [pc]")
@@ -660,13 +663,28 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
         Single step the target tracer.
         Usage: stepi [count expression]
         """
+        t = self.trace
         if len(args):
-            count = self.trace.parseExpression(args)
+            count = t.parseExpression(args)
         else:
             count = 1
 
-        for i in xrange(count):
-            self.trace.stepi()
+        oldmode = self.getMode('FastStep')
+        self.setMode('FastStep', True)
+        try:
+            for i in xrange(count):
+                pc = t.getProgramCounter()
+                self.canvas.render(pc, 1, rend=self.opcoderend)
+                t.stepi()
+                if t.getMeta('PendingException'):
+                    break
+                if t.getMeta('PendingSignal'):
+                    break
+        finally:
+            self.setMode('FastStep', oldmode)
+            # We ate all the events, tell the GUI to update
+            # if it's around...
+            if self.gui != None: self.gui.setTraceWindowsActive(True)
 
     def do_go(self, line):
         """
@@ -770,7 +788,6 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
                         continue
                 self.vprint("0x%.8x %s" % (sym.value, r))
 
-    @firethread
     def do_call(self, string):
         """
         Allows a C-like syntax for calling functions inside
@@ -900,9 +917,11 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
 
         Usage: bt
         """
-        self.vprint("[   PC   ] [ Frame  ] [ Location ]")
-        for frame in self.trace.getStackTrace():
-            self.vprint("0x%.8x 0x%.8x %s" % (frame[0],frame[1],self.reprPointer(frame[0])))
+        self.vprint("      [   PC   ] [ Frame  ] [ Location ]")
+        idx = 0
+        for pc,frame in self.trace.getStackTrace():
+            self.vprint("[%3d] 0x%.8x 0x%.8x %s" % (idx,pc,frame,self.reprPointer(pc)))
+            idx += 1
 
     def do_lm(self, args):
         """

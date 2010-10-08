@@ -50,7 +50,7 @@ class ArchitectureModule:
         """
         raise ArchNotImplemented("archGetRegCtx")
 
-    def makeOpcode(self, bytes, offset=0):
+    def makeOpcode(self, bytes, offset=0, va=0):
         """
         Create a new opcode from the specified bytes (beginning
         at the specified offset)
@@ -214,6 +214,18 @@ class Operand:
         """
         return False
 
+    def isImmed(self):
+        '''
+        If the given operand represents an immediate value, this must return True.
+        '''
+        return False
+
+    def isReg(self):
+        '''
+        If the given operand represents a register value, this must return True.
+        '''
+        return False
+
     def getOperAddr(self, op, emu):
         """
         If the operand is a "dereference" operand, this method should use the
@@ -244,6 +256,21 @@ class Operand:
         if not isinstance(oper, self.__class__):
             return False
         #FIXME each one will need this...
+        return True
+
+class DerefOper(Operand):
+
+    def isDeref(self):
+        return True
+
+class ImmedOper(Operand):
+
+    def isImmed(self):
+        return True
+
+class RegisterOper(Operand):
+
+    def isReg(self):
         return True
 
 class Opcode:
@@ -447,7 +474,7 @@ class Emulator(e_reg.RegisterContext, e_mem.IMemory):
     def stepi(self):
         pc = self.getProgramCounter()
         bytes = self.readMemory(pc, 32)
-        op = self.makeOpcode(bytes)
+        op = self.makeOpcode(bytes, va=pc)
         self.executeOpcode(op)
 
 #############################################################

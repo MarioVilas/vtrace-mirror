@@ -216,12 +216,19 @@ class EnviCli(Cmd):
     def do_python(self, line):
         """
         Start an interactive python interpreter. The namespace of the
-        interpreter is updated with expression nicities.
+        interpreter is updated with expression nicities.  You may also
+        specify a line of python code as an argument to be exec'd without
+        beginning an interactive python interpreter on the controlling
+        terminal.
 
-        Usage: python
+        Usage: python [pycode]
         """
-        l = self.getExpressionLocals()
-        code.interact(local=l)
+        locals = self.getExpressionLocals()
+        if len(line) != 0:
+            cobj = compile(line, 'cli_input', 'exec')
+            exec(cobj, locals)
+        else:
+            code.interact(local=locals)
 
     def parseExpression(self, expr):
         l = self.getExpressionLocals()
@@ -459,6 +466,24 @@ class EnviMutableCli(EnviCli):
     Cli extensions which require a mutable memory object
     (emulator/trace) rather than a static one (viv workspace)
     """
+
+    def do_memcpy(self, line):
+        '''
+        Copy memory from one location to another...
+
+        Usage: memcpy <dest_expr> <src_expr> <size_expr>
+        '''
+        argv = splitargs(line)
+        if len(argv) != 3:
+            return self.do_help('memcpy')
+
+
+        dst = self.parseExpression(argv[0])
+        src = self.parseExpression(argv[1])
+        siz = self.parseExpression(argv[2])
+
+        mem = self.memobj.readMemory(src, siz)
+        self.memobj.writeMemory(dst, mem)
 
     def do_memprotect(self, line):
         """

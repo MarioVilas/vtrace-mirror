@@ -79,6 +79,7 @@ class VdbGui(vw_layout.LayoutManager, Notifier):
         vw_layout.LayoutManager.__init__(self)
 
         self.db = db
+        db.gui = self
         self.db.registerNotifier(NOTIFY_ALL, self)
         self.ismain = ismain
 

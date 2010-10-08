@@ -368,7 +368,7 @@ class ScrolledMemoryView(MemoryView):
     @idlethread
     def addText(self, text, tag=None):
         MemoryView.addText(self, text, tag=tag)
-        if text.find("\n"):
+        if text.find("\n") != -1:
             self.vwScrollToBottom()
 
     def goto(self, va, size=None, rend=None):

@@ -23,7 +23,9 @@ def idlethread(func):
     def idleadd(*args, **kwargs):
         if currentThread().getName() == 'GtkThread':
             return func(*args, **kwargs)
+        gtk.gdk.threads_enter()
         gobject.idle_add(dowork, (args,kwargs))
+        gtk.gdk.threads_leave()
 
     return idleadd
 
@@ -43,7 +45,9 @@ def idlethreadsync(func):
     def idleadd(*args, **kwargs):
         if currentThread().getName() == 'GtkThread':
             return func(*args, **kwargs)
+        gtk.gdk.threads_enter()
         gobject.idle_add(dowork, (args,kwargs))
+        gtk.gdk.threads_leave()
         return q.get()
 
     return idleadd
@@ -57,4 +61,6 @@ def mainthread():
 
 def main():
     currentThread().setName('GtkThread')
+    gtk.gdk.threads_enter()
     gtk.main()
+    gtk.gdk.threads_leave()

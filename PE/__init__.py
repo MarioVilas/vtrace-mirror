@@ -3,6 +3,8 @@ import struct
 import vstruct
 import vstruct.defs.pe as vs_pe
 
+import ordlookup
+
 IMAGE_FILE_MACHINE_I386  = 0x014c
 IMAGE_FILE_MACHINE_IA64  = 0x0200
 IMAGE_FILE_MACHINE_AMD64 = 0x8664
@@ -296,7 +298,7 @@ class PE(object):
                 nva = self.readPointerAtOffset(noff+(self.psize*idx))
                 #FIXME high bit testing for 64 bit
                 if nva & 0x80000000:
-                    name = "ord%d" % (nva & 0x7fffffff,)
+                    name = ordlookup.ordLookup(libname, nva & 0x7fffffff)
                 else:
                     nameoff = self.rvaToOffset(nva) + 2 # Skip the short "hint"
                     name = self.readAtOffset(nameoff, 256).split("\x00")[0]

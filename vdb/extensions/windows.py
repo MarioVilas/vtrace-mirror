@@ -59,9 +59,25 @@ def regkeys(vdb, line):
 def einfo(vdb, line):
     """
     Show all the current exception information.
-    Usage: einfo
+
+    -P    Toggle the "PendingException" meta key which controls
+          delivery (or handling) of the current exception.
+
+    Usage: einfo [options]
     """
+    argv = e_cli.splitargs(line)
     t = vdb.getTrace()
+
+    try:
+        opts,args = getopt.getopt(argv, 'P')
+    except Exception, e:
+        return vdb.do_help('einfo')
+
+    for opt,optarg in opts:
+        if opt == '-P':
+            p = t.getMeta('PendingException')
+            t.setMeta('PendingException', not p)
+
     exc = t.getMeta("Win32Event", None)
     if exc == None:
         vdb.vprint("No Exception Information Found")
@@ -70,11 +86,13 @@ def einfo(vdb, line):
     chance = 2
     if exc.get("FirstChance", False):
         chance = 1
+
     einfo = exc.get("ExceptionInformation", [])
     #FIXME get extended infoz
     #FIXME unify with cli thing
     vdb.vprint("Win32 Exception 0x%.8x at 0x%.8x (%d chance)" % (ecode, eaddr, chance))
     vdb.vprint("Exception Information: %s" % " ".join([hex(i) for i in einfo]))
+    vdb.vprint('Deliver Exception: %s' % t.getMeta('PendingException'))
 
 def seh(vdb, line):
     """

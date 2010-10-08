@@ -120,7 +120,7 @@ def addrToName(mcanv, va):
 #
 
 
-class i386RegOper(envi.Operand):
+class i386RegOper(envi.RegisterOper):
 
     def __init__(self, reg, tsize):
         self.reg = reg
@@ -156,7 +156,7 @@ class i386RegOper(envi.Operand):
 # For opcodes which need their immediate extended on print
 sextend = [opcode86.INS_ADD, opcode86.INS_SUB, opcode86.INS_AND]
 
-class i386ImmOper(envi.Operand):
+class i386ImmOper(envi.ImmedOper):
     """
     An operand representing an immediate.
     """
@@ -199,7 +199,6 @@ class i386ImmOper(envi.Operand):
             return False
         return True
 
-
 class i386PcRelOper(envi.Operand):
     """
     This is the operand used for EIP relative offsets
@@ -211,6 +210,9 @@ class i386PcRelOper(envi.Operand):
 
     def repr(self, op):
         return "0x%.8x" % (op.va + op.size + self.imm)
+
+    def isImmed(self):
+        return True # FIXME trying this out....
 
     def getOperValue(self, op, emu=None):
         return op.va + op.size + self.imm
@@ -233,7 +235,7 @@ class i386PcRelOper(envi.Operand):
             return False
         return True
 
-class i386RegMemOper(envi.Operand):
+class i386RegMemOper(envi.DerefOper):
     """
     An operand which represents the result of reading/writting memory from the
     dereference (with possible displacement) from a given register.
@@ -297,7 +299,7 @@ class i386RegMemOper(envi.Operand):
             return False
         return True
 
-class i386ImmMemOper(envi.Operand):
+class i386ImmMemOper(envi.DerefOper):
     """
     An operand which represents the dereference (memory read/write) of
     a memory location associated with an immediate.
@@ -323,9 +325,6 @@ class i386ImmMemOper(envi.Operand):
             ret += base
         return ret
 
-    def isDeref(self):
-        return True
-
     def render(self, mcanv, op, idx):
         mcanv.addNameText(sizenames[self.tsize])
         mcanv.addText(" [")
@@ -349,7 +348,7 @@ class i386ImmMemOper(envi.Operand):
             return False
         return True
 
-class i386SibOper(envi.Operand):
+class i386SibOper(envi.DerefOper):
     """
     An operand which represents the result of reading/writting memory from the
     dereference (with possible displacement) from a given register.
@@ -435,9 +434,6 @@ class i386SibOper(envi.Operand):
         if emu:
             return emu.getRegister(self.reg)
         return None
-
-    def isDeref(self):
-        return True
 
     def render(self, mcanv, op, idx):
 

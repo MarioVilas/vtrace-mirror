@@ -872,7 +872,7 @@ class Trace(e_mem.IMemory, e_reg.RegisterContext, e_resolv.SymbolResolver, objec
         """
         Get the dictionary of named variables.
         """
-        return self.localvars
+        return dict(self.localvars)
 
     def hex(self, value):
         """
@@ -1033,10 +1033,11 @@ class VtraceExpressionLocals(e_expr.MemoryExpressionLocals):
 
     def __getitem__(self, name):
         # Check registers
-        regs = self.trace.getRegisters()
-        r = regs.get(name, None)
-        if r != None:
-            return r
+        if self.trace.isAttached():
+            regs = self.trace.getRegisters()
+            r = regs.get(name, None)
+            if r != None:
+                return r
         # Check local variables
         locs = self.trace.getVariables()
         r = locs.get(name, None)
