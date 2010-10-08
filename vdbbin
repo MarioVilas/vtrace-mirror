@@ -65,6 +65,7 @@ if __name__ == "__main__":
     if do_gui:
         import vwidget.main as vw_main
         import vdb.gui
+        vw_main.mainthread()
         vgui = vdb.gui.VdbGui(db)
 
     if pid != None:
@@ -75,18 +76,7 @@ if __name__ == "__main__":
 
     if do_gui:
 
-        thr = threading.Thread(target=vdb.gui.mainwait, args=(vgui,))
-        thr.setDaemon(True)
-        thr.start()
-
         vw_main.main()
-
-        if db.vdbhome:
-            lfile = os.path.join(db.vdbhome, "vdb.lyt")
-            vgui.saveLayoutFile(file(lfile, "wb"))
-
-        vgui.deleteAllWindows()
-
 
     else:
 

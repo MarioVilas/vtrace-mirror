@@ -1,29 +1,60 @@
 
 import gtk
 import time
-import threading
+import gobject
+from threading import currentThread
 
-guilock = threading.RLock()
-go = True
+from Queue import Queue
 
+gtk.gdk.threads_init()
+
+def idlethread(func):
+    '''
+    A decorator which causes the function to be called by the gtk
+    main iteration loop rather than synchronously...
+
+    NOTE: This makes the call async handled by the gtk main
+    loop code.  you can NOT return anything.
+    '''
+    def dowork(arginfo):
+        args,kwargs = arginfo
+        return func(*args, **kwargs)
+
+    def idleadd(*args, **kwargs):
+        if currentThread().getName() == 'GtkThread':
+            return func(*args, **kwargs)
+        gobject.idle_add(dowork, (args,kwargs))
+
+    return idleadd
+
+def idlethreadsync(func):
+    '''
+    Similar to idlethread except that it is synchronous and able
+    to return values.
+    '''
+    q = Queue()
+    def dowork(arginfo):
+        args,kwargs = arginfo
+        try:
+            q.put(func(*args, **kwargs))
+        except Exception, e:
+            q.put(e)
+
+    def idleadd(*args, **kwargs):
+        if currentThread().getName() == 'GtkThread':
+            return func(*args, **kwargs)
+        gobject.idle_add(dowork, (args,kwargs))
+        return q.get()
+
+    return idleadd
+
+@idlethread
 def shutdown():
-    global go
-    go = False
+    gtk.main_quit()
 
-def waitandshutdown(event):
-    event.wait()
-    shutdown()
+def mainthread():
+    currentThread().setName('GtkThread')
 
-def main(onexit=None):
-    try:
-        while go:
-            guilock.acquire()
-            gtk.main_iteration_do(False)
-            skipsleep = gtk.events_pending()
-            guilock.release()
-            if not skipsleep:
-                time.sleep(0.01)
-    finally:
-        if onexit != None:
-            onexit()
-
+def main():
+    currentThread().setName('GtkThread')
+    gtk.main()

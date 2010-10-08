@@ -38,6 +38,8 @@ class i386Mixin(e_i386.i386Module, e_i386.i386RegisterContext):
         e_i386.i386Module.__init__(self)
         e_i386.i386RegisterContext.__init__(self)
 
+        self.setMeta('Architecture', 'i386')
+
     def getBreakInstruction(self):
         return "\xcc"
 

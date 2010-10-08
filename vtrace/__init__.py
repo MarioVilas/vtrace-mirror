@@ -55,7 +55,6 @@ import vstruct
 remote = None       # If set, we're a vtrace client (set to serverhost)
 cobra_daemon = None
 port = 0x5656
-symbolcache = {} # A list of vtrace symbols key'd by filename
 verbose = False
 
 # Order must match format junk

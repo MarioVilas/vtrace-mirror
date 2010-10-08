@@ -57,7 +57,10 @@ class LayoutManager:
 
     def loadLayoutFile(self, fd):
         try:
-            for clsname, geom, state in pickle.load(fd):
+            for line in fd.readlines():
+
+                clsname, geom, state = line.split(':', 2)
+
                 clstup = self.winclasses.get(clsname)
                 if clstup == None:
                     print "ERROR: unregistered class in layout: %s" % clsname
@@ -66,16 +69,18 @@ class LayoutManager:
                 cls, args = clstup
 
                 win = cls(*args)
-                win.setGeometry(geom)
+                win.setGeometry(eval(geom))
                 try:
-                    win.setWindowState(state)
+                    win.setWindowState(eval(state))
                 except Exception, e:
                     print "ERROR: Failed to set window state: %s %s" % (clsname, e)
 
                 self.__trackWindow(win)
+
             return True
+
         except Exception, e:
-            print "WARNING: loadLayoutFile() %s" % e
+            print 'Layout Error: %s' % e
             return False
 
     def saveLayoutFile(self, fd):
@@ -88,7 +93,7 @@ class LayoutManager:
                 geom = win.getGeometry()
                 state = win.getWindowState()
                 wlist.append((win.getWindowName(), geom, state))
-        pickle.dump(wlist, fd)
+                fd.write('%s:%s:%s\n' % (win.getWindowName(), repr(geom), repr(state)))
 
     def __trackWindow(self, win):
         self.windows.append(win)
@@ -105,9 +110,15 @@ class LayoutManager:
             window.setGeometry(geom)
 
     def _windowDeleted(self, window, event):
-        self.windows.remove(window)
+        try:
+            self.windows.remove(window)
+        except ValueError, e:
+            pass
 
-    def deleteAllWindows(self):
+    def deleteAllWindows(self, omit=None):
         for win in self.windows:
+            if win == omit:
+                continue
+            win.emit('delete_event', None)
             win.destroy()
 

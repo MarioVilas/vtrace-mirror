@@ -854,6 +854,9 @@ class WindowsMixin:
 
         self.setupDosDeviceMaps()
 
+        # Setup our binary format meta
+        self.setMeta('Format','pe')
+
         # Setup some win32_ver info in metadata
         rel,ver,csd,ptype = platform.win32_ver()
         self.setMeta("WindowsRelease",rel)

@@ -2,7 +2,9 @@ import envi.memory as e_mem
 import vtrace
 import gtk
 import vwidget.views as vw_views
-import vwidget.main as vw_main
+
+from envi.threads import firethread
+from vwidget.main import idlethread, idlethreadsync
 
 class VtraceView:
     def __init__(self, trace):
@@ -96,6 +98,11 @@ class TraceToolBar(gtk.Toolbar, vtrace.Notifier):
 
         self.updateButtons(trace.isAttached(), trace.isRunning())
 
+        self.activateList(self.wantsrunning, True)
+        self.activateList(self.wantsnotrunning, True)
+        self.activateList(self.wantsnotattached, True)
+
+    @idlethread
     def updateButtons(self, attached, running):
         self.activateList(self.wantsnotattached, not attached)
         if attached:
@@ -109,59 +116,42 @@ class TraceToolBar(gtk.Toolbar, vtrace.Notifier):
         for o in objs:
             o.set_sensitive(sens)
 
+    @firethread
     def tstep(self, button):
-        vw_main.guilock.release()
-        try:
-            self.trace.stepi()
-        finally:
-            vw_main.guilock.acquire()
+        self.trace.stepi()
 
+    @firethread
     def tbreak(self, button):
-        vw_main.guilock.release()
-        try:
-            self.trace.sendBreak()
-        finally:
-            vw_main.guilock.acquire()
+        self.trace.sendBreak()
 
+    @firethread
     def tcontinue(self, button):
-        vw_main.guilock.release()
-        try:
-            self.trace.run()
-        finally:
-            vw_main.guilock.acquire()
+        self.trace.run()
 
     def attach(self, button):
         dia = SelectProcessDialog(self.trace)
         pid = dia.selectProcess()
         if pid != None:
-            vw_main.guilock.release()
-            try:
-                self.trace.attach(pid)
-            finally:
-                vw_main.guilock.acquire()
+            self._doattach(pid)
 
+    @firethread
+    def _doattach(self, pid):
+        self.trace.attach(pid)
+
+    @firethread
     def detach(self, button):
         if self.trace.isAttached():
-            vw_main.guilock.release()
-            try:
-                self.trace.detach()
-            finally:
-                vw_main.guilock.acquire()
+            self.trace.detach()
 
     def notify(self, event, trace):
-        vw_main.guilock.acquire()
-        try:
-            if event == vtrace.NOTIFY_DETACH:
-                self.updateButtons(False, False)
+        if event == vtrace.NOTIFY_DETACH:
+            self.updateButtons(False, False)
 
-            elif event == vtrace.NOTIFY_CONTINUE:
-                self.updateButtons(True, True)
+        elif event == vtrace.NOTIFY_CONTINUE:
+            self.updateButtons(True, True)
 
-            else:
-                self.updateButtons(trace.isAttached(), trace.shouldRunAgain())
-
-        finally:
-            vw_main.guilock.release()
+        else:
+            self.updateButtons(trace.isAttached(), trace.shouldRunAgain())
 
 class MemoryMapView(VtraceView, vw_views.VTreeView):
     __cols__ = (

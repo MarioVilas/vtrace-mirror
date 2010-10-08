@@ -237,6 +237,12 @@ class Operand:
         """
         return "unknown"
 
+    def render(self, mcanv, op, idx):
+        """
+        Used by the opcode class when rendering to a memory canvas.
+        """
+        mcanv.addText(self.repr(op))
+
     def __ne__(self, op):
         return not op == self
 

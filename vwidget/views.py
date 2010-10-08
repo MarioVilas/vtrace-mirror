@@ -14,6 +14,10 @@ class VView(gtk.ScrolledWindow):
         self.vwactive = True
         self.vwname = None
         self.closable = closable
+        self.connect("destroy", self.vwDestroy)
+
+    def vwDestroy(self, arg):
+        pass
 
     def vwSetSensitive(self, sensitive=True):
         """

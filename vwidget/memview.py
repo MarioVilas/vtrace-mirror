@@ -6,11 +6,12 @@ import os
 import gtk
 import gtk.gdk as gdk
 
-import vwidget.main as vw_main
 import vwidget.views as vw_views
+from vwidget.main import idlethread, idlethreadsync
 
 import envi
 import envi.memcanvas as e_canvas
+
 
 moddir = os.path.dirname(__file__)
 
@@ -95,12 +96,9 @@ class MemoryView(vw_views.VTextView, e_canvas.MemoryCanvas):
 # The MemoryCanvas API
 
     def write(self, msg):
-        vw_main.guilock.acquire()
-        try:
-            self.addText(msg)
-        finally:
-            vw_main.guilock.release()
+        self.addText(msg)
 
+    @idlethreadsync
     def getTag(self, typename):
         # Return a type colored tag that doesn't
         # do highlight on click etc...
@@ -110,6 +108,7 @@ class MemoryView(vw_views.VTextView, e_canvas.MemoryCanvas):
             self.vwInitTag(tag, typename)
         return tag
 
+    @idlethreadsync
     def getNameTag(self, tname, typename="name"):
         """
         Get a tag for a unique name
@@ -121,6 +120,7 @@ class MemoryView(vw_views.VTextView, e_canvas.MemoryCanvas):
             self.vwInitTag(tag, typename, self.vwNamedTagEvent)
         return tag
 
+    @idlethreadsync
     def getVaTag(self, va):
         tname = "%.8x" % va
         tag = self.vwGetTag(tname)
@@ -130,6 +130,7 @@ class MemoryView(vw_views.VTextView, e_canvas.MemoryCanvas):
             tag.va = va
         return tag
 
+    @idlethread
     def addText(self, text, tag=None):
         if tag == None:
             tag = self.vwGetTag("default")
@@ -223,6 +224,7 @@ class MemoryView(vw_views.VTextView, e_canvas.MemoryCanvas):
             self.memwin.updateHistoryButtons()
             #self.memwin.eentry.set_text(hex(va))
 
+    @idlethreadsync
     def render(self, va, size, rend=None):
         self.vwClearText()
         self.iter = self.vwGetAppendIter()
@@ -232,6 +234,7 @@ class MemoryView(vw_views.VTextView, e_canvas.MemoryCanvas):
 
         self.render_noclear(va, size, rend=rend)
 
+    @idlethreadsync
     def render_noclear(self, va, size, rend=None):
         # Use this if you've set up your own iter for a partial
         # re-render and don't want your render call to clear the
@@ -356,11 +359,13 @@ class ScrolledMemoryView(MemoryView):
     continuous scrolling kind of canvas (like a CLI)
     """
 
+    @idlethreadsync
     def render(self, va, size, rend=None):
         MemoryView.render(self, va, size, rend=rend)
         self.addText("\n")
         self.vwScrollToBottom()
 
+    @idlethread
     def addText(self, text, tag=None):
         MemoryView.addText(self, text, tag=tag)
         if text.find("\n"):

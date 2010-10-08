@@ -16,10 +16,6 @@ class ScriptThread(Thread):
         self.locals = locals
 
     def run(self):
-        # Seems there's a bug in GTK/pygtk which causes a race...
-        # this eliminates it.
-        vw_main.guilock.acquire()
-        vw_main.guilock.release()
         try:
             exec(self.cobj, self.locals)
         except Exception, e:

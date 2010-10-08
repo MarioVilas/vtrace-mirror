@@ -8,9 +8,10 @@ import gtk
 import cobra
 import cobra.cluster as c_cluster
 
-import vwidget.main as vw_main
 import vwidget.util as vw_util
 import vwidget.views as vw_views
+
+from vwidget.main import idlethread
 
 class ClusterServerView(vw_views.VTreeView,
                         c_cluster.ClusterCallback):
@@ -36,23 +37,19 @@ class ClusterServerView(vw_views.VTreeView,
 
     # Mirror the server interfaces so it's easy to keep things straight
     def workGotten(self, server, work):
-        vw_main.guilock.acquire()
-        try:
-            ip,port = cobra.getCallerInfo()
-            #FIXME reverse lookup?
+        ip,port = cobra.getCallerInfo()
+        self._dispWorkGotten(work, ip, port)
+
+    @idlethread
+    def _dispWorkGotten(self, work, ip, port):
             iter = self.model.append((work.id, ip, "Starting", 0))
             self.id_iter[work.id] = iter
-        finally:
-            vw_main.guilock.release()
 
+    @idlethread
     def workDone(self, server, work):
-        vw_main.guilock.acquire()
-        try:
-            iter = self.id_iter.pop(work.id, None)
-            if iter != None:
-                self.vwRemove(iter)
-        finally:
-            vw_main.guilock.release()
+        iter = self.id_iter.pop(work.id, None)
+        if iter != None:
+            self.vwRemove(iter)
 
     def workTimeout(self, server, work):
         self.workDone(server, work)
@@ -63,19 +60,13 @@ class ClusterServerView(vw_views.VTreeView,
     def workFailed(self, server, work):
         self.workDone(server, work)
 
+    @idlethread
     def workStatus(self, server, workid, status):
-        vw_main.guilock.acquire()
-        try:
-            iter = self.id_iter.get(workid)
-            self.model.set_value(iter, 2, status)
-        finally:
-            vw_main.guilock.release()
+        iter = self.id_iter.get(workid)
+        self.model.set_value(iter, 2, status)
 
+    @idlethread
     def workCompletion(self, server, workid, percent):
-        vw_main.guilock.acquire()
-        try:
-            iter = self.id_iter.get(workid)
-            self.model.set_value(iter, 3, percent)
-        finally:
-            vw_main.guilock.release()
+        iter = self.id_iter.get(workid)
+        self.model.set_value(iter, 3, percent)
 

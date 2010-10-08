@@ -13,7 +13,7 @@ class FieldAdder:
         for p in plist[:-1]:
             kid = parent.kids.get(p)
             if kid == None:
-                item = gtk.MenuItem(p)
+                item = gtk.MenuItem(p, True)
                 item.set_name("vwidget_menu")
                 item.show()
                 parent.append(item)
@@ -22,7 +22,7 @@ class FieldAdder:
                 parent.kids[p] = kid
             parent = kid
 
-        item = gtk.MenuItem(plist[-1])
+        item = gtk.MenuItem(plist[-1], True)
         if callback != None:
             item.connect("activate", callback, *args)
         item.show()

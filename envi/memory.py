@@ -206,6 +206,8 @@ class MemoryObject(IMemory):
             for va,perms,fname,bytes in maps:
                 self.addMemoryMap(va, perms, fname, bytes)
 
+    #FIXME MemoryObject: def allocateMemory(self, size, perms=MM_RWX, suggestaddr=0):
+
     def addMemoryMap(self, va, perms, fname, bytes):
         x = [va, perms, fname, bytes] # Asign to a list cause we need to write to it
         maptup = (va, len(bytes), perms, fname)
@@ -288,3 +290,23 @@ class FakeMemory:
     def writeMemory(self, va, bytes):
         pass
 
+class MemoryFile:
+    '''
+    A file like object to wrap around a memory object.
+    '''
+    def __init__(self, memobj, baseaddr):
+        self.baseaddr = baseaddr
+        self.offset = baseaddr
+        self.memobj = memobj
+
+    def seek(self, offset):
+        self.offset = self.baseaddr + offset
+
+    def read(self, size):
+        ret = self.memobj.readMemory(self.offset, size)
+        self.offset += size
+        return ret
+        
+    def write(self, bytes):
+        self.memobj.writeMemory(self.offset, bytes)
+        self.offset += len(bytes)

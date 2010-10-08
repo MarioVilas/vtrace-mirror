@@ -96,7 +96,7 @@ class EnviCli(Cmd):
     def vprint(self, msg, addnl=True):
         if addnl:
             msg = msg+"\n"
-        self.canvas.addText(msg)
+        self.canvas.write(msg)
 
     def __getattr__(self, name):
         func = self.extcmds.get(name, None)

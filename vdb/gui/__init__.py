@@ -30,6 +30,9 @@ import vwidget.memview as vw_memview
 import vwidget.vwvtrace as vw_vtrace
 import vwidget.views as vw_views
 
+from envi.threads import firethread
+from vwidget.main import idlethread, idlethreadsync
+
 symtype_names = {
     SYM_MISC:"Unknown",
     SYM_GLOBAL:"Global",
@@ -72,11 +75,12 @@ gtk-font-name = "Monospace 10"
 
 class VdbGui(vw_layout.LayoutManager, Notifier):
 
-    def __init__(self, db):
+    def __init__(self, db, ismain=True):
         vw_layout.LayoutManager.__init__(self)
 
         self.db = db
         self.db.registerNotifier(NOTIFY_ALL, self)
+        self.ismain = ismain
 
         self.winactive = False
 
@@ -122,18 +126,10 @@ class VdbGui(vw_layout.LayoutManager, Notifier):
     def createExtensionWindow(self, item, name):
         self.createWindow(name)
 
-    def waitOnDebugger(self):
-        """
-        Wait for the debugger and then clean up.
-        """
-        self.db.shutdown.wait()
-        vw_main.guilock.acquire()
-        try:
-            if self.db.vdbhome:
-                lfile = os.path.join(self.db.vdbhome, "vdb.lyt")
-                self.saveLayoutFile(file(lfile, "wb"))
-        finally:
-            vw_main.guilock.release()
+    def saveVdbLayout(self, *args):
+        if self.db.vdbhome:
+            lfile = os.path.join(self.db.vdbhome, "vdb.lyt")
+            self.saveLayoutFile(file(lfile, "wb"))
 
     def createWindow(self, clsname):
         win = vw_layout.LayoutManager.createWindow(self, clsname)
@@ -149,20 +145,16 @@ class VdbGui(vw_layout.LayoutManager, Notifier):
                 #FIXME ugly 
                 print "ERROR: setTraceWindowsActive() for %s: %s" % (win.__class__.__name__, e)
 
+    @idlethreadsync
     def notify(self, event, trace):
-        vw_main.guilock.acquire()
-        try:
 
-            if event in [vtrace.NOTIFY_CONTINUE, vtrace.NOTIFY_DETACH, vtrace.NOTIFY_EXIT]:
-                self.setTraceWindowsActive(False)
+        if event in [vtrace.NOTIFY_CONTINUE, vtrace.NOTIFY_DETACH, vtrace.NOTIFY_EXIT]:
+            self.setTraceWindowsActive(False)
 
-            else:
-                # If the trace is just going to run again, skip the update.
-                if not trace.shouldRunAgain():
-                    self.setTraceWindowsActive(True)
-
-        finally:
-            vw_main.guilock.release()
+        else:
+            # If the trace is just going to run again, skip the update.
+            if not trace.shouldRunAgain():
+                self.setTraceWindowsActive(True)
 
 class VdbWindow(vw_layout.LayoutWindow):
     """
@@ -308,6 +300,9 @@ class VdbMainWindow(vw_windows.MainWindow):
         self.menubar.addField("View.File Descriptors", self.file_view_filedesc)
         self.menubar.addField("Tools.Python", self.tools_python)
 
+        # On delete, lets save off the layout...
+        self.connect('delete_event', self._mainDelete)
+
         #descr = pango.FontDescription("Monospace 12")
         #entry.modify_font(descr)
 
@@ -339,13 +334,16 @@ class VdbMainWindow(vw_windows.MainWindow):
     def file_edit_copy(self, *args):
         print "copy"
 
+    def _mainDelete(self, *args):
+        self.db.do_quit("")
+        self.db.shutdown.set()
+        self.gui.saveVdbLayout()
+        self.gui.deleteAllWindows(omit=self)
+        if self.gui.ismain:
+            vw_main.shutdown()
+
     def file_quit(self, *args):
-        
-        vw_main.guilock.release()
-        try:
-            self.db.do_quit("")
-        finally:
-            vw_main.guilock.acquire()
+        self.gui.deleteAllWindows()
 
     def file_save_snapshot(self, *args):
         print "Save Snapshot!"
@@ -412,12 +410,9 @@ class VdbMemoryView(vw_memview.MemoryView):
 
         menu.show_all()
 
+    @firethread
     def popRunToHere(self, item, va):
-        vw_main.guilock.release()
-        try:
-            self.vdbwin.db.trace.run(until=va)
-        finally:
-            vw_main.guilock.acquire()
+        self.vdbwin.db.trace.run(until=va)
 
     def popBreakpoint(self, item, va):
         bp = vtrace.Breakpoint(va)
@@ -459,11 +454,4 @@ class VdbMemoryWindow(vw_memview.MemoryWindow):
             return
 
         return vw_memview.MemoryWindow.updateMemoryView(self, *args)
-
-def mainwait(gui):
-    """
-    Use this routine if you are the only vdb gui instance.
-    """
-    gui.waitOnDebugger()
-    vw_main.shutdown()
 

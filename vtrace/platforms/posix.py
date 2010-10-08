@@ -151,7 +151,7 @@ class ElfMixin:
     A platform mixin to parse Elf binaries
     """
     def __init__(self):
-        pass
+        self.setMeta('Format','elf')
 
     def platformParseBinary(self, filename, baseaddr, normname):
         typemap = {

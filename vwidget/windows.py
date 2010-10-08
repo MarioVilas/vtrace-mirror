@@ -4,10 +4,12 @@ import gtk.glade
 
 import envi.cli as e_cli
 
-import vwidget.main as vw_main
 import vwidget.layout as vw_layout
 import vwidget.menubuilder as vw_menu
 import vwidget.memview as vw_memview
+
+from envi.threads import firethread
+from vwidget.main import idlethread
 
 class MainWindow(vw_layout.LayoutWindow):
     """
@@ -70,22 +72,24 @@ class MainWindow(vw_layout.LayoutWindow):
             return True
         return False
 
+    def onecmd(self, cmd):
+        '''
+        Issue a single command with proper history tracking etc...
+        (fires a thread to do it...)
+        '''
+        cmd = self.cli.precmd(cmd)
+        self.canvas.write("%s %s\n" % (self.cli.prompt,cmd))
+        self.cli.onecmd(cmd)
+        self.addHistory(cmd)
+
     def keypressed(self, window, event):
         fkbase = 65469
         fkey = event.keyval - fkbase
         if fkey >= 1 and fkey < 13:
-            vw_main.guilock.release()
-            try:
-                self.cli.onecmd("<f%d>" % fkey)
-            finally:
-                vw_main.guilock.acquire()
+            self.onecmd("<f%d>" % fkey)
 
         elif event.keyval == 65299:
-            vw_main.guilock.release()
-            try:
-                self.cli.onecmd("break")
-            finally:
-                vw_main.guilock.acquire()
+            self.onecmd("break")
 
     def addHistory(self, histcmd):
         self.history.append(histcmd)
@@ -94,15 +98,7 @@ class MainWindow(vw_layout.LayoutWindow):
     def cli_activate(self, entry):
         cmd = entry.get_text()
         entry.set_text("")
-        self.canvas.addText("%s %s\n" % (self.cli.prompt,cmd))
-
-        vw_main.guilock.release()
-        try:
-            cmd = self.cli.precmd(cmd)
-            self.cli.onecmd(cmd)
-            self.addHistory(cmd)
-        finally:
-            vw_main.guilock.acquire()
+        self.onecmd(cmd)
 
 #FIXME is anything even using this one still?
 class VWindow:

@@ -118,6 +118,7 @@ class IntelEmulator(i386Module, i386RegisterContext, envi.Emulator):
         self.addCallingConvention("cdecl", cdecl)
 
     def getSegmentIndex(self, op):
+        # FIXME this needs to account for push/pop/etc
         if op.prefixes == 0:
             return SEG_DS
         if op.prefixes & PREFIX_ES:

@@ -28,6 +28,8 @@ import envi.config as e_config
 import envi.resolver as e_resolv
 import envi.memcanvas as e_canvas
 
+from envi.threads import firethread
+
 import vstruct
 import vstruct.primitives as vs_prims
 
@@ -118,6 +120,7 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
 
         arch = trace.getMeta("Architecture")
         self.arch = envi.getArchModule(arch)
+        self.difftracks = {}
 
         self.setMode("NonBlocking", True)
 
@@ -274,11 +277,13 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
 
         if event == vtrace.NOTIFY_ATTACH:
             self.vprint("Attached to : %d" % pid)
+            self.difftracks = {}
 
         elif event == vtrace.NOTIFY_CONTINUE:
             pass
 
         elif event == vtrace.NOTIFY_DETACH:
+            self.difftracks = {}
             self.vprint("Detached from %d" % pid)
 
         elif event == vtrace.NOTIFY_SIGNAL:
@@ -464,6 +469,7 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
             t.setMeta("PendingSignal", newsig)
             self.vprint("New signal: %d" % newsig)
 
+    @firethread
     def do_snapshot(self, line):
         """
         Take a process snapshot of the current (stopped) trace and
@@ -758,6 +764,7 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
                         continue
                 self.vprint("0x%.8x %s" % (sym.value, r))
 
+    @firethread
     def do_call(self, string):
         """
         Allows a C-like syntax for calling functions inside
@@ -1099,4 +1106,94 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
         meta = self.trace.metadata
         x = pprint.pformat(meta)
         self.vprint(x)
+
+    def do_memdiff(self, line):
+        """
+        Save and compare snapshots of memory to enumerate changes.
+
+        Usage: memdiff [options]
+        -C             Clear all current memory diff snapshots.
+        -A <va:size>   Add the given virtual address to the list.
+        -M <va>        Add the entire memory map which contains VA to the list.
+        -D             Compare currently tracked memory with the target process
+                       and show any differences.
+        """
+        argv = e_cli.splitargs(line)
+        opts,args = getopt(argv, "A:CDM:")
+
+        if len(opts) == 0:
+            return self.do_help('memdiff')
+
+        self.trace.requireNotRunning()
+
+        for opt,optarg in opts:
+
+            if opt == "-A":
+                if optarg.find(':') == -1:
+                    return self.do_help('memdiff')
+
+                vastr,sizestr = optarg.split(':')
+                va = self.parseExpression(vastr)
+                size = self.parseExpression(sizestr)
+                bytes = self.trace.readMemory(va,size)
+                self.difftracks[va] = bytes
+
+            elif opt == '-C':
+                self.difftracks = {}
+
+            elif opt == '-D':
+                difs = self._getDiffs()
+                if len(difs) == 0:
+                    self.vprint('No Differences!')
+                else:
+                    for va,thenbytes,nowbytes in difs:
+                        self.vprint('0x%.8x: %s %s' %
+                                    (va,
+                                     thenbytes.encode('hex'),
+                                     nowbytes.encode('hex')))
+
+            elif opt == '-M':
+                va = self.parseExpression(optarg)
+                map = self.trace.getMemoryMap(va)
+                if map == None:
+                    self.vprint('No Memory Map At: 0x%.8x' % va)
+                    return
+                mva,msize,mperm,mfile = map
+                bytes = self.trace.readMemory(mva, msize)
+                self.difftracks[mva] = bytes
+
+    def _getDiffs(self):
+
+        ret = []
+        for va, bytes in self.difftracks.items():
+            nowbytes = self.trace.readMemory(va, len(bytes))
+
+            i = 0
+            while i < len(bytes):
+                thendiff = ""
+                nowdiff = ""
+                iva = va+i
+                while (i < len(bytes) and
+                            bytes[i] != nowbytes[i]):
+                    thendiff += bytes[i]
+                    nowdiff += nowbytes[i]
+                    i += 1
+
+                if thendiff:
+                    ret.append((iva, thendiff, nowdiff))
+                    continue
+
+                i += 1
+        
+        return ret
+
+    def FIXME_do_remote(self, line):
+        """
+        Act as a remote debugging client to the server running on
+        the specified host/ip.
+
+        Usage: remote <host>
+        """
+        vtrace.remote = line
+        # FIXME how do we re-init the debugger?
 

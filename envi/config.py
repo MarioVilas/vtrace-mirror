@@ -25,6 +25,15 @@ def gethomedir(*paths):
 
     return path
 
+def getusername():
+    u = os.getenv('USERNAME')
+    if u != None:
+        return u
+    u = os.getenv('USER')
+    if u != None:
+        return u
+    return 'UnknownUser'
+
 class EnviConfig(ConfigParser):
 
     def __init__(self, filename=None, defaults=None):
