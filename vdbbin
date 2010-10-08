@@ -8,6 +8,7 @@ import threading
 
 import vdb
 import vtrace
+import vtrace.snapshot as vt_snap
 import cobra
 
 def usage():
@@ -22,7 +23,7 @@ def usage():
 
 if __name__ == "__main__":
 
-    pid = None
+    pidstr = None
     cmd = None
     snapshot = None
 
@@ -50,14 +51,14 @@ if __name__ == "__main__":
             vtrace.startVtraceServer()
 
         elif opt == "-p":
-            pid = int(optarg)
+            pidstr = optarg
 
         elif opt == "-v":
             vtrace.verbose = True
             cobra.verbose = True
 
     if snapshot != None:
-        trace = vtrace.TraceSnapshot(snapshot)
+        trace = vt_snap.loadSnapshot(snapshot)
     else:
         trace = vtrace.getTrace()
 
@@ -68,8 +69,8 @@ if __name__ == "__main__":
         vw_main.mainthread()
         vgui = vdb.gui.VdbGui(db)
 
-    if pid != None:
-        trace.attach(pid)
+    if pidstr != None:
+        db.do_attach(pidstr)
 
     elif cmd != None:
         trace.execute(cmd)

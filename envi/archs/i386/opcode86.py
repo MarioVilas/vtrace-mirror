@@ -894,8 +894,8 @@ tbl32_660F = [
 ( 0, INS_OTHER, ADDRMETH_V | OPTYPE_dq | OP_W, ADDRMETH_W | OPTYPE_dq | OP_R, ARG_NONE, cpu_PENTMMX, "punpckhqdq", 0, 0, 0),  #
 #VISI
 ( 0, INS_MOV, ADDRMETH_V | OPTYPE_dq | OP_W, ADDRMETH_E | OPTYPE_dq | OP_R, ARG_NONE, cpu_PENTMMX, "movd", 0, 0, 0),  #
-( 0, INS_MOV, ADDRMETH_V | OPTYPE_dq | OP_W, ADDRMETH_W | OPTYPE_dq | OP_R, ARG_NONE, cpu_PENTMMX, "movq", 0, 0, 0),  #
-    ( 0, INS_OTHER, ADDRMETH_V | OPTYPE_dq | OP_W, ADDRMETH_W | OPTYPE_dq | OP_R, ADDRMETH_I |  OPTYPE_b | OP_R, cpu_PENTIUM2, "pshufd", 0, 0, 0),  #
+( 0, INS_MOV, ADDRMETH_V | OPTYPE_dq | OP_W, ADDRMETH_E | OPTYPE_dq | OP_R, ARG_NONE, cpu_PENTMMX, "movq", 0, 0, 0),  # FIXME HORKED
+( 0, INS_OTHER, ADDRMETH_V | OPTYPE_dq | OP_W, ADDRMETH_W | OPTYPE_dq | OP_R, ADDRMETH_I |  OPTYPE_b | OP_R, cpu_PENTIUM2, "pshufd", 0, 0, 0),  #
 (0, 0, ARG_NONE, ARG_NONE, ARG_NONE, cpu_PENTMMX, 0, 0, 0, 0),  
 (0, 0, ARG_NONE, ARG_NONE, ARG_NONE, cpu_PENTMMX, 0, 0, 0, 0),  
 (54, 0, ARG_NONE, ARG_NONE, ARG_NONE, cpu_PENTMMX, 0, 0, 0, 0),  # 66 0f 73

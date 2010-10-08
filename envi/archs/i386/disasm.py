@@ -183,7 +183,10 @@ class i386ImmOper(envi.ImmedOper):
         value = self.imm
         hint = mcanv.syms.getSymHint(op.va, idx)
         if hint != None:
-            mcanv.addVaText(hint)
+            if mcanv.mem.isValidPointer(value):
+                mcanv.addVaText(hint, value)
+            else:
+                mcanv.addNameText(hint)
         elif mcanv.mem.isValidPointer(value):
             name = addrToName(mcanv, value)
             mcanv.addVaText(name, value)
@@ -393,8 +396,10 @@ class i386SibOper(envi.DerefOper):
             if self.scale != 1:
                 r += " * %d" % self.scale
 
-        if self.disp != 0:
+        if self.disp > 0:
             r += " + %d" % self.disp
+        elif self.disp < 0:
+            r += " - %d" % abs(self.disp)
 
         r += "]"
 
@@ -828,7 +833,7 @@ class i386Disasm:
             #print tabidx
             #print opdesc
             #print "OPTTYPE 0"
-            raise envi.InvalidInstruction()
+            raise envi.InvalidInstruction(bytes=bytes[startoff:startoff+16])
 
         operoffset = 0
         # Begin parsing operands based off address method
@@ -873,7 +878,7 @@ class i386Disasm:
                         osize, oper = ameth(bytes, offset, tsize, prefixes)
                 except struct.error, e:
                     # Catch struct unpack errors due to insufficient data length
-                    raise envi.InvalidInstruction()
+                    raise envi.InvalidInstruction(bytes=bytes[startoff:startoff+16])
 
             if oper != None:
                 # This is a filty hack for now...

@@ -1,12 +1,32 @@
-IF_PSR_S = 0x100
-IF_B     = 0x200
-IF_H     = 0x400
-IF_DA    = 0x0800
-IF_DB    = 0x1800
-IF_IA    = 0x2800
-IF_IB    = 0x3800
+MODE_ARM        = 0
+MODE_THUMB      = 1
+MODE_JAZELLE    = 2
 
-OSZFMT_BYTE = "<B"
+#IFLAGS - keep bottom 8-bits for cross-platform flags like envi.IF_NOFALL and envi.IF_BRFALL
+IF_PSR_S     = 1<<8     # This DP instruciton can update CPSR
+IF_B         = 1<<9     # Byte
+IF_H         = 1<<11    # HalfWord
+IF_S         = 1<<12    # Signed
+IF_D         = 1<<13    # Signed
+IF_L         = 1<<14    # Long-store (eg. Dblword Precision) for STC
+IF_T         = 1<<15    # Translate for strCCbt
+IF_W         = 1<<16    # Write Back for STM/LDM (!)
+IF_UM        = 1<<17    # User Mode Registers for STM/LDM (^) (obviously no R15)
+IF_DAIB_MASK = 0x3800000
+IF_DAIB_SHFT = 23
+IF_DA        = 0x0800000  # Decrement After
+IF_IA        = 0x1800000  # Increment After
+IF_DB        = 0x2800000  # Decrement Before
+IF_IB        = 0x3800000  # Increment Before
+IF_DAIB_B    = 0x2800000  # Before mask 
+IF_DAIB_I    = 0x1800000  # Before mask 
+
+
+OF_W         = 1<<8     # Write back to 
+OF_UM        = 1<<9     # Usermode, or if r15 included set current SPSR -> CPSR
+
+
+OSZFMT_BYTE = "B"
 OSZFMT_HWORD = "<H"  # Introduced in ARMv4
 OSZFMT_WORD = "<L"
 OSZ_BYTE = 1
@@ -48,7 +68,50 @@ COND_LT:"lt", # Signed less than N set and V clear, or N clear and V set (N!= V)
 COND_GT:"gt", # Signed greater than Z clear, and either N set and V set, or N clear and V clear (Z == 0,N == V) 
 COND_LE:"le", # Signed less than or equal Z set, or N set and V clear, or N clear and V set (Z == 1 or N!= V) 
 COND_AL:"", # Always (unconditional) - could be "al" but "" seems better...
-COND_EXTENDED:"EXTENDED", # See extended opcode table
+COND_EXTENDED:"2", # See extended opcode table
+}
+
+PM_usr = 0b10000
+PM_fiq = 0b10001
+PM_irq = 0b10010
+PM_svc = 0b10011
+PM_abt = 0b10111
+PM_und = 0b11011
+PM_sys = 0b11111
+
+# reg stuff stolen from regs.py to support proc_modes
+REG_OFFSET_USR = 17 * (PM_usr&0xf)
+REG_OFFSET_FIQ = 17 * (PM_fiq&0xf)
+REG_OFFSET_IRQ = 17 * (PM_irq&0xf)
+REG_OFFSET_SVC = 17 * (PM_svc&0xf)
+REG_OFFSET_ABT = 17 * (PM_abt&0xf)
+REG_OFFSET_UND = 17 * (PM_und&0xf)
+REG_OFFSET_SYS = 17 * (PM_sys&0xf)
+#REG_OFFSET_CPSR = 17 * 16
+REG_OFFSET_CPSR = 16                    # CPSR is available in every mode, and PM_usr and PM_sys don't have an SPSR.
+
+REG_SPSR_usr = REG_OFFSET_USR + 16
+REG_SPSR_fiq = REG_OFFSET_FIQ + 16
+REG_SPSR_irq = REG_OFFSET_IRQ + 16
+REG_SPSR_svc = REG_OFFSET_SVC + 16
+REG_SPSR_abt = REG_OFFSET_ABT + 16
+REG_SPSR_und = REG_OFFSET_UND + 16
+REG_SPSR_sys = REG_OFFSET_SYS + 16
+
+REG_PC = 0xf
+REG_SP = 0xd
+REG_BP = None
+REG_CPSR = REG_OFFSET_CPSR
+REG_FLAGS = REG_OFFSET_CPSR    #same location, backward-compat name
+
+proc_modes = { # mode_name, short_name, description, offset, mode_reg_count, PSR_offset
+    PM_usr: ("User Processor Mode", "usr", "Normal program execution mode", REG_OFFSET_USR, 15, REG_SPSR_usr),
+    PM_fiq: ("FIQ Processor Mode", "fiq", "Supports a high-speed data transfer or channel process", REG_OFFSET_FIQ, 8, REG_SPSR_fiq),
+    PM_irq: ("IRQ Processor Mode", "irq", "Used for general-purpose interrupt handling", REG_OFFSET_IRQ, 13, REG_SPSR_irq),
+    PM_svc: ("Supervisor Processor Mode", "svc", "A protected mode for the operating system", REG_OFFSET_SVC, 13, REG_SPSR_svc),
+    PM_abt: ("Abort Processor Mode", "abt", "Implements virtual memory and/or memory protection", REG_OFFSET_ABT, 13, REG_SPSR_abt),
+    PM_und: ("Undefined Processor Mode", "und", "Supports software emulation of hardware coprocessor", REG_OFFSET_UND, 13, REG_SPSR_und),
+    PM_sys: ("System Processor Mode", "sys", "Runs privileged operating system tasks (ARMv4 and above)", REG_OFFSET_SYS, 15, REG_SPSR_sys),
 }
 
 INST_ENC_DP_IMM = 0 # Data Processing Immediate Shift
@@ -84,9 +147,11 @@ IENC_MEDIA_REV      = ((IENC_MEDIA << 8) + 3) << 8
 IENC_MEDIA_SEL      = ((IENC_MEDIA << 8) + 4) << 8
 IENC_MEDIA_USAD8    = ((IENC_MEDIA << 8) + 5) << 8
 IENC_MEDIA_USADA8   = ((IENC_MEDIA << 8) + 6) << 8
+IENC_MEDIA_EXTEND   = ((IENC_MEDIA << 8) + 7) << 8
 IENC_UNCOND_CPS     = ((IENC_UNCOND << 8) + 1) << 8
 IENC_UNCOND_SETEND  = ((IENC_UNCOND << 8) + 2) << 8
 IENC_UNCOND_PLD     = ((IENC_UNCOND << 8) + 3) << 8
+IENC_UNCOND_BLX     = ((IENC_UNCOND << 8) + 4) << 8
 
 
 # The supported types of operand shifts (by the 2 bit field)
@@ -98,8 +163,8 @@ S_RRX = 4 # FIXME HACK XXX add this
 
 shift_names = ("lsl", "lsr", "asr", "ror", "rrx")
 
-
 SOT_REG = 0
 SOT_IMM = 1
 
-daib = ("da","db","ia","ib")
+daib = ("da","ia","db","ib")
+

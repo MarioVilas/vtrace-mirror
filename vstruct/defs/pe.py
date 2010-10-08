@@ -193,7 +193,7 @@ class IMAGE_SECTION_HEADER(vstruct.VStruct):
 
     def __init__(self):
         vstruct.VStruct.__init__(self)
-        self.Name                 = v_bytes(8)
+        self.Name                 = v_str(8)
         self.VirtualSize          = v_uint32()
         self.VirtualAddress       = v_uint32()
         self.SizeOfRawData        = v_uint32()

@@ -44,6 +44,9 @@ class DcodeLoader(object):
         self.filename = filename
         self.path = path
 
+    def get_source(self, name):
+        return self.fbytes
+
     def load_module(self, fullname):
         mod = sys.modules.get(fullname)
         if mod == None:

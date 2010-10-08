@@ -28,6 +28,7 @@ Greetz:
 """
 # Copyright (C) 2007 Invisigoth - See LICENSE file for details
 import os
+import re
 import sys
 import code
 import copy
@@ -168,7 +169,7 @@ class Trace(e_mem.IMemory, e_reg.RegisterContext, e_resolv.SymbolResolver, objec
         self.arch = envi.getArchModule()
 
         e_resolv.SymbolResolver.__init__(self, width=self.arch.getPointerSize())
-        e_mem.IMemory.__init__(self)
+        e_mem.IMemory.__init__(self, archmod=self.arch)
         e_reg.RegisterContext.__init__(self)
 
         # We'll just use our own notify interface to catch some stuff
@@ -188,6 +189,17 @@ class Trace(e_mem.IMemory, e_reg.RegisterContext, e_resolv.SymbolResolver, objec
         pid = self.platformExec(cmdline)
         self.justAttached(pid)
         self.wait()
+
+    def getCurrentSignal(self):
+        '''
+        Retrieve the current signal/exception posted to the process.
+        If there are no pending signals/exceptions the API will return
+        None.  For POSIX systems, this will be a traditional POSIX signal.
+        For Windows systems it will be a current exception code (if any).
+
+        Example: sig = trace.getCurrentSignal()
+        '''
+        return self.platformGetSignal()
 
     def addIgnoreSignal(self, code, address=0):
         """
@@ -321,6 +333,8 @@ class Trace(e_mem.IMemory, e_reg.RegisterContext, e_resolv.SymbolResolver, objec
         """
         self._loadBinaryNorm(libname)
         sym = self.getSymByName(libname)
+        if sym == None:
+            raise Exception('Invalid Library Name: %s' % libname)
         return sym.getSymList()
 
     def getSymByAddr(self, addr, exact=True):
@@ -354,6 +368,28 @@ class Trace(e_mem.IMemory, e_reg.RegisterContext, e_resolv.SymbolResolver, objec
         """
         self._loadBinaryNorm(name)
         return e_resolv.SymbolResolver.getSymByName(self, name)
+
+    def searchSymbols(self, regex, libname=None):
+        '''
+        Search for symbols which match the given regular expression.  Specify libname
+        as the "normalized" library name to only search the specified lib.
+
+        Example:  for sym in trace.searchSymbols('.*CreateFile.*', 'kernel32'):
+        '''
+        reobj = re.compile(regex)
+        if libname != None:
+            libs = [libname, ]
+        else:
+            libs = self.getNormalizedLibNames()
+
+        ret = []
+        for lname in libs:
+            for sym in self.getSymsForFile(lname):
+                symstr = str(sym)
+                if reobj.match(symstr):
+                    ret.append(sym)
+        return ret
+
 
     def getRegisterContext(self, threadid=None):
         """
@@ -514,6 +550,28 @@ class Trace(e_mem.IMemory, e_reg.RegisterContext, e_resolv.SymbolResolver, objec
         """
         return self.platformPs()
 
+    def addBreakByExpr(self, symname):
+        '''
+        Add a breakpoint by resolving an expression.  This will create
+        the Breakpoint object for you and add it to the trace.  It
+        returns the newly created breakpoint id.
+
+        Example: trace.addBreakByExpr('kernel32.CreateFileA + ecx')
+        '''
+        bp = Breakpoint(None, expression=symname)
+        return self.addBreakpoint(bp)
+
+    def addBreakByAddr(self, va):
+        '''
+        Add a breakpoint by address.  This will create the Breakpoint
+        object for you and add it to the trace.  It returns the newly
+        created breakpoint id.
+
+        Example: trace.addBreakByAddr(0x7c770308)
+        '''
+        bp = Breakpoint(va)
+        return self.addBreakpoint(bp)
+
     def addBreakpoint(self, breakpoint):
         """
         Add a breakpoint/watchpoint to the trace.  The "breakpoint" argument
@@ -524,8 +582,12 @@ class Trace(e_mem.IMemory, e_reg.RegisterContext, e_resolv.SymbolResolver, objec
 
         This will return the internal ID given to the new breakpoint
         """
+        breakpoint.inittrace(self)
+
         breakpoint.id = self.nextBpId()
         addr = breakpoint.resolveAddress(self)
+
+
         if addr == None:
             self.bpbyid[breakpoint.id] = breakpoint
             self.deferred.append(breakpoint)
@@ -533,8 +595,14 @@ class Trace(e_mem.IMemory, e_reg.RegisterContext, e_resolv.SymbolResolver, objec
 
         if self.breakpoints.has_key(addr):
             raise Exception("ERROR: Duplicate break for address 0x%.8x" % addr)
+
         self.bpbyid[breakpoint.id] = breakpoint
         self.breakpoints[addr] = breakpoint
+
+        # If we are in fastbreak mode or it is a fastbreak breakpoint
+        # we must activate it here...
+        if self.getMode('FastBreak') or breakpoint.fastbreak:
+            self._activateBreak(breakpoint)
 
         return breakpoint.id
             
@@ -574,6 +642,12 @@ class Trace(e_mem.IMemory, e_reg.RegisterContext, e_resolv.SymbolResolver, objec
         setBreakpointCode() instead).
         """
         return self.bpbyid.get(id)
+
+    def getBreakpointByAddr(self, va):
+        '''
+        Return the breakpoint object (or None) for a given virtual address.
+        '''
+        return self.breakpoints.get(va)
 
     def getBreakpoints(self):
         """
@@ -705,6 +779,20 @@ class Trace(e_mem.IMemory, e_reg.RegisterContext, e_resolv.SymbolResolver, objec
             self.mapcache = self.platformGetMaps()
         return self.mapcache
 
+    def getMemoryFault(self):
+        '''
+        If the most receent event is a memory access error, this API will
+        return a tuple of (<addr>,<perm>) on supported platforms.  Otherwise,
+        a (None, None) will result.
+
+        Example:
+        import envi.memory as e_mem
+        vaddr,vperm = trace.getMemoryFault()
+        if vaddr != None:
+            print 'Memory Fault At: 0x%.8x (perm: %d)' % (vaddr, vperm)
+        '''
+        return self.platformGetMemFault()
+
     def isAttached(self):
         """
         Return boolean true/false for weather or not this trace is
@@ -758,8 +846,8 @@ class Trace(e_mem.IMemory, e_reg.RegisterContext, e_resolv.SymbolResolver, objec
         This is only valid if the target is actually running...
         """
         self.requireAttached()
-        if not self.isRunning():
-            raise Exception("Why sending a break when not running?!?!")
+        #if not self.isRunning():
+            #raise Exception("Why sending a break when not running?!?!")
         self.setMode("RunForever", False)
         self.setMode("FastBreak", False)
         self.setMeta("ShouldBreak", True)
@@ -789,6 +877,12 @@ class Trace(e_mem.IMemory, e_reg.RegisterContext, e_resolv.SymbolResolver, objec
         if not self.threadcache:
             self.threadcache = self.platformGetThreads()
         return self.threadcache
+
+    def getCurrentThread(self):
+        '''
+        Return the thread id of the currently selected thread.
+        '''
+        return self.getMeta('ThreadId')
 
     def selectThread(self, threadid):
         """
@@ -1024,11 +1118,12 @@ class VtraceExpressionLocals(e_expr.MemoryExpressionLocals):
                 'vtrace':vtrace
         })
         self.update({
-            "struct":self.struct,
-            "frame":self.frame,
-            "teb":self.teb,
-            "bp":self.bp,
-            "meta":self.meta,
+            'struct':self.struct,
+            'frame':self.frame,
+            'teb':self.teb,
+            'bp':self.bp,
+            'meta':self.meta,
+            'go':self.go,
         })
 
     def __getitem__(self, name):
@@ -1053,6 +1148,14 @@ class VtraceExpressionLocals(e_expr.MemoryExpressionLocals):
         Usage: struct("PEB", <peb address>)
         """
         return self.trace.getStruct(sname, saddr)
+
+    def go(self):
+        '''
+        A shortcut for trace.runAgain() which may be used in
+        breakpoint code (or similar even processors) to begin
+        execution again after event processing...
+        '''
+        self.trace.runAgain();
 
     def frame(self, index):
         """

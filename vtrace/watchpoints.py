@@ -15,6 +15,14 @@ class Watchpoint(Breakpoint):
         self.wpsize = size
         self.wpperms = perms
 
+    def inittrace(self, trace):
+        # No need to get a breakinstr
+        pass
+
+    def resolvedaddr(self, trace, addr):
+        # We needn't save the memory at our addr...
+        pass
+
     def getName(self):
         bname = Breakpoint.getName(self)
         return "%s (%s %d bytes)" % (bname, self.wpperms, self.wpsize)
@@ -44,24 +52,39 @@ class PageWatchpoint(Watchpoint):
 
     NOTE: These *must* be added page aligned
     """
-    def __init__(self, addr, expression=None, size=4, perms="rw"):
-        Watchpoint.__init__(self, addr, expression=expression, size=size, perms=perms)
-        self.perms = None
+    def __init__(self, addr, expression=None, size=4, watchread=False):
+        Watchpoint.__init__(self, addr, expression=expression, size=size, perms='rw')
+        self._orig_perms = None
+        self._new_perms = e_mem.MM_READ
+        if watchread:
+            self._new_perms = e_mem.MM_NONE
+
+    def resolvedaddr(self, trace, addr):
+        self._orig_perms = trace.getMemoryMap(addr)[2]
+
+    def notify(self, event, trace):
+        pw = trace.getMeta('pagewatch')
+        pc = trace.getProgramCounter()
+        vaddr,vperm = trace.platformGetMemFault()
+        pw.append((pc, vaddr, vperm))
+        if trace.getMeta('pagerun'):
+            trace.runAgain()
+
+    def getName(self):
+        bname = Breakpoint.getName(self)
+        return "%s (%s %d bytes)" % (bname, e_mem.reprPerms(self._new_perms), self.wpsize)
 
     def activate(self, trace):
         trace.requireNotRunning()
         if not self.active:
-            if self.perms == None:
-                map = trace.getMemoryMap(self.address)
-                self.perms = map[2]
-            trace.protectMemory(self.address, self.wpsize, e_mem.MM_READ)
+            trace.protectMemory(self.address, self.wpsize, self._new_perms)
             self.active = True
         return self.active
 
     def deactivate(self, trace):
         trace.requireNotRunning()
         if self.active:
-            trace.protectMemory(self.address, self.wpsize, self.perms)
+            trace.protectMemory(self.address, self.wpsize, self._orig_perms)
             self.active = False
         return self.active
 

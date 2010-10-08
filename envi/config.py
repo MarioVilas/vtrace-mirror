@@ -62,3 +62,7 @@ class EnviConfig(ConfigParser):
         ConfigParser.remove_option(self, sec, opt)
         self.syncFile()
 
+    #def __getattr__(self, name):
+
+    #def __setattr__(self, name, value):
+

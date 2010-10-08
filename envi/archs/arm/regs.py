@@ -1,49 +1,39 @@
-
+from envi.archs.arm.const import *
 import envi.registers as e_reg
 
-reg_table = []
+
+reg_table = [(None,0,None, None) for x in xrange(17*16)]
 arm_regnames = ("r0","r1","r2","r3","r4","r5","r6","r7","r8","r9","sl","fp","ip","sp","lr","pc","cpsr")
 reg_base = ("r0_","r1_","r2_","r3_","r4_","r5_","r6_","r7_","r8_","r9_","r10_","r11_","r12_","r13_","r14_","error-r15_","SPSR_")
-modes = ("user","fiq","irq","svc","abt","und")
+"""
+modes = ("usr","fiq","irq","svc","abt","und")  #more mode-related stuff in const.py
 mode_defs = {   # ( Arm_regs, 
-    "user": ( 15, ),  # user mode
-    "fiq":  ( 8, ),
-    "irq":  ( 13, ),
-    "svc":  ( 13, ),
-    "abt":  ( 13, ),
-    "und":  ( 13, ),
+    "usr":  ( 15, PM_usr, ),  # user mode
+    "fiq":  ( 8,  PM_fiq, ),
+    "irq":  ( 13, PM_irq, ),
+    "svc":  ( 13, PM_svc, ),
+    "abt":  ( 13, PM_abt, ),
+    "und":  ( 13, PM_und, ),
+    "sys":  ( 15, PM_sys, ),
 }
-
-for midx in range(len(modes)):
-    mode = modes[midx]
-    creg_count = mode_defs[mode][0]
+"""
+for modenum in proc_modes.keys():
+    mode_name, short_name, desc, mode_reg_base, creg_count, psr_offset = proc_modes[modenum]
+    #mode_reg_base = (modenum&0xf) * 17
+    #print mode_reg_base
     for x in range(creg_count):
-        # (reg_name, bitsize, regidx_for_emulation)
-        reg_table.append((arm_regnames[x], 32, x))
+        # (reg_name, bitsize, regidx_for_emulation, init_val)
+        reg_table[mode_reg_base + x] = (arm_regnames[x], 32, x, 0)
     
-    for x in range(creg_count, 16):
-        reg_table.append((reg_base[x] + mode, 32, (midx * 17)+x))
+    for x in range(creg_count, 15):
+        reg_table[mode_reg_base + x] = (reg_base[x] + short_name, 32, mode_reg_base+x, 0)
     
-    reg_table.append(("pc", 32, 16))
-    
-    reg_table.append((reg_base[x] + mode, 32, (midx * 17)+x))
-    #reg_table.append((reg_base + mode, 32, (midx * 17)+x))
-    
+    reg_table[mode_reg_base + 15] = (arm_regnames[15], 32, 15, 0)                   # program counter
+    reg_table[mode_reg_base + 16] = (reg_base[16] + short_name, 32, mode_reg_base+16, modenum) # SPSR
 #FIXME: What to do with CPSR...  hack... "hey yall check this out!"
-reg_table.append(("cpsr", 32, None))    # CPSR needs to access some other SPSR_, most often SPSR_user
-
-REG_OFFSET_FIQ = 17
-REG_OFFSET_IRQ = 17 * 1
-REG_OFFSET_SVC = 17 * 2
-REG_OFFSET_ABT = 17 * 3
-REG_OFFSET_UND = 17 * 4
-REG_OFFSET_CPSR = 17 * 5
-
-REG_PC = 0x10
-REG_SP = 0xe
-REG_BP = None
-REG_PSR = REG_OFFSET_CPSR
-REG_FLAGS = REG_OFFSET_CPSR    #same location, backward-compat name
+reg_table[REG_OFFSET_CPSR] = ("cpsr", 32, REG_OFFSET_CPSR, PM_usr)     # CPSR will maintain it's own value, to be stored into SPSR's as modes change.
+reg_table[REG_SPSR_sys] = ("cpsr", 32, REG_OFFSET_CPSR, PM_usr)        # SPSR_sys is same reg as SPSR_usr.
+#reg_table[REG_SPSR_sys] = ("SPSR_sys", 32, 16, 0)               # SPSR_sys is same reg as SPSR_usr.
 
 PSR_N = 31  # negative
 PSR_Z = 30  # zero
@@ -59,6 +49,9 @@ PSR_F = 6
 PSR_T = 5
 PSR_M = 0
 
+PSR_C_bit  = 1 << PSR_C
+PSR_C_mask = 0xffffffff ^ PSR_C_bit
+
 psr_fields = [None for x in xrange(32)]
 psr_fields[PSR_M] = "M"
 psr_fields[PSR_T] = "T"
@@ -67,6 +60,9 @@ psr_fields[PSR_I] = "I"
 psr_fields[PSR_A] = "A"
 psr_fields[PSR_E] = "E"
 psr_fields[PSR_GE] = "GE"
+psr_fields[PSR_GE+1] = "GE+1"
+psr_fields[PSR_GE+2] = "GE+2"
+psr_fields[PSR_GE+3] = "GE+3"
 psr_fields[PSR_J] = "J"
 psr_fields[PSR_Q] = "Q"
 psr_fields[PSR_V] = "V"
@@ -74,7 +70,7 @@ psr_fields[PSR_C] = "C"
 psr_fields[PSR_Z] = "Z"
 psr_fields[PSR_N] = "N"
 
-ArmRegs = [reg_table[x][:2] for x in xrange(REG_OFFSET_CPSR)]
+ArmRegs = [reg_table[x][:2] for x in xrange((17*16))]
 ArmMeta =tuple([("N", REG_FLAGS, PSR_N, 1),
                 ("Z", REG_FLAGS, PSR_Z, 1),
                 ("C", REG_FLAGS, PSR_C, 1),
@@ -97,4 +93,7 @@ class ArmRegisterContext(e_reg.RegisterContext):
         self.loadRegDef(ArmRegs)
         self.loadRegMetas(ArmMeta)
         self.setRegisterIndexes(REG_PC, REG_SP)
+        for n,s,idx,val in reg_table:
+            if val != None:
+                self._rctx_vals[idx] = val
 

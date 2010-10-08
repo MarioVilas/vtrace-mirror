@@ -481,6 +481,12 @@ class LinuxMixin(v_posix.PtraceMixin, v_posix.PosixMixin):
 
         return fds
 
+    def platformGetSignal(self):
+        sig = self.getMeta('PendingSignal', 0)
+        if sig == 0:
+            sig = None
+        return sig
+
 ############################################################################
 #
 # NOTE: Both of these use class locals set by the i386/amd64 variants

@@ -41,6 +41,12 @@ class PosixMixin:
     def platformKill(self):
         self.sendSignal(signal.SIGKILL)
 
+    def platformGetSignal(self):
+        sig = self.getMeta('PendingSignal', 0)
+        if sig == 0:
+            sig = None
+        return sig
+
     def sendSignal(self, signo):
         self.requireAttached()
         os.kill(self.pid, signo)

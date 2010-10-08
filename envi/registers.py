@@ -260,6 +260,25 @@ class RegisterContext:
         mask = (2**width)-1
         return (self._rctx_vals[ridx] >> offset) & mask
 
+    def getMetaRegInfo(self, index):
+        '''
+        Return the appropriate realreg, shift, mask info
+        for the specified metareg idx (or None if it's not
+        meta).
+
+        Example:
+            real_reg, lshift, mask = r.getMetaRegInfo(x)
+        '''
+        ridx = index & 0xffff
+        if ridx == index:
+            return None
+
+        offset = (index >> 24) & 0xff
+        width  = (index >> 16) & 0xff
+
+        mask = (2**width)-1
+        return ridx, offset, mask
+
     def setRegister(self, index, value):
         """
         Set a register value by index.

@@ -15,11 +15,20 @@ from cmd import Cmd
 from getopt import getopt
 
 import re                                                                                                          
+
 def splitargs(cmdline):
     cmdline = cmdline.replace('\\\\"', '"').replace('\\"', '')
     patt = re.compile('\".+?\"|\S+')
     for item in cmdline.split('\n'):
         return [s.strip('"') for s in patt.findall(item)]
+
+def columnstr(slist):
+    msize = 0
+    for s in slist:
+        if len(s) > msize:
+            msize = len(s)
+    return [x.ljust(msize) for x in slist]
+
 
 class CliExtMeth:
     """
@@ -415,6 +424,45 @@ class EnviCli(Cmd):
         mem = self.memobj.readMemory(addr, size)
         file(argv[2], "wb").write(mem)
         self.vprint("Wrote %d bytes!" % len(mem))
+
+    def do_memcmp(self, line):
+        '''
+        Compare memory at the given locations.  Outputs a set of
+        differences showing bytes at their given offsets....
+
+        Usage: memcmp <addr_expr1> <addr_expr2> <size_expr>
+        '''
+        if len(line) == 0:
+            return self.do_help('memcmp')
+
+        argv = splitargs(line)
+        if len(argv) != 3:
+            return self.do_help('memcmp')
+
+        addr1 = self.parseExpression(argv[0])
+        addr2 = self.parseExpression(argv[1])
+        size  = self.parseExpression(argv[2])
+
+        bytes1 = self.memobj.readMemory(addr1, size)
+        bytes2 = self.memobj.readMemory(addr2, size)
+
+        res = e_mem.memdiff(bytes1, bytes2)
+        if len(res) == 0:
+            self.vprint('No Differences!')
+            return
+
+        for offset, offsize in res:
+            diff1 = addr1+offset
+            diff2 = addr2+offset
+            self.canvas.addText('==== %d byte difference at offset %d\n' % (offsize,offset))
+            self.canvas.addVaText("0x%.8x" % diff1, diff1)
+            self.canvas.addText(":")
+            self.canvas.addText(bytes1[offset:offset+offsize].encode('hex'))
+            self.canvas.addText('\n')
+            self.canvas.addVaText("0x%.8x" % diff2, diff2)
+            self.canvas.addText(":")
+            self.canvas.addText(bytes2[offset:offset+offsize].encode('hex'))
+            self.canvas.addText('\n')
 
     def do_mem(self, line):
         """

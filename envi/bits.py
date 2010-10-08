@@ -167,7 +167,29 @@ hex_fmt = {
     8:"0x%.16x",
 }
 
-def hex(value, size):
+def intwidth(val):
+    ret = 0
+    while val:
+        ret += 1
+        val = val >> 8
+    return ret
+
+def hex(value, size=None):
+    if size == None:
+        size = intwidth(value)
+
+    fmt = hex_fmt.get(size)
+    if fmt != None:
+        return fmt % value
+
+    x = []
+    while value:
+        x.append('%.2x' % (value & 0xff))
+        value = value >> 8
+    x.reverse()
+    return '0x%.s' % ''.join(x)
+
+
     return hex_fmt.get(size) % value
 
 def binary(binstr):

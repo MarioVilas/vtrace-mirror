@@ -25,7 +25,7 @@ class ByteRend(e_canvas.MemoryRenderer):
     def render(self, mcanv, va):
         bytes = mcanv.mem.readMemory(va, 16)
         self.rendVa(mcanv, va)
-        mcanv.addText("    ")
+        mcanv.addText("  ")
 
         for val in mcanv.mem.readMemoryFormat(va, self.packfmt):
             bstr = self.dispfmt % val
@@ -36,7 +36,7 @@ class ByteRend(e_canvas.MemoryRenderer):
 
             mcanv.addText(" ")
 
-        mcanv.addText("    ")
+        mcanv.addText("  ")
         self.rendChars(mcanv, bytes)
         mcanv.addText("\n")
         return 16

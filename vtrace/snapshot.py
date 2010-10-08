@@ -3,10 +3,21 @@ All the code related to vtrace process snapshots
 and TraceSnapshot classes.
 """
 
+import sys
+import copy
+import cPickle as pickle
+
+import envi
+import envi.memory as e_mem
+import envi.resolver as e_resolv
+
 import vtrace
 import vtrace.platforms.base as v_base
 
-class TraceSnapshot(v_base.TracerBase):
+class TraceSnapshot(
+            vtrace.Trace,
+            v_base.TracerBase,
+        ):
     """
     A tracer snapshot is similar to a traditional "core file" except that
     you may also have memory only snapshots that are never written to disk.
@@ -15,14 +26,7 @@ class TraceSnapshot(v_base.TracerBase):
     in it's execution and manipulate/test from there or save it to disk for later
     analysis...
     """
-    def __init__(self, filename=None, snapdict=None):
-        Trace.__init__(self)
-        if filename == None and snapdict == None:
-            raise Exception("ERROR: TraceSnapshot needs either filename or snapdict!")
-
-        if filename:
-            sfile = file(filename, "rb")
-            snapdict = pickle.load(sfile)
+    def __init__(self, snapdict):
 
         self.s_snapcache = {}
         self.s_snapdict = snapdict
@@ -42,27 +46,65 @@ class TraceSnapshot(v_base.TracerBase):
         else:
             raise Exception("ERROR: Unknown snapshot version!")
 
+        # In the ghetto!
+        archname = self.metadata.get('Architecture')
+        self._inheritArchitecture(archname)
+
+        vtrace.Trace.__init__(self)
+        v_base.TracerBase.__init__(self)
+        # This will re-init meta... *sigh* set it back...
+        self.metadata = snapdict['meta']
+
+        # Steal the reg defs of the first thread
+        rinfo = self.s_regs.items()[0][1]
+        self.setRegisterInfo(rinfo)
+
         #FIXME hard-coded page size!
         self.s_map_lookup = {}
         for map in self.s_maps:
             for i in range(map[0],map[0] + map[1], 4096):
                 self.s_map_lookup[i] = map
 
+        # Lets get some symbol resolvers created for our libraries
+        #for fname in self.getNormalizedLibNames():
+            #subres = e_resolv.FileSymbol(fname, 
+
         self.attached = True
         # So that we pickle
         self.bplock = None
         self.thread = None
 
+
         #FIXME maybe self.arch is NOT the same as real platform...
+
+    def _inheritArchitecture(self, archname):
+        '''
+        Steal the bound methods of a named arch module
+        and make ourself *look* like an arch module ;)
+        '''
+        bmethod = type(self._inheritArchitecture)
+        arch = envi.getArchModule(archname)
+        for name in dir(arch):
+            o = getattr(arch, name, None)
+            if type(o) == bmethod:
+                setattr(self, name, o)
+
+        ctx = arch.archGetRegCtx()
+
+
+    def saveToFd(self, fd):
+        '''
+        Save this snapshot to the given file like object
+        for later reloading...
+        '''
+        pickle.dump(self.s_snapdict, fd)
 
     def saveToFile(self, filename):
         """
         Save a snapshot to file for later reading in...
         """
-        #import zlib
         f = file(filename, "wb")
-        pickle.dump(self.s_snapdict, f)
-        #f.write(zlib.compress(rawbytes))
+        self.saveToFd(f)
         f.close()
 
     def getMemoryMap(self, addr):
@@ -82,6 +124,12 @@ class TraceSnapshot(v_base.TracerBase):
             raise Exception("ERROR: Invalid thread id specified")
         return tr
 
+    def platformGetRegCtx(self, thrid):
+        rinfo = self.s_regs.get(thrid)
+        ctx = self.archGetRegCtx()
+        ctx.setRegisterInfo(rinfo)
+        return ctx
+        
     def platformGetMaps(self):
         return self.s_maps
 
@@ -117,6 +165,9 @@ class TraceSnapshot(v_base.TracerBase):
     def platformDetach(self):
         pass
 
+    def platformParseBinary(self, *args):
+        print 'FIXME FAKE PLATFORM PARSE BINARY: %s' % repr(args)
+
     # Over-ride register *caching* subsystem to store/retrieve
     # register information in pure dictionaries
     def cacheRegs(self, threadid):
@@ -127,6 +178,13 @@ class TraceSnapshot(v_base.TracerBase):
     def syncRegs(self):
         pass
 
+def loadSnapshot(filename):
+    '''
+    Load a vtrace process snapshot from a file
+    '''
+    sfile = file(filename, "rb")
+    snapdict = pickle.load(sfile)
+    return TraceSnapshot(snapdict)
 
 def takeSnapshot(trace):
     """
@@ -140,15 +198,13 @@ def takeSnapshot(trace):
     stacktrace = dict()
 
     for thrid,tdata in trace.getThreads().items():
-        trace.selectThread(thrid)
-        regs[thrid] = trace.getRegisters()
+        ctx = trace.getRegisterContext(thrid)
+        reginfo = ctx.getRegisterInfo()
+        regs[thrid] = reginfo
         try:
             stacktrace[thrid] = trace.getStackTrace()
         except Exception, msg:
             print >> sys.stderr, "WARNING: Failed to get stack trace for thread 0x%.8x" % thrid
-
-    if orig_thread != -1:
-        trace.selectThread(orig_thread)
 
     mem = dict()
     maps = []

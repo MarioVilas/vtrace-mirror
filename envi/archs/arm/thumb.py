@@ -1,5 +1,6 @@
 
 import envi.bits as e_bits
+from envi.bits import binary
 import envi.bintree as e_btree
 
 import envi.archs.arm.disasm as arm_dis
@@ -11,21 +12,10 @@ thumb_32 = [
         binary('11111'),
 ]
 
-class oper:
-
-
-class imm:
-    def __init__(self, width, shift):
-        self.width = width
-        self.shift = shift
-
-class reg:
-    def __init__(self, width, shift):
-
 O_REG = 0
 O_IMM = 1
 
-def shmaskval(value, shval, mask)
+def shmaskval(value, shval, mask):  #FIXME: unnecessary to make this another fn call.  will be called a bajillion times.
     return (value >> shval) & mask
 
 class simpleops:
@@ -37,7 +27,7 @@ class simpleops:
         for otype, shval, mask in self.operdef:
             oval = shmaskval(value, shval, mask)
 
-            ret.append( (value >> shval)
+            ret.append( (value >> shval) )
 
 imm5_rm_rd  = simpleops((O_REG, 0, 0x7), (O_REG, 3, 0x7), (O_IMM, 6, 0x1f))
 rm_rn_rd    = simpleops((O_REG, 0, 0x7), (O_REG, 3, 0x7), (O_REG, 6, 0x7))
@@ -49,6 +39,8 @@ rm_rdn      = simpleops((O_REG, 0, 0x7), (O_REG, 3, 0x7))
 rm_rd_imm0  = simpleops((O_REG, 0, 0x7), (O_REG, 3, 0x7), (O_IMM, 0, 0))
 rm4_shift3  = simpleops((O_REG, 3, 0xf))
 rm_rn_rt    = simpleops((O_REG, 0, 0x7), (O_REG, 3, 0x7), (O_REG, 6, 0x7))
+imm8        = simpleops((O_IMM, 8, 0xff))
+imm11       = simpleops((O_IMM, 11, 0x7ff))
 
 sh4_imm1    = simpleops((O_IMM, 3, 0x1))
 
@@ -75,6 +67,14 @@ def imm5_rn_rt(va, value):
     oper1 = arm_dis.ArmImmOffsetOper(rn, imm, va)
     return oper0,oper1
 
+def rd_sp_imm8(va, value):
+    rd = shmask(value, 8, 0x7)
+    imm = shmask(value, 0, 0xff)
+    oper0 = arm_dis.ArmRegOper(rd)
+    # pre-compute PC relative addr
+    oper1 = arm_dis.ArmImmOffsetOper(REG_SP, imm)
+    return oper0,oper1
+
 def rd_pc_imm8(va, value):
     rd = shmask(value, 8, 0x7)
     imm = shmask(value, 0, 0xff)
@@ -88,6 +88,29 @@ def rt_pc_imm8(va, value):
     imm = shmask(value, 0, 0xff)
     oper0 = arm_dis.ArmRegOper(rt)
     oper1 = arm_dis.ArmImmOffsetOper() # FIXME offset from PC
+    return oper0,oper1
+
+def ldmia(va, value): 
+    rd = shmask(value, 8, 0x7)
+    reg_list = value & 0xff
+    oper0 = arm_dis.ArmRegOper(rd)
+    oper1 = arm_dis.ArmRegListOper(reg_list)
+    flags = 1<<11   # W flag indicating that write back should occur (marked by "!")
+    return oper0,oper1
+
+def sp_sp_imm7(va, value):
+    imm = shmask(value, 0, 0x7f)
+    o0 = arm_dis.ArmRegOper(arm_reg.REG_SP)
+    o1 = arm_dis.ArmRegOper(arm_reg.REG_SP)
+    o2 = arm_dis.ArmImmOper(imm*4)
+    return o0,o1,o2
+
+def rm_reglist(va, value):
+    rm = shmask(value, 8, 0x7)
+    reglist = value & 0xff
+    oper0 = arm_dis.ArmRegOper(rm)
+    oper1 = arm_dis.ArmReglistOper(reglist)
+    return oper0,oper1
 
 
 # opinfo is:
@@ -154,23 +177,45 @@ thumb_table = [
     ('10010',       ('str',     imm5_rn_rt, 0)), # STR<c> <Rt>, [<Rn>{,#<imm>}]
     ('10011',       ('ldr',     imm5_rn_rt, 0)), # LDR<c> <Rt>, [<Rn>{,#<imm>}]
     # Generate PC relative address
-    ('10100',       ('adr',     rd_pc_imm8, 0)), # ADR<c> <Rd>,<label>
+    ('10100',       ('add',     rd_pc_imm8, 0)), # ADD<c> <Rd>,<label>
     # Generate SP relative address
     ('10101',       ('add',     rd_sp_imm8, 0)), # ADD<c> <Rd>,SP,#<imm>
     # Miscellaneous instructions
     ('10110110010', ('setend',  sh4_imm1,   0)), # SETEND <endian_specifier>
     ('10110110011', ('cps',     simpleops(),0)), # CPS<effect> <iflags> FIXME
+    ('1011101000',  ('rev',     rn_rdm,     0)), # REV Rd, Rn
+    ('1011101001',  ('rev16',   rn_rdm,     0)), # REV16 Rd, Rn
+    ('1011101011',  ('revsh',   rn_rdm,     0)), # REVSH Rd, Rn
     ('101100000',   ('add',     sp_sp_imm7, 0)), # ADD<c> SP,SP,#<imm>
     ('101100001',   ('sub',     sp_sp_imm7, 0)), # SUB<c> SP,SP,#<imm>
-    ('10110001',    ('cbz',     
+    ('10111110',    ('bkpt',    imm8,       0)), # BKPT <blahblah>
+    # Load / Store Multiple
+    ('11000',       ('stmia',   rm_reglist, 0x800)), # LDMIA Rd!, reg_list
+    ('11001',       ('ldmia',   rm_reglist, 0x800)), # STMIA Rd!, reg_list
+    # Conditional Branches
+    ('11010000',    ('b',       imm8,       0)),
+    ('11010001',    ('bn',      imm8,       0)),
+    ('11010010',    ('bz',      imm8,       0)),
+    ('11010011',    ('bnz',     imm8,       0)),
+    ('11010100',    ('bc',      imm8,       0)),
+    ('11010101',    ('bnc',     imm8,       0)),
+    ('11010100',    ('bzc',     imm8,       0)),
+    ('11010111',    ('bnzc',    imm8,       0)),
+    ('11011000',    ('bv',      imm8,       0)),
+    ('11011001',    ('bnv',     imm8,       0)),
+    ('11011010',    ('bzv',     imm8,       0)),
+    ('11011011',    ('bnzv',    imm8,       0)),
+    ('11011100',    ('bcv',     imm8,       0)),
+    ('11011101',    ('bncv',    imm8,       0)),
+    ('11011110',    ('bzcv',    imm8,       0)),
+    ('11011111',    ('bnzcv',   imm8,       0)),
+    # Software Interrupt
+    ('11011111',    ('swi',     imm8,       0)), # SWI <blahblah>
+    ('11100',       ('b',       imm11,      0)), # B <addr11> 
+    ('11101',       ('blx',     imm11,      0)), # BLX suffix <addr11>  -- SEE p542 of 14218.pdf manual for how this if gonna fuck with emulation. 
+    ('11110',       ('bl',      imm11,      0)), # BL/BLX prefix <addr11> -- SEE p542 of 14218.pdf manual for how this if gonna fuck with emulation. 
+    ('11111',       ('blx',     imm11,      0)), # BL suffix <addr11>   -- SEE p542 of 14218.pdf manual for how this if gonna fuck with emulation.
 ]
-
-def sp_sp_imm7(va, value):
-    imm = shmask(value, 0, 0x7f)
-    o0 = arm_dis.ArmRegOper(arm_reg.REG_SP)
-    o1 = arm_dis.ArmRegOper(arm_reg.REG_SP)
-    o2 = arm_dis.ArmImmOper(imm)
-    return o0,o1,o2
 
 ttree = e_btree.BinaryTree()
 for binstr, opinfo in thumb_table:
@@ -178,69 +223,6 @@ for binstr, opinfo in thumb_table:
 
 thumb32mask = binary('11111')
 thumb32min  = binary('11100')
-
-def thumb16_arithmetic(opval):
-
-def thumb16_dataprocess():
-    pass
-def thumb16_specialdata():
-    pass
-def thumb16_loadliteral():
-    pass
-def thumb16_loadstorsingle():
-    pass
-def thumb16_genpcreladdr():
-    pass
-def thumb16_genspreladdr():
-    pass
-def thumb16_misc():
-    pass
-def thumb16_stormultireg():
-    pass
-def thumb16_loadmultireg():
-    pass
-def thumb16_condbranch():
-    pass
-def thumb16_uncondbranch():
-    pass
-def thumb16_goto32():
-    pass
-
-def thumb16row(binstr, func):
-    bin = e_bits.binary(binstr)
-    shift = 6 - len(binstr)
-    return bin, shift, func
-
-def addtotree(binstr, opinfo):
-    node = thumbtree
-    while binstr:
-        choice = int(binstr[0], 2)
-        if node[choice] == None:
-            node[choice] = [None, None, None]
-        node = node[choice]
-    node[2] = opinfo
-
-thumbtree = [None, None, None]
-
-thumb16table = [
-    thumb16row('00',     thumb16_arithmetic),
-    thumb16row('010000', thumb16_dataprocess),
-    thumb16row('010001', thumb16_specialdata),
-    thumb16row('01001',  thumb16_loadliteral),
-    thumb16row('0101',   thumb16_loadstorsingle),
-    thumb16row('011',    thumb16_loadstorsingle),
-    thumb16row('100',    thumb16_loadstorsingle),
-    thumb16row('10100',  thumb16_genpcreladdr),
-    thumb16row('10101',  thumb16_genspreladdr),
-    thumb16row('1011',   thumb16_misc),
-    thumb16row('11000',  thumb16_stormultireg),
-    thumb16row('11001',  thumb16_loadmultireg),
-    thumb16row('1101',   thumb16_condbranch),
-    thumb16row('11100',  thumb16_uncondbranch),
-    thumb16row('11101',  thumb16_goto32),
-    thumb16row('11110',  thumb16_goto32),
-    thumb16row('11111',  thumb16_goto32),
-]
 
 def is_thumb32(val):
     '''
@@ -251,3 +233,16 @@ def is_thumb32(val):
     bval = val >> 11
     return (bval & thumb32mask) > thumb32min
 
+
+class ThumbOpcode(arm_dis.ArmOpcode):
+    pass
+
+class ArmThumbDisasm(arm_dis.ArmDisasmChild):
+    def disasm(self, bytes, offset, va, trackMode=True):
+        val = struct.unpack("<L", bytes[offset:offset+2])
+        mnem, opermkr, flags = ttree.getInstr(val)
+        olist = opermkr(va, val)
+
+        op = ThumbOpcode(va, opcode, mnem, 0xe, 2, olist, flags)
+        return op
+        raise Exception("ummm. you could try Implementing disasm first... duh.")

@@ -19,6 +19,13 @@ moddir = os.path.dirname(__file__)
 # ord('K').  Some are here for special esc/FN etc treatment
 KEYCODE_esc = 0xff1b
 
+class VaTag(vw_views.VRevTextTag):
+
+    def __init__(self, va):
+        tname = '%.8x' % va
+        vw_views.VRevTextTag.__init__(self, '%.8x' % va)
+        self.va = va
+
 class MemoryView(vw_views.VTextView, e_canvas.MemoryCanvas):
     """
     A MemoryCanvas compliant GTK TextView.
@@ -104,7 +111,7 @@ class MemoryView(vw_views.VTextView, e_canvas.MemoryCanvas):
         # do highlight on click etc...
         tag = self.vwGetTag(typename)
         if tag == None:
-            tag = gtk.TextTag(typename)
+            tag = vw_views.VTextTag(typename)
             self.vwInitTag(tag, typename)
         return tag
 
@@ -116,7 +123,7 @@ class MemoryView(vw_views.VTextView, e_canvas.MemoryCanvas):
         """
         tag = self.vwGetTag(tname)
         if tag == None:
-            tag = gtk.TextTag(tname)
+            tag = vw_views.VRevTextTag(tname)
             self.vwInitTag(tag, typename, self.vwNamedTagEvent)
         return tag
 
@@ -125,9 +132,10 @@ class MemoryView(vw_views.VTextView, e_canvas.MemoryCanvas):
         tname = "%.8x" % va
         tag = self.vwGetTag(tname)
         if tag == None:
-            tag = gtk.TextTag(tname)
+            #tag = gtk.TextTag(tname)
+            tag = VaTag(va)
             self.vwInitTag(tag, "va", self.vaTagEvent)
-            tag.va = va
+            #tag.va = va
         return tag
 
     @idlethread
@@ -135,6 +143,11 @@ class MemoryView(vw_views.VTextView, e_canvas.MemoryCanvas):
         if tag == None:
             tag = self.vwGetTag("default")
         self.vwInsertText(text, tag=tag, iter=self.iter)
+
+    @idlethread
+    def addVaText(self, text, va):
+        tag = self.getVaTag(va)
+        self.addText(text, tag=tag)
 
 #############################################################
 
@@ -315,9 +328,9 @@ class MemoryView(vw_views.VTextView, e_canvas.MemoryCanvas):
         if self.vatag == tag:
             return
         if self.vatag != None:
-            self.vwReverseTag(self.vatag)
+            self.vatag.reverse()
         self.vatag = tag
-        self.vwReverseTag(self.vatag)
+        self.vatag.reverse()
 
     def vwNamedTagEvent(self, tag, textview, event, iter):
         self.vwTagEvent(tag, textview, event, iter)

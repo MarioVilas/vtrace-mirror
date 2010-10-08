@@ -33,6 +33,7 @@ class TracerBase(vtrace.Notifier):
         self.pid = 0 # Attached pid (also used to know if attached)
         self.exited = False
         self.breakpoints = {}
+        self.newbreaks = []
         self.bpbyid = {}
         self.bpid = 0
         self.curbp = None
@@ -170,12 +171,22 @@ class TracerBase(vtrace.Notifier):
             if doit:
                 self._doRun()
 
+    def _activateBreak(self, bp):
+        if bp.isEnabled():
+            try:
+                bp.activate(self)
+            except Exception, e:
+                traceback.print_exc()
+                print "WARNING: bpid %d activate failed (deferring): %s" % (bp.id, e)
+                self.deferred.append(bp)
+
     def _throwdownBreaks(self):
         """
         Run through the breakpoints and setup
         the ones that are enabled.
         """
         self.curbp = None
+
         if self.getMode("FastBreak"):
             if self.fb_bp_done:
                 return
@@ -188,13 +199,7 @@ class TracerBase(vtrace.Notifier):
                 self.breakpoints[addr] = bp
 
         for bp in self.breakpoints.values():
-            if bp.isEnabled():
-                try:
-                    bp.activate(self)
-                except Exception, e:
-                    traceback.print_exc()
-                    print "WARNING: bpid %d activate failed (deferring): %s" % (bp.id, e)
-                    self.deferred.append(bp)
+            self._activateBreak(bp)
 
         if self.getMode("FastBreak"):
             self.fb_bp_done = True
@@ -233,7 +238,8 @@ class TracerBase(vtrace.Notifier):
         # clear curbp...
         bp = self.curbp
         if bp != None and bp.isEnabled():
-            bp.deactivate(self)
+            if bp.active:
+                bp.deactivate(self)
             orig = self.getMode("FastStep")
             self.setMode("FastStep", True)
             self.stepi()
@@ -357,27 +363,36 @@ class TracerBase(vtrace.Notifier):
                 print "WARNING: Notifier exception for",repr(notifier)
                 traceback.print_exc()
 
-    def _cleanupBreakpoints(self):
+    def _cleanupBreakpoints(self, force=False):
+        '''
+        Cleanup any non-fastbreak breakpoints.  This routine doesn't even get
+        called in the event of mode FastBreak=True.
+        '''
         self.fb_bp_done = False
         for bp in self.breakpoints.itervalues():
             # No harm in calling deactivate on
             # an inactive bp
-            bp.deactivate(self)
+            if force or not bp.fastbreak:
+                bp.deactivate(self)
 
     def _fireBreakpoint(self, bp):
         self.curbp = bp
+        # A breakpoint should be inactive when fired
+        if bp.active:
+            bp.deactivate(self)
         try:
             bp.notify(vtrace.NOTIFY_BREAK, self)
         except Exception, msg:
             print "Breakpoint Exception 0x%.8x : %s" % (bp.address,msg)
-        self.fireNotifiers(vtrace.NOTIFY_BREAK)
+        if not bp.fastbreak:
+            self.fireNotifiers(vtrace.NOTIFY_BREAK)
 
     def checkPageWatchpoints(self):
         """
         Check if the given memory fault was part of a valid
         MapWatchpoint.
         """
-        faultaddr = self.platformGetMemFault()
+        faultaddr,faultperm = self.platformGetMemFault()
 
         #FIXME this is some AWESOME but intel specific nonsense
         if faultaddr == None: return False
@@ -452,7 +467,7 @@ class TracerBase(vtrace.Notifier):
         elif event == vtrace.NOTIFY_DETACH:
             for tid in self.sus_threads.keys():
                 self.resumeThread(tid)
-            self._cleanupBreakpoints()
+            self._cleanupBreakpoints(force=True)
 
         elif event == vtrace.NOTIFY_EXIT:
             self.setMode("RunForever", False)
@@ -604,6 +619,12 @@ class TracerBase(vtrace.Notifier):
         """
         raise Exception("Platform must implement platformGetFds()")
 
+    def platformGetSignal(self):
+        '''
+        Return the currently posted exception/signal....
+        '''
+        raise Exception('Platform must implement platformGetSignal')
+
     def platformGetMaps(self):
         """
         Return a list of the memory maps where each element has
@@ -724,9 +745,9 @@ class TracerBase(vtrace.Notifier):
         Return the addr of the current memory fault
         or None
         """
-        #NOTE: This is used by the MapWatchpoint subsystem
+        #NOTE: This is used by the PageWatchpoint subsystem
         # (and is still considered experimental)
-        return None
+        return None,None
 
     def platformWait(self):
         """

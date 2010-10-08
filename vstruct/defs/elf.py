@@ -57,7 +57,7 @@ class Elf32Pheader(vstruct.VStruct):
 class Elf32Reloc(vstruct.VStruct):
     def __init__(self):
         vstruct.VStruct.__init__(self)
-        self.r_offset = v_ptr()
+        self.r_offset = v_ptr32()
         self.r_info   = v_uint32()
 
 class Elf32Reloca(Elf32Reloc):
@@ -136,8 +136,7 @@ class Elf64Pheader(Elf32Pheader):
 class Elf64Reloc(vstruct.VStruct):
     def __init__(self):
         vstruct.VStruct.__init__(self)
-        self.r_offset = v_ptr()
-        #self.r_offset = v_uint64()
+        self.r_offset = v_ptr64()
         self.r_info   = v_uint64()
 
 class Elf64Reloca(Elf64Reloc):

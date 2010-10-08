@@ -5,6 +5,21 @@ import vstruct.defs.pe as vs_pe
 
 import ordlookup
 
+IMAGE_DLLCHARACTERISTICS_RESERVED_1      = 1
+IMAGE_DLLCHARACTERISTICS_RESERVED_2      = 2
+IMAGE_DLLCHARACTERISTICS_RESERVED_4      = 4
+IMAGE_DLLCHARACTERISTICS_RESERVED_8      = 8
+IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE    = 0x0040 # The DLL can be relocated at load time.
+IMAGE_DLLCHARACTERISTICS_FORCE_INTEGRITY = 0x0080 # Code integrity checks are forced. If you set this flag and a section contains only uninitialized data, set the PointerToRawData member of IMAGE_SECTION_HEADER for that section to zero; otherwise, the image will fail to load because the digital signature cannot be verified.
+IMAGE_DLLCHARACTERISTICS_NX_COMPAT       = 0x0100 # The image is compatible with data execution prevention (DEP).
+IMAGE_DLLCHARACTERISTICS_NO_ISOLATION    = 0x0200 # The image is isolation aware, but should not be isolated.
+IMAGE_DLLCHARACTERISTICS_NO_SEH          = 0x0400 # The image does not use structured exception handling (SEH). No handlers can be called in this image.
+IMAGE_DLLCHARACTERISTICS_NO_BIND         = 0x0800 # Do not bind the image.
+IMAGE_DLLCHARACTERISTICS_RESERVED_1000   = 0x1000 # Reserved
+IMAGE_DLLCHARACTERISTICS_WDM_DRIVER      = 0x2000 # A WDM driver.
+IMAGE_DLLCHARACTERISTICS_RESERVED_4000   = 0x4000 # Reserved
+IMAGE_DLLCHARACTERISTICS_TERMINAL_SERVER_AWARE  = 0x8000
+
 IMAGE_FILE_MACHINE_I386  = 0x014c
 IMAGE_FILE_MACHINE_IA64  = 0x0200
 IMAGE_FILE_MACHINE_AMD64 = 0x8664
@@ -99,7 +114,7 @@ class PE(object):
                                 "pe.IMAGE_NT_HEADERS")
 
         # Parse in a default 32 bit, and then check for 64...
-        if nt.FileHeader.Machine == IMAGE_FILE_MACHINE_AMD64:
+        if nt.FileHeader.Machine in [ IMAGE_FILE_MACHINE_AMD64, IMAGE_FILE_MACHINE_IA64 ]:
             nt = self.readStructAtOffset(self.IMAGE_DOS_HEADER.e_lfanew,
                                 "pe.IMAGE_NT_HEADERS64")
             self.pe32p = True

@@ -36,6 +36,7 @@ class ArchitectureModule:
     def __init__(self, archname, maxinst=32):
         self._arch_name = archname
         self._arch_maxinst = maxinst
+        self._arch_call_convs = {}
 
     def archGetBreakInstr(self):
         """
@@ -75,6 +76,21 @@ class ArchitectureModule:
         """
         raise ArchNotImplemented("pointerString")
 
+    def addCallingConvention(self, name, obj):
+        self._arch_call_convs[name] = obj
+
+    def hasCallingConvention(self, name):
+        if self._arch_call_convs.get(name) != None:
+            return True
+        return False
+
+    def getCallingConvention(self, name):
+        return self._arch_call_conv.get(name)
+
+    def getCallingConventions(self):
+        return self._arch_call_convs.items()
+
+
 ################################################################
 #
 # FIXME going away and becomming part of opcode.
@@ -95,7 +111,11 @@ class InvalidInstruction(EnviException):
     Raised by opcode parsers when the specified
     bytes do not represent a valid opcode
     """
-    pass
+    def __init__(self, bytes=None):
+        msg = None
+        if bytes != None:
+            msg = bytes.encode('hex')
+        EnviException.__init__(self, msg)
 
 class SegmentationViolation(EnviException):
     """
@@ -367,6 +387,10 @@ class Opcode:
             if self.prefixes & byte:
                 ret.append(name)
         return "".join(ret)
+
+    def getOperValue(self, idx, emu=None):
+        oper = self.opers[idx]
+        return oper.getOperValue(self, emu=emu)
             
 
 class Emulator(e_reg.RegisterContext, e_mem.IMemory):
@@ -401,8 +425,6 @@ class Emulator(e_reg.RegisterContext, e_mem.IMemory):
         # Save off the memory object
         self.setMemoryObject(memobj)
 
-        self.call_convs = {}
-
         # Automagically setup an instruction mnemonic handler dict
         # by finding all methods starting with i_ and assume they
         # implement an instruction by mnemonic
@@ -413,20 +435,20 @@ class Emulator(e_reg.RegisterContext, e_mem.IMemory):
             if name.startswith("i_"):
                 self.op_methods[name[2:]] = getattr(self, name)
 
-    def emuSnapshot(self):
+    def getEmuSnap(self):
         """
         Return the data needed to "snapshot" this emulator.  For most
         archs, this method will be enough (it takes the memory object,
         and register values with it)
         """
         regs = self.getRegisterSnap()
-        mem  = copy.deepcopy(self.memobj)
+        mem = self.memobj.getMemorySnap()
         return regs,mem
 
-    def emuRestore(self, snap):
+    def setEmuSnap(self, snap):
         regs,mem = snap
         self.setRegisterSnap(regs)
-        self.setMemoryObject(mem)
+        self.memobj.setMemorySnap(mem)
 
     def getSegmentInfo(self, op):
         idx = self.getSegmentIndex(op)
@@ -527,14 +549,6 @@ class Emulator(e_reg.RegisterContext, e_mem.IMemory):
         oper = op.opers[idx]
         return oper.setOperValue(op, self, value)
 
-    def addCallingConvention(self, name, obj):
-        self.call_convs[name] = obj
-
-    def hasCallingConvention(self, name):
-        if self.call_convs.get(name) != None:
-            return True
-        return False
-
     def getCallArgs(self, count, cc):
         """
         Emulator implementors can implement this method to allow
@@ -543,7 +557,7 @@ class Emulator(e_reg.RegisterContext, e_mem.IMemory):
 
         Usage: getCallArgs(3, "stdcall") -> (0, 32, 0xf00)
         """
-        c = self.call_convs.get(cc, None)
+        c = self._arch_call_convs.get(cc, None)
         if c == None:
             raise UnknownCallingConvention(cc)
 
@@ -557,7 +571,7 @@ class Emulator(e_reg.RegisterContext, e_mem.IMemory):
         care of any argument cleanup or other return time tasks
         for the calling convention)
         """
-        c = self.call_convs.get(cc, None)
+        c = self._arch_call_convs.get(cc, None)
         if c == None:
             raise UnknownCallingConvention(cc)
 

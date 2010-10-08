@@ -241,10 +241,12 @@ class v_bytes(v_prim):
 
     _vs_builder = True
 
-    def __init__(self, size=4):
+    def __init__(self, size=0, vbytes=None):
         v_prim.__init__(self)
-        self._vs_length = size
-        self._vs_value = "\x00" * size
+        if vbytes == None:
+            vbytes = '\x00' * size
+        self._vs_length = len(vbytes)
+        self._vs_value = vbytes
 
     def vsGetFormat(self):
         return "%ds" % len(self)
@@ -261,10 +263,10 @@ class v_str(v_prim):
 
     _vs_builder = True
 
-    def __init__(self, size=4):
+    def __init__(self, size=4, val=''):
         v_prim.__init__(self)
         self._vs_length = size
-        self._vs_value = "A"*size
+        self._vs_value = val.ljust(size, '\x00')
 
     def vsGetValue(self):
         val = v_prim.vsGetValue(self)
@@ -289,9 +291,9 @@ class v_wstr(v_str):
 
     _vs_builder = True
 
-    def __init__(self, size=4, encode='utf-16le'):
+    def __init__(self, size=4, encode='utf-16le', val=''):
         v_prim.__init__(self)
-        b = ('A'*size).encode(encode)
+        b = val.ljust(size, '\x00').encode(encode)
         self._vs_length = len(b)
         self._vs_value = b
         self._vs_encode = encode

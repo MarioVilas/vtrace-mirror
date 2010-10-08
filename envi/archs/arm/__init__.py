@@ -3,8 +3,6 @@
 The initial arm module.
 """
 
-import struct
-
 import envi
 
 from envi.archs.arm.regs import *
@@ -16,6 +14,9 @@ class ArmModule(envi.ArchitectureModule):
         envi.ArchitectureModule.__init__(self, "armv6", maxinst=4)
         self._arch_reg = self.archGetRegCtx()
         self._arch_dis = ArmDisasm()
+
+    def setModeThumb(self):
+        self._arch_dis.setMode(MODE_THUMB)
 
     def archGetRegCtx(self):
         return ArmRegisterContext()
@@ -50,6 +51,7 @@ class ArmModule(envi.ArchitectureModule):
         """
         return self._arch_dis.disasm(bytes, offset, va)
 
-    def getEmulator(self):
-        return ArmEmulator()
+    #def getEmulator(self):
+        #return ArmEmulator()
 
+from envi.archs.arm.emu import *

@@ -54,13 +54,9 @@ class VStructView(vw_views.VTreeView):
 
         dcontext.finish(success=False, del_=False, time=etime)
 
-    def bumpOffsets(self):
-        #FIXME on proto change, field must be bumped
-        pass
-
     def vwLoad(self):
         self.model.clear()
-        i = self.model.append(None, (self.mystruct, "00000000", self.mystruct._vs_name, ""))
+        i = self.model.append(None, (self.mystruct, "00000000", self.mystruct._vs_name, self.mystruct.vsGetClassPath()))
         todo = [(self.mystruct, i, 0),]
         while len(todo):
             d,iter,baseoff = todo.pop()

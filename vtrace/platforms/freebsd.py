@@ -405,6 +405,7 @@ class FreeBSDMixin:
                 print "WARNING: KINFO_PROC CHANGED SIZE, Trying to account for it... good luck"
             ret.append((kinfo.ki_pid, kinfo.ki_comm))
 
+        ret.reverse()
         return ret
 
 class bsd_regs_i386(ctypes.Structure):

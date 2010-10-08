@@ -27,12 +27,21 @@ class MemoryExpressionLocals(ExpressionLocals):
         ExpressionLocals.__init__(self, symobj=symobj)
         self.memobj = memobj
         self.update({
-            "mapbase":self.mapbase,
-            "maplen":self.maplen,
-            "ispoi":self.ispoi,
-            "mem":self.mem,
-            "poi":self.poi,
+            'mapbase':self.mapbase,
+            'maplen':self.maplen,
+            'ispoi':self.ispoi,
+            'mem':self.mem,
+            'poi':self.poi,
+            'sym':self.sym,
         })
+
+    def sym(self, symstr):
+        '''
+        An easy to use utility for symbols which have un-pythonic names.
+
+        Example x = sym('kernel32.??2@$$FYAPAXI@Z')
+        '''
+        return long(evaluate(symstr, self))
 
     def mapbase(self, address):
         """

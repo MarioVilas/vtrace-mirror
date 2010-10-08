@@ -74,6 +74,8 @@ class VTreeView(VView):
         ("Stuff",2, str)
     )
 
+    __editors__ = {} # 'Address': 'editAddrMethodName'
+
     def __init__(self):
         VView.__init__(self)
         self.treeview = gtk.TreeView()
@@ -96,7 +98,12 @@ class VTreeView(VView):
             ftypes.append(ctype)
             if name == None:
                 continue
-            col = vw_util.makeColumn(name, index)
+
+            onedit = None
+            emeth_name = self.__editors__.get(name)
+            if emeth_name != None:
+                onedit = getattr(self, emeth_name, None)
+            col = vw_util.makeColumn(name, index, onedit=onedit)
             self.treeview.append_column(col)
 
         self.model = modelclass(*ftypes)
@@ -123,15 +130,35 @@ class VTreeView(VView):
         """
         return vw_util.getTreeSelected(self.treeview, column)
 
+class VTextTag(gtk.TextTag):
+    def __init__(self, tname):
+        gtk.TextTag.__init__(self, tname)
+        self.reversed = False
+
+    def reverse(self):
+        pass
+
+class VRevTextTag(VTextTag):
+
+    def reverse(self):
+        front = self.get_property("foreground-gdk")
+        back = self.get_property("background-gdk")
+        self.set_property("foreground-gdk", back)
+        self.set_property("background-gdk", front)
+        self.reversed = not self.reversed
+
 class VTextView(VView):
 
-    def __init__(self):
+    def __init__(self, tagtable=None):
         VView.__init__(self)
         self.textview = gtk.TextView()
         self.textview.connect("populate_popup", self.vwGetPopup)
         self.add(self.textview)
 
-        self.tagtable = gtk.TextTagTable()
+        if tagtable == None:
+            tagtable = gtk.TextTagTable()
+
+        self.tagtable = tagtable
         self.textbuf = gtk.TextBuffer(self.tagtable)
         self.textview.set_buffer(self.textbuf)
 
@@ -148,21 +175,20 @@ class VTextView(VView):
         self.tagcfg = ConfigParser()
 
         self.curtag = None # Is a current tag selected?
-        self.deftag = gtk.TextTag("default")
+        self.deftag = VTextTag("default")
         self.vwInitTag(self.deftag)
 
         start,end = self.textbuf.get_bounds()
         self.textbuf.create_mark("insertend", end)
 
-    def vwInitTag(self, tag, typename="default", handler=None):
+    def vwInitTag(self, tag, typename="default", handler=None, *handleargs):
         """
         Initialize a tag for event processing and properties from
         the tag config.
         """
         if handler != None:
-            tag.connect("event", handler)
+            tag.connect("event", handler, *handleargs)
         self.tagtable.add(tag)
-        tag.reversed = False
         self.vwSetTagColor(tag, typename=typename)
 
     def vwSetTagColor(self, tag, typename="default"):
@@ -182,8 +208,8 @@ class VTextView(VView):
         if event.type == gdk.BUTTON_PRESS:
             if tag.get_property("name") != "default":
                 if self.curtag != None:
-                    self.vwReverseTag(self.curtag)
-                self.vwReverseTag(tag)
+                    self.curtag.reverse()
+                tag.reverse()
                 self.curtag = tag
                 return True
 
@@ -192,7 +218,7 @@ class VTextView(VView):
         for sec in self.tagcfg.sections():
             tag = self.vwGetTag(sec)
             if tag == None:
-                tag = gtk.TextTag(sec)
+                tag = VTextTag(sec)
                 self.tagtable.add(tag)
 
             tag.connect("event",self.vwTagEvent)
@@ -210,16 +236,6 @@ class VTextView(VView):
     def vwTagEvent(self, tag, textview, event, iter):
         #print "OVERRIDE ME FOR TAG EVENT PROCESSING!"
         pass
-
-    def vwReverseTag(self, tag):
-        """
-        fg->bg bg->fg highlighting
-        """
-        front = tag.get_property("foreground-gdk")
-        back = tag.get_property("background-gdk")
-        tag.set_property("foreground-gdk", back)
-        tag.set_property("background-gdk", front)
-        tag.reversed = not tag.reversed
 
     def vwGetPopup(self, textview, menu):
         """

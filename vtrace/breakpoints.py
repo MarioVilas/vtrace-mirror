@@ -22,9 +22,12 @@ class Breakpoint:
 
     def __init__(self, address, expression=None):
         self.saved = None
+        self.resonce = False
         self.address = address
+        self.breakinst = None
         self.enabled = True
         self.active = False
+        self.fastbreak = False
         self.id = -1
         self.vte = None
         self.bpcode = None
@@ -54,6 +57,21 @@ class Breakpoint:
             addr = "0x%.8x" % self.address
         return "[%d] %s %s: %s" % (self.id, addr, self.__class__.__name__, self.getName())
 
+    def inittrace(self, trace):
+        '''
+        A callback to do housekeeping at the time the breakpoint is
+        added to the tracer object.  This should be used instead of activate
+        for initialization time infoz to save on time per activate call...
+        '''
+        self.breakinst = trace.archGetBreakInstr()
+
+    def resolvedaddr(self, trace, addr):
+        '''
+        An initialization callback which will be executed when the
+        actual address for this breakpoint has been resolved.
+        '''
+        self.saved = trace.readMemory(addr, len(self.breakinst))
+
     def activate(self, trace):
         """
         Actually store off and replace memory for this process.  This
@@ -64,9 +82,7 @@ class Breakpoint:
         trace.requireAttached()
         if not self.active:
             if self.address != None:
-                breakinst = trace.archGetBreakInstr()
-                self.saved = trace.readMemory(self.address, len(breakinst))
-                trace.writeMemory(self.address, breakinst)
+                trace.writeMemory(self.address, self.breakinst)
                 self.active = True
         return self.active
 
@@ -93,6 +109,12 @@ class Breakpoint:
                 self.address = trace.parseExpression(self.vte)
             except Exception, e:
                 self.address == None
+
+        # If we resolved, lets get our saved code...
+        if self.address != None and not self.resonce:
+            self.resonce = True
+            self.resolvedaddr(trace, self.address)
+
         return self.address
 
     def isEnabled(self):

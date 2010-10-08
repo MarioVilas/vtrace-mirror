@@ -4,7 +4,7 @@ Just a place to house some universalish utilities
 
 import gtk
 
-def makeColumn(name, index, onedit=False, cell=None, links=None):
+def makeColumn(name, index, onedit=None, cell=None, links=None):
     """
     Return a default "TreeViewColumn" of name "name"
     whose TreeModel index for the renderer is "index"

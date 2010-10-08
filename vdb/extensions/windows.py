@@ -1,7 +1,9 @@
-
+import os
 import getopt
+
 import vtrace
 import vtrace.tools.win32heap as win32heap
+import vtrace.tools.win32aslr as win32_aslr
 import vtrace.tools.win32stealth as win32_stealth
 import vtrace.util as v_util
 
@@ -134,7 +136,13 @@ def safeseh(vdb, line):
             return
 
         vdb.vprint("%s:" % line)
-        p = PE.peFromMemoryObject(t, base)
+
+        try:
+            p = PE.peFromMemoryObject(t, base)
+        except Exception, e:
+            vdb.vprint('Error: %s (0x%.8x) %s' % (line, base, e))
+            return
+
         if p.IMAGE_LOAD_CONFIG != None:
             va = int(p.IMAGE_LOAD_CONFIG.SEHandlerTable)
             if va != 0:
@@ -149,7 +157,12 @@ def safeseh(vdb, line):
         lnames.sort()
         for name in lnames:
             base = libs.get(name)
-            p = PE.peFromMemoryObject(t, base)
+            try:
+                p = PE.peFromMemoryObject(t, base)
+            except Exception, e:
+                vdb.vprint('Error: %s (0x%.8x) %s' % (name, base, e))
+                continue
+
             enabled = False
             if p.IMAGE_LOAD_CONFIG != None:
                 va = int(p.IMAGE_LOAD_CONFIG.SEHandlerTable)
@@ -305,7 +318,11 @@ IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE = 0x0040
 
 def showaslr(vdb, base, libname):
     t = vdb.getTrace()
-    p = PE.peFromMemoryObject(t, base)
+    try:
+        p = PE.peFromMemoryObject(t, base)
+    except Exception, e:
+        vdb.vprint('Error: %s (0x%.8x) %s' % (name, base, e))
+        return
     enabled = False
     c = p.IMAGE_NT_HEADERS.OptionalHeader.DllCharacteristics
     if c & IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE:
@@ -336,6 +353,16 @@ def aslr(vdb, line):
             base = libs.get(name)
             showaslr(vdb, base, name)
 
+def _printPageHits(vdb, hits, unique=False):
+    vdb.vprint('[  eip  ]  [ mem addr ] [ access ]')
+    if unique:
+        newhits = []
+        [newhits.append(h) for h in hits if not newhits.count(h)]
+        hits = newhits
+
+    for eip,addr,perm in hits:
+        vdb.vprint("0x%.8x 0x%.8x   %s" % (eip,addr,e_mem.getPermName(perm)))
+
 def pagewatch(vdb, line):
     """
     Enable write access watching on a given memory page.  This works
@@ -344,67 +371,81 @@ def pagewatch(vdb, line):
 
     Usage: pagewatch [options] [<addr_expression>]
     -C - Clear the current pagewatch log
+    -F - Toggle auto-continue behavior (run and record vs. stop on hit)
+         (NOTE: use this with 'mode FastBreak=True' for *really* fast!
     -L - List the current hits from the pagewatch log
     -M - Add page watches to the entire memory map from addr_expression
-    -S <addr> - Show edits to the specified address
+    -R - Use to enable *read* watching while adding a page watch
+    -S <addr> - Show touches to the specified address
     -P <addr> - Show memory touched by specifed program counter (eip)
+    -u - When listing, show only *unique* entries
     """
     argv = e_cli.splitargs(line)
     try:
-        opts,args = getopt.getopt(argv, "CLMP:S:")
+        opts,args = getopt.getopt(argv, "CFLMP:RS:u")
     except Exception, e:
-        vdb.vprint(pagewatch.__doc__)
-        return 
+        return vdb.do_help('pagewatch')
+
+    if vdb.trace.getMeta('pagewatch') == None:
+        vdb.trace.setMeta('pagewatch', [])
+
+    if vdb.trace.getMeta('pagerun') == None:
+        vdb.trace.setMeta('pagerun', False)
 
     domap = False
+    unique = False
+    watchread = False
     for opt,optarg in opts:
+
         if opt == "-C":
             vdb.trace.setMeta("pagewatch", [])
             vdb.vprint("Pagewatch log cleared")
             return
 
+        elif opt == '-F':
+            pr = vdb.trace.getMeta('pagerun', False)
+            pr = not pr
+            vdb.trace.setMeta('pagerun', pr)
+            vdb.vprint('Pagewatch Auto Continue: %s' % pr)
+            return
+
         elif opt == "-L":
-            x = vdb.trace.getMeta("pagewatch")
-            if x == None:
-                vdb.vprint("No pagewatch log!")
-                return
-            vdb.vprint("[  eip  ] [ mem addr ]")
-            for eip,addr in x:
-                vdb.vprint("0x%.8x 0x%.8x" % (eip,addr))
+            hits = vdb.trace.getMeta('pagewatch', [])
+            _printPageHits(vdb, hits, unique=unique)
             return
 
         elif opt == "-M":
             domap = True
 
+        elif opt == '-R':
+            watchread = True
+
         elif opt == "-S":
             saddr = vdb.trace.parseExpression(optarg)
-            x = vdb.trace.getMeta("pagewatch")
-            if x == None:
+            hits = vdb.trace.getMeta("pagewatch")
+            if hits == None:
                 vdb.vprint("No pagewatch log!")
                 return
-            vdb.vprint("[  eip  ] [ mem addr ]")
-            for eip,addr in x:
-                if addr != saddr:
-                    continue
-                vdb.vprint("0x%.8x 0x%.8x" % (eip,addr))
+            hits = [ h for h in hits if h[1] == saddr ]
+            _printPageHits(vdb, hits, unique=unique)
             return
 
         elif opt == "-P":
             saddr = vdb.trace.parseExpression(optarg)
-            x = vdb.trace.getMeta("pagewatch")
-            if x == None:
+            hits = vdb.trace.getMeta("pagewatch")
+            if hits == None:
                 vdb.vprint("No pagewatch log!")
                 return
-            vdb.vprint("[  eip  ] [ mem addr ]")
-            for eip,addr in x:
-                if eip != saddr:
-                    continue
-                vdb.vprint("0x%.8x 0x%.8x" % (eip,addr))
+
+            hits = [ h for h in hits if h[0] == saddr ]
+            _printPageHits(vdb, hits, unique=unique)
             return
 
+        elif opt == '-u':
+            unique = True
+
     if len(args) == 0:
-        vdb.vprint(pagewatch.__doc__)
-        return 
+        return vdb.do_help('pagewatch')
 
     baseaddr = vdb.trace.parseExpression(args[0])
     # Page align
@@ -413,18 +454,18 @@ def pagewatch(vdb, line):
 
     map = vdb.trace.getMemoryMap(baseaddr)
     if map == None:
-        raise Exception("Invalid memory map address 0x%.8x" % map)
+        raise Exception("Invalid memory map address 0x%.8x" % baseaddr)
 
     if domap:
         baseaddr = map[0]
         maxaddr  = baseaddr + map[1]
 
-    bpcode = "trace.getMeta('pagewatch').append((eip,trace.platformGetMemFault()));trace.runAgain()"
-    vdb.trace.setMeta("pagewatch", [])
+    bpset = vdb.trace.breakpoints
     while baseaddr < maxaddr:
-        wp = vtrace.PageWatchpoint(baseaddr, size=4096, perms="w")
-        wpid = vdb.trace.addBreakpoint(wp)
-        vdb.trace.setBreakpointCode(wpid, bpcode)
+        # Skip ones that are already there!
+        if not bpset.get(baseaddr):
+            wp = vtrace.PageWatchpoint(baseaddr, size=4096, watchread=watchread)
+            wpid = vdb.trace.addBreakpoint(wp)
         baseaddr += 4096
 
 def stealth(vdb, line):
@@ -446,25 +487,86 @@ def stealth(vdb, line):
         win32_stealth.stealthify(vdb.trace)
         vdb.vprint("Stealth enabled")
 
+
+gflag_stuff = [
+    ('loader_snaps', 'ntdll.ShowSnaps', '<B', 0, 1),
+]
+
+def gflags(vdb, line):
+    '''
+    Support a subset of gflags like behavior on windows.  This enables
+    features *exclusively* by direct process manipulation and does NOT
+    set any registry settings or persist across processes...
+
+    Usage: gflags [toggle_type]
+
+    NOTE: Most of these options require symbols!
+    '''
+    argv = e_cli.splitargs(line)
+
+    optnames = [ x[0] for x in gflag_stuff ]
+
+    for opt in argv:
+
+        if opt not in optnames:
+            vdb.vprint('Unknown/Unsupported Option: %s' % opt)
+            continue
+
+        for hname, symname, fmt, offval, onval in gflag_stuff:
+            if opt == hname:
+                try:
+                    addr = vdb.trace.parseExpression(symname)
+                    cur = vdb.trace.readMemoryFormat(addr, fmt)[0]
+                    if cur == offval:
+                        newval = onval
+                    else:
+                        newval = offval
+                    vdb.trace.writeMemoryFormat(addr, fmt, newval)
+                except Exception, e:
+                    vdb.vprint('Symbol Failure: %s' % symname)
+                break
+
+    for hname, symname, fmt, offval, onval in gflag_stuff:
+        status = 'Unknown'
+        try:
+            addr = vdb.trace.parseExpression(symname)
+            val = vdb.trace.readMemoryFormat(addr, fmt)[0]
+            if val == offval:
+                status = 'Off'
+            elif val == onval:
+                status = 'On'
+        except Exception, e:
+            pass
+        vdb.vprint('%s : %s' % (hname.rjust(20), status))
+
+
 def pe(vdb, line):
     """
     Show extended info about loaded PE binaries.
 
     Usage: pe [opts] [<libname>...]
     -I      Show PE import files.
+    -m      Toggle inmem/ondisk behavior (directly mapped DLLs)
+    -N      Show full NT header
     -t      Show PE timestamp information
+    -E      Show PE exports
+    -S      Show PE sections
     """
     #-v      Show PE version information
     argv = e_cli.splitargs(line)
     try:
-        opts,args = getopt.getopt(argv, "Itv")
+        opts,args = getopt.getopt(argv, "EImNStv")
     except Exception, e:
-        vdb.vprint(pe.__doc__)
-        return 
+        return vdb.do_help('pe')
 
+    inmem = True
+
+    showsecs = False
     showvers = False
     showtime = False
     showimps = False
+    shownthd = False
+    showexps = False
     for opt,optarg in opts:
         if opt == '-I':
             showimps = True
@@ -472,6 +574,14 @@ def pe(vdb, line):
             showtime = True
         elif opt == '-v':
             showvers = True
+        elif opt == '-N':
+            shownthd = True
+        elif opt == '-m':
+            inmem = False
+        elif opt == '-S':
+            showsecs = True
+        elif opt == '-E':
+            showexps = True
 
     t = vdb.trace
     bases = t.getMeta("LibraryBases")
@@ -482,13 +592,18 @@ def pe(vdb, line):
         names = t.getNormalizedLibNames()
 
     names.sort()
-    names = vdb.columnstr(names)
+    names = e_cli.columnstr(names)
     for libname in names:
-        base = bases.get(libname.strip(), -1)
+        base = bases.get(libname.strip(), None)
+        if base == None:
+            base = vdb.trace.parseExpression(libname)
         path = paths.get(base, "unknown")
 
-        mem = PE.MemObjFile(t, base)
-        pobj = PE.PE(mem, inmem=True)
+        try:
+            pobj = PE.peFromMemoryObject(t, base)
+        except Exception, e:
+            vdb.vprint('Error: %s (0x%.8x) %s' % (libname, base, e))
+            continue
 
         if showimps:
             ldeps = {}
@@ -497,11 +612,26 @@ def pe(vdb, line):
             lnames = ldeps.keys()
             lnames.sort()
             vdb.vprint('0x%.8x - %.30s %s' % (base, libname, ' '.join(lnames)))
+
         elif showvers:
             vdb.vprint('0x%.8x - %.30s %s' % (base, libname, path))
+
         elif showtime:
             tstamp = pobj.IMAGE_NT_HEADERS.FileHeader.TimeDateStamp
             vdb.vprint('0x%.8x - %.30s 0x%.8x' % (base, libname, tstamp))
+
+        elif shownthd:
+            t = pobj.IMAGE_NT_HEADERS.tree()
+            vdb.vprint(t)
+
+        elif showsecs:
+            for sec in pobj.getSections():
+                vdb.vprint(sec.tree())
+
+        elif showexps:
+            vdb.vprint('[Ord] [Address] [Name]')
+            for fva, ord, name in pobj.getExports():
+                vdb.vprint('%.4d 0x%.8x %s' % (ord, fva, name))
         else:
             vdb.vprint('0x%.8x - %.30s %s' % (base, libname, path))
 
@@ -520,6 +650,55 @@ def bindiff(mem1, mem2):
             i+=r
         i+=1
     return ret
+
+def deaslr(vdb, line):
+    '''
+    Rebase the specified address expression as though the origin
+    library had gotten it's suggested base address rather than
+    being ASLR'd.
+
+    Usage: deaslr <addr_expr>
+    '''
+    if len(line) == 0:
+        return vdb.do_help('deaslr')
+
+    addr = vdb.trace.parseExpression(line)
+    newaddr = win32_aslr.deAslr(vdb.trace, addr)
+
+    vdb.vprint('aslr: 0x%.8x deaslr: 0x%.8x' % (addr, newaddr))
+
+def sympath(vdb, line):
+    '''
+    Set the symbol path for the tracer.  This will currently only
+    effect *subsequent* library loads!
+
+    Usage: sympath <new_path>
+    '''
+    if len(line):
+        vdb.trace.setMeta('NtSymbolPath', line)
+    sympath = vdb.trace.getMeta('NtSymbolPath')
+    if sympath == None:
+        sympath = os.getenv('_NT_SYMBOL_PATH')
+    vdb.vprint('Current Symbol Path: %s' % sympath)
+
+def stepb(vdb, line):
+    '''
+    Use the extended intel hardware support to step to the next branch
+    target.
+
+    Usage: stepb
+    
+    NOTE: This will *not* work inside VMware / VirtualBox.  Other hypervisors
+          may vary... (it will simply single step)
+    '''
+    if len(line):
+        vdb.do_help('stepb')
+
+    orig = vdb.trace.getMode('BranchStep')
+    vdb.trace.setMode('BranchStep', True)
+    # For now, lets cheat so we get FastStep behavior for free...
+    vdb.do_stepi('')
+    vdb.trace.setMode('BranchStep', orig)
 
 def hooks(vdb, line):
     '''
@@ -591,4 +770,7 @@ def vdbExtension(vdb, trace):
     vdb.registerCmdExtension(stealth)
     vdb.registerCmdExtension(aslr)
     vdb.registerCmdExtension(hooks)
-
+    vdb.registerCmdExtension(gflags)
+    vdb.registerCmdExtension(deaslr)
+    vdb.registerCmdExtension(sympath)
+    #vdb.registerCmdExtension(stepb)

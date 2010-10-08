@@ -16,6 +16,7 @@ import vtrace.archs.amd64 as v_amd64
 import vtrace.platforms.base as v_base
 
 import envi
+import envi.bits as e_bits
 import envi.memory as e_mem
 import envi.resolver as e_resolv
 import envi.archs.i386 as e_i386
@@ -176,6 +177,7 @@ PAGE_WRITECOMBINE = 0x400
 
 # Map win32 permissions to envi permissions
 perm_lookup = {
+    PAGE_NOACCESS:0,
     PAGE_READONLY:e_mem.MM_READ,
     PAGE_READWRITE: e_mem.MM_READ | e_mem.MM_WRITE,
     PAGE_WRITECOPY: e_mem.MM_READ | e_mem.MM_WRITE,
@@ -187,6 +189,7 @@ perm_lookup = {
 
 # To get win32 permssions from envi permissions
 perm_rev_lookup = {
+    0:PAGE_NOACCESS,
     e_mem.MM_READ:PAGE_READONLY,
     e_mem.MM_READ|e_mem.MM_WRITE:PAGE_READWRITE,
     e_mem.MM_EXEC:PAGE_EXECUTE,
@@ -390,6 +393,31 @@ class CONTEXTx64(Structure):
         #(LastExceptionFromRip,c_ulonglong),
     ]
 
+    def regPostProcess(self):
+        pass
+
+# Used for xmm registers
+class M128A(Structure):
+    _fields_ = [
+            ('Low', c_ulonglong),
+            ('High', c_ulonglong),
+    ]
+
+class ExtendedXmmx86(Structure):
+    _fields_ = [
+            ('Header', M128A * 2),
+            ('Legacy', M128A * 8),
+            ('_xmm0',   M128A),
+            ('_xmm1',   M128A),
+            ('_xmm2',   M128A),
+            ('_xmm3',   M128A),
+            ('_xmm4',   M128A),
+            ('_xmm5',   M128A),
+            ('_xmm6',   M128A),
+            ('_xmm7',   M128A),
+            ("Pad", c_byte * 224),
+    ]
+
 class CONTEXTx86(Structure):
     _fields_ = [   ("ContextFlags", c_ulong),
                    ("debug0", c_ulong),
@@ -415,8 +443,31 @@ class CONTEXTx86(Structure):
                    ("eflags", c_ulong),
                    ("esp", c_ulong),
                    ("ss", c_ulong),
-                   ("Extension", c_byte * 512),
+
+                   #("Extension", c_byte * 512),
+                   ('Extension', ExtendedXmmx86),
+
+                    #M128A Header[2],
+                    #M128A Legacy[8],
+                    #M128A Xmm0,
+                    #M128A Xmm1,
+                    #M128A Xmm2,
+                    #M128A Xmm3,
+                    #M128A Xmm4,
+                    #M128A Xmm5,
+                    #M128A Xmm6,
+                    #M128A Xmm7,
                    ]
+
+    def regPostProcess(self):
+        self.xmm0 = (self.Extension._xmm0.High << 8) + self.Extension._xmm0.Low
+        self.xmm1 = (self.Extension._xmm1.High << 8) + self.Extension._xmm1.Low
+        self.xmm2 = (self.Extension._xmm2.High << 8) + self.Extension._xmm2.Low
+        self.xmm3 = (self.Extension._xmm3.High << 8) + self.Extension._xmm3.Low
+        self.xmm4 = (self.Extension._xmm4.High << 8) + self.Extension._xmm4.Low
+        self.xmm5 = (self.Extension._xmm5.High << 8) + self.Extension._xmm5.Low
+        self.xmm6 = (self.Extension._xmm6.High << 8) + self.Extension._xmm6.Low
+        self.xmm7 = (self.Extension._xmm7.High << 8) + self.Extension._xmm7.Low
 
 class MEMORY_BASIC_INFORMATION32(Structure):
     _fields_ = [
@@ -826,6 +877,8 @@ def GetModuleFileNameEx(phandle, mhandle):
     psapi.GetModuleFileNameExW(phandle, mhandle, addressof(buf), 1024)
     return buf.value
 
+av_einfo_perms = [e_mem.MM_READ, e_mem.MM_WRITE, None, None, None, None, None, None, e_mem.MM_EXEC]
+
 class WindowsMixin:
 
     """
@@ -915,8 +968,10 @@ class WindowsMixin:
             if kernel32.WaitForSingleObject(handle, 150) == EXCEPTION_TIMEOUT:
                 return "_TIMEOUT_"
 
-        ntdll.NtQueryObject(handle, itype,
+        x = ntdll.NtQueryObject(handle, itype,
                 buf, sizeof(buf), addressof(retSiz))
+        if x != 0:
+            return 'Error 0x%.8x' % (e_bits.unsigned(x, self.psize))
 
         realbuf = create_string_buffer(retSiz.value)
 
@@ -987,7 +1042,7 @@ class WindowsMixin:
         # Do the crazy "can't supress exceptions from detach" dance.
         if ((not self.exited) and
             self.getCurrentBreakpoint() != None):
-            self._cleanupBreakpoints()
+            self._cleanupBreakpoints(force=True)
             self.platformContinue()
             self.platformSendBreak()
             self.platformWait()
@@ -1080,11 +1135,12 @@ class WindowsMixin:
         return event
 
     def platformGetMemFault(self):
-        return self.faultaddr
+        return self.faultaddr,self.faultperm
 
     def platformProcessEvent(self, event):
 
         self.faultaddr = None
+        self.faultperm = None
 
         if event.ProcessId != self.pid:
             raise Exception("event.ProcessId != self.pid (%d != %d)" %
@@ -1185,6 +1241,7 @@ class WindowsMixin:
                 else:
                     if excode == 0xc0000005:
                         self.faultaddr = plist[1]
+                        self.faultperm = av_einfo_perms[plist[0]]
 
                     # First we check for PageWatchpoint faults
                     if not self.checkPageWatchpoints():
@@ -1277,6 +1334,12 @@ class WindowsMixin:
 
         return ret
 
+    def platformGetSignal(self):
+        if not self.getMeta('PendingException', False):
+            return None
+        event = self.getMeta('Win32Event')
+        return event.get('ExceptionCode', None)
+
     def platformGetThreads(self):
         return self.win32threads
 
@@ -1297,7 +1360,8 @@ class WindowsMixin:
     def parseWithDbgHelp(self, filename, baseaddr, normname):
         funcflags = (SYMFLAG_FUNCTION | SYMFLAG_EXPORT)
 
-        parser = Win32SymbolParser(self.phandle, filename, baseaddr)
+        sympath = self.getMeta('NtSymbolPath')
+        parser = Win32SymbolParser(self.phandle, filename, baseaddr, sympath=sympath)
         parser.parse()
 
         for name, addr, size, flags in parser.symbols:
@@ -1322,6 +1386,8 @@ class WindowsMixin:
 
         if not kernel32.GetThreadContext(thandle, addressof(c)):
             raiseWin32Error("kernel32.GetThreadContext")
+
+        c.regPostProcess()
 
         ctx._rctx_Import(c)
         return ctx
@@ -1359,7 +1425,10 @@ class Windowsi386Trace(
 
     def _winGetRegStruct(self):
         c = CONTEXTx86()
-        c.ContextFlags = (CONTEXT_i386 | CONTEXT_FULL | CONTEXT_DEBUG_REGISTERS)
+        c.ContextFlags = (CONTEXT_i386 | 
+                          CONTEXT_FULL | 
+                          CONTEXT_DEBUG_REGISTERS |
+                          CONTEXT_EXTENDED_REGISTERS)
         return c
 
     def _winGetMemStruct(self):
@@ -1388,10 +1457,11 @@ class WindowsAmd64Trace(
 
 class Win32SymbolParser:
 
-    def __init__(self, phandle, filename, loadbase):
+    def __init__(self, phandle, filename, loadbase, sympath=None):
         self.phandle = phandle
         self.filename = filename
         self.loadbase = loadbase
+        self.sympath = sympath
         self.symbols = []
         self.symopts = (SYMOPT_UNDNAME | SYMOPT_NO_PROMPTS | SYMOPT_NO_CPP)
         self.types = []
@@ -1480,8 +1550,9 @@ class Win32SymbolParser:
         return True
 
     def symInit(self):
-            dbghelp.SymInitialize(self.phandle, None, False)
+            dbghelp.SymInitialize(self.phandle, self.sympath, False)
             dbghelp.SymSetOptions(self.symopts)
+
 
             x = dbghelp.SymLoadModule64(self.phandle,
                         0, 
