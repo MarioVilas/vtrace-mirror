@@ -72,6 +72,28 @@ class IMemory:
         """
         raise Exception("must implement protectMemory!")
 
+    def probeMemory(self, va, size, permstr):
+        """
+        Check to be sure that the given virtual address and size
+        is contained within one memory map, and check that the
+        perms ("rwxs") are contained within the permission bits
+        for the memory map.
+
+        Example probeMemory(0x41414141, 20, "w")
+        (check if the memory for 20 bytes at 0x41414141 is writable)
+        """
+        perm = parsePerms(permstr)
+        map = self.getMemoryMap(va)
+        if map == None:
+            return False
+        mapva, mapsize, mapperm, mapfile = map
+        mapend = mapva+mapsize
+        if va+size >= mapend:
+            return False
+        if mapperm & perm != perm:
+            return False
+        return True
+
     def allocateMemory(self, size, perms=MM_RWX, suggestaddr=0):
         raise Exception("must implement allocateMemory!")
 
@@ -191,6 +213,9 @@ class MemoryObject(IMemory):
         base = va & self._mem_mask
         maxva = va + len(bytes)
         while base < maxva:
+            t = self._mem_maplookup.get(base)
+            if t != None:
+                raise envi.MapOverlapException(maptup, t)
             self._mem_maplookup[base] = maptup
             self._mem_bytelookup[base] = bytelist
             base += self._mem_pagesize

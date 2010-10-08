@@ -144,10 +144,6 @@ class IntelEmulator(i386Module, i386RegisterContext, envi.Emulator):
 
     def setFlag(self, which, state):
         flags = self.getRegister(REG_EFLAGS)
-        # On PDE, assume we're setting enough flags...
-        if flags ==  None:
-            flags = 0
-
         if state:
             flags |= which
         else:
@@ -1310,9 +1306,6 @@ class IntelEmulator(i386Module, i386RegisterContext, envi.Emulator):
             self.setRegister(REG_ESP, esp+ival)
         return ret
 
-    def i_shl(self, op):
-        return self.i_sal(op)
-
     def i_sal(self, op):
         dsize = op.opers[0].tsize
         dst = self.getOperValue(op, 0)
@@ -1376,6 +1369,9 @@ class IntelEmulator(i386Module, i386RegisterContext, envi.Emulator):
 
         self.setOperValue(op, 0, res)
 
+    def i_shl(self, op):
+        return self.i_sal(op)
+
     def i_shr(self, op):
         dsize = op.opers[0].tsize
         dst = self.getOperValue(op, 0)
@@ -1402,6 +1398,76 @@ class IntelEmulator(i386Module, i386RegisterContext, envi.Emulator):
             self.setFlag(EFLAGS_OF, 0) # Undefined, but zero'd on core2 duo
 
         self.setOperValue(op, 0, res)
+
+    def i_shrd(self, op):
+        dsize = op.opers[0].tsize
+        bsize = dsize * 8
+        dst = self.getOperValue(op, 0)
+        src = self.getOperValue(op, 1)
+        cnt = self.getOperValue(op, 2)
+
+        cnt &= 0x1f # Reg gets masked down
+
+        if cnt == 0:
+            return
+
+        if cnt > bsize:
+            # result is "undfined"
+            return
+
+        res = dst >> cnt
+        res |= src << (bsize - cnt)
+
+        # We now have the bits masked into res, but it has become
+        # wider than the original operand.
+
+        # Ret is masked down to size
+        ret = e_bits.unsigned(res, dsize)
+
+        if cnt == 1: # Set OF on sign change
+            dsign = e_bits.is_signed(dst, dsize)
+            rsign = e_bits.is_signed(ret, dsize)
+            self.setFlag(EFLAGS_OF, dsign != rsign)
+
+        # set carry to last shifted bit
+        self.setFlag(EFLAGS_CF, (res << bsize) & 1)
+        self.setFlag(EFLAGS_SF, e_bits.is_signed(ret, dsize))
+        self.setFlag(EFLAGS_ZF, not ret)
+        self.setFlag(EFLAGS_PF, e_bits.is_parity_byte(ret))
+
+        self.setOperValue(op, 0, ret)
+
+    def i_shld(self, op):
+        dsize = op.opers[0].tsize
+        bsize = dsize * 8
+        dst = self.getOperValue(op, 0)
+        src = self.getOperValue(op, 1)
+        cnt = self.getOperValue(op, 2)
+
+        cnt &= 0x1f # Reg gets masked down
+
+        if cnt == 0:
+            return
+
+        if cnt > bsize:
+            return
+
+        res = dst << cnt
+        res |= src >> (bsize - cnt)
+        ret = e_bits.unsigned(res, dsize)
+
+        if cnt == 1: # Set OF on sign change
+            dsign = e_bits.is_signed(dst, dsize)
+            rsign = e_bits.is_signed(ret, dsize)
+            self.setFlag(EFLAGS_OF, dsign != rsign)
+
+        # set carry to last shifted bit
+        self.setFlag(EFLAGS_CF, (dst << (cnt-1)) & 1)
+        self.setFlag(EFLAGS_SF, e_bits.is_signed(ret, dsize))
+        self.setFlag(EFLAGS_ZF, not ret)
+        self.setFlag(EFLAGS_PF, e_bits.is_parity_byte(ret))
+
+        self.setOperValue(op, 0, ret)
 
     def i_scasb(self, op):
         al = self.getRegister(REG_AL)

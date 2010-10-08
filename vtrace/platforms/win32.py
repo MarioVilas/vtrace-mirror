@@ -15,6 +15,7 @@ import vtrace.archs.i386 as v_i386
 import vtrace.archs.amd64 as v_amd64
 import vtrace.platforms.base as v_base
 
+import envi
 import envi.memory as e_mem
 import envi.resolver as e_resolv
 import envi.archs.i386 as e_i386
@@ -31,59 +32,19 @@ psapi = None
 ntdll = None
 advapi32 = None
 
+IsWow64Process = None
+
 # Setup some ctypes helpers:
 # NOTE: we don't use LPVOID because it can return None.
 #       c_size_t is the designated platform word width int.
 LPVOID = c_size_t
 HANDLE  = LPVOID
 SIZE_T  = LPVOID
+QWORD   = c_ulonglong
 DWORD   = c_ulong
 WORD    = c_ushort
 BOOL    = c_ulong
-
-# All platforms must be able to import this module (for exceptions etc..)
-if sys.platform == "win32":
-
-    kernel32 = windll.kernel32
-    # We need to inform some of the APIs about their args
-    kernel32.OpenProcess.argtypes = [DWORD, BOOL, DWORD]
-    kernel32.OpenProcess.restype = HANDLE
-    kernel32.CreateProcessA.argtypes = [LPVOID, c_char_p, LPVOID, LPVOID, c_uint, DWORD, LPVOID, LPVOID, LPVOID, LPVOID]
-    kernel32.ReadProcessMemory.argtypes = [HANDLE, LPVOID, LPVOID, SIZE_T, LPVOID]
-    #kernel32.WriteProcessMemory.argtypes = [HANDLE, LPVOID, LPVOID, SIZE_T, LPVOID]
-    kernel32.GetThreadContext.argtypes = [HANDLE, LPVOID]
-    kernel32.SetThreadContext.argtypes = [HANDLE, LPVOID]
-    kernel32.SuspendThread.argtypes = [HANDLE,]
-    kernel32.ResumeThread.argtypes = [HANDLE,]
-    kernel32.VirtualQueryEx.argtypes = [HANDLE, LPVOID, LPVOID, SIZE_T]
-    kernel32.DebugBreakProcess.argtypes = [HANDLE,]
-    kernel32.CloseHandle.argtypes = [HANDLE,]
-    kernel32.GetLogicalDriveStringsA.argtypes = [DWORD, LPVOID]
-    kernel32.TerminateProcess.argtypes = [HANDLE, DWORD]
-    kernel32.VirtualProtectEx.argtypes = [HANDLE, LPVOID, SIZE_T, DWORD, LPVOID]
-    kernel32.VirtualAllocEx.argtypes = [HANDLE, LPVOID, SIZE_T, DWORD, DWORD]
-    kernel32.DuplicateHandle.argtypes = [HANDLE, HANDLE, HANDLE, LPVOID, DWORD, DWORD, DWORD]
-
-
-    psapi = windll.psapi
-    psapi.GetModuleFileNameExW.argtypes = [HANDLE, HANDLE, LPVOID, DWORD]
-    psapi.GetMappedFileNameW.argtypes = [HANDLE, LPVOID, LPVOID, DWORD]
-
-    ntdll = windll.ntdll
-    ntdll.NtQuerySystemInformation.argtypes = [DWORD, LPVOID, DWORD, LPVOID]
-    ntdll.NtQueryObject.argtypes = [HANDLE, DWORD, c_void_p, DWORD, LPVOID]
-
-    try:
-        symsrv = windll.LoadLibrary(os.path.join(platdir, "symsrv.dll"))
-        dbghelp = windll.LoadLibrary(os.path.join(platdir, "dbghelp.dll"))
-    except Exception, e:
-        print "WARNING: Failed to import dbghelp/symsrv: %s" % e
-
-    advapi32 = windll.advapi32
-    advapi32.LookupPrivilegeValueA.argtypes = [LPVOID, c_char_p, LPVOID]
-    advapi32.OpenProcessToken.argtypes = [HANDLE, DWORD, HANDLE]
-    advapi32.AdjustTokenPrivileges.argtypes = [HANDLE, DWORD, LPVOID, DWORD, LPVOID, LPVOID]
-
+NULL    = 0
 
 INFINITE = 0xffffffff
 EXCEPTION_MAXIMUM_PARAMETERS = 15
@@ -135,6 +96,7 @@ SYMOPT_AUTO_PUBLICS             = 0x00010000
 SYMOPT_NO_IMAGE_SEARCH          = 0x00020000
 SYMOPT_SECURE                   = 0x00040000
 SYMOPT_NO_PROMPTS               = 0x00080000
+SYMOPT_OVERWRITE                = 0x00100000
 SYMOPT_DEBUG                    = 0x80000000
 
 # Exception Types
@@ -632,6 +594,39 @@ TI_GET_UDTKIND                  = 24
 TI_IS_EQUIV_TO                  = 25
 TI_GET_CALLING_CONVENTION       = 26
 
+SymTagNull              = 0
+SymTagExe               = 1
+SymTagCompiland         = 2
+SymTagCompilandDetails  = 3
+SymTagCompilandEnv      = 4
+SymTagFunction          = 5
+SymTagBlock             = 6
+SymTagData              = 7
+SymTagAnnotation        = 8
+SymTagLabel             = 9
+SymTagPublicSymbol      = 10
+SymTagUDT               = 11
+SymTagEnum              = 12
+SymTagFunctionType      = 13
+SymTagPointerType       = 14
+SymTagArrayType         = 15
+SymTagBaseType          = 16
+SymTagTypedef           = 17
+SymTagBaseClass         = 18
+SymTagFriend            = 19
+SymTagFunctionArgType   = 20
+SymTagFuncDebugStart    = 21
+SymTagFuncDebugEnd      = 22
+SymTagUsingNamespace    = 23
+SymTagVTableShape       = 24
+SymTagVTable            = 25
+SymTagCustom            = 26
+SymTagThunk             = 27
+SymTagCustomType        = 28
+SymTagManagedType       = 29
+SymTagDimension         = 30
+SymTagMax               = 31
+
 class IMAGE_DEBUG_DIRECTORY(Structure):
     _fields_ = [
             ("Characteristics", c_ulong),
@@ -707,6 +702,78 @@ class TOKEN_PRIVILEGES(Structure):
         ("PrivilegeAttribute", c_ulong)
     )
 
+# All platforms must be able to import this module (for exceptions etc..)
+# (do this stuff *after* we define some types...)
+if sys.platform == "win32":
+
+    kernel32 = windll.kernel32
+    # We need to inform some of the APIs about their args
+    kernel32.OpenProcess.argtypes = [DWORD, BOOL, DWORD]
+    kernel32.OpenProcess.restype = HANDLE
+    kernel32.CreateProcessA.argtypes = [LPVOID, c_char_p, LPVOID, LPVOID, c_uint, DWORD, LPVOID, LPVOID, LPVOID, LPVOID]
+    kernel32.ReadProcessMemory.argtypes = [HANDLE, LPVOID, LPVOID, SIZE_T, LPVOID]
+    #kernel32.WriteProcessMemory.argtypes = [HANDLE, LPVOID, LPVOID, SIZE_T, LPVOID]
+    kernel32.GetThreadContext.argtypes = [HANDLE, LPVOID]
+    kernel32.SetThreadContext.argtypes = [HANDLE, LPVOID]
+    kernel32.SuspendThread.argtypes = [HANDLE,]
+    kernel32.ResumeThread.argtypes = [HANDLE,]
+    kernel32.VirtualQueryEx.argtypes = [HANDLE, LPVOID, LPVOID, SIZE_T]
+    kernel32.DebugBreakProcess.argtypes = [HANDLE,]
+    kernel32.CloseHandle.argtypes = [HANDLE,]
+    kernel32.GetLogicalDriveStringsA.argtypes = [DWORD, LPVOID]
+    kernel32.TerminateProcess.argtypes = [HANDLE, DWORD]
+    kernel32.VirtualProtectEx.argtypes = [HANDLE, LPVOID, SIZE_T, DWORD, LPVOID]
+    kernel32.VirtualAllocEx.argtypes = [HANDLE, LPVOID, SIZE_T, DWORD, DWORD]
+    kernel32.DuplicateHandle.argtypes = [HANDLE, HANDLE, HANDLE, LPVOID, DWORD, DWORD, DWORD]
+
+    IsWow64Process = getattr(kernel32, 'IsWow64Process', None)
+    if IsWow64Process != None:
+        IsWow64Process.argtypes = [HANDLE, LPVOID]
+
+
+
+    psapi = windll.psapi
+    psapi.GetModuleFileNameExW.argtypes = [HANDLE, HANDLE, LPVOID, DWORD]
+    psapi.GetMappedFileNameW.argtypes = [HANDLE, LPVOID, LPVOID, DWORD]
+
+    ntdll = windll.ntdll
+    ntdll.NtQuerySystemInformation.argtypes = [DWORD, LPVOID, DWORD, LPVOID]
+    ntdll.NtQueryObject.argtypes = [HANDLE, DWORD, c_void_p, DWORD, LPVOID]
+
+    try:
+
+        SYMCALLBACK = WINFUNCTYPE(BOOL, POINTER(SYMBOL_INFO), c_ulong, LPVOID)
+        PDBCALLBACK = WINFUNCTYPE(BOOL, c_char_p, LPVOID)
+
+        arch_name = envi.getCurrentArch()
+        symsrv = windll.LoadLibrary(os.path.join(platdir, "windll", arch_name, "symsrv.dll"))
+        dbghelp = windll.LoadLibrary(os.path.join(platdir, "windll", arch_name, "dbghelp.dll"))
+        dbghelp.SymInitialize.argtypes = [HANDLE, c_char_p, BOOL]
+        dbghelp.SymInitialize.restype = BOOL
+        dbghelp.SymSetOptions.argtypes = [DWORD]
+        dbghelp.SymSetOptions.restype = DWORD
+        dbghelp.SymCleanup.argtypes = [HANDLE]
+        dbghelp.SymCleanup.restype = BOOL
+        dbghelp.SymLoadModule64.argtypes = [HANDLE, HANDLE, c_char_p, c_char_p, QWORD, DWORD]
+        dbghelp.SymLoadModule64.restype = QWORD
+        dbghelp.SymGetModuleInfo64.argtypes = [HANDLE, QWORD, POINTER(IMAGEHLP_MODULE64)]
+        dbghelp.SymGetModuleInfo64.restype = BOOL
+        dbghelp.SymEnumSymbols.argtypes = [HANDLE, QWORD, c_char_p, SYMCALLBACK, LPVOID]
+        dbghelp.SymEnumSymbols.restype = BOOL
+        dbghelp.SymEnumTypes.argtypes = [HANDLE, QWORD, SYMCALLBACK, LPVOID]
+        dbghelp.SymEnumTypes.restype = BOOL
+        dbghelp.SymGetTypeInfo.argtypes = [HANDLE, QWORD, DWORD, DWORD, c_void_p]
+        dbghelp.SymGetTypeInfo.restype = BOOL
+
+    except Exception, e:
+        print "WARNING: Failed to import dbghelp/symsrv: %s" % e
+
+    advapi32 = windll.advapi32
+    advapi32.LookupPrivilegeValueA.argtypes = [LPVOID, c_char_p, LPVOID]
+    advapi32.OpenProcessToken.argtypes = [HANDLE, DWORD, HANDLE]
+    advapi32.AdjustTokenPrivileges.argtypes = [HANDLE, DWORD, LPVOID, DWORD, LPVOID, LPVOID]
+
+
 SE_PRIVILEGE_ENABLED    = 0x00000002
 TOKEN_ADJUST_PRIVILEGES = 0x00000020
 dbgprivdone = False
@@ -745,7 +812,9 @@ def buildSystemHandleInformation(count):
 def buildFindChildrenParams(count):
     class TI_FINDCHILDREN_PARAMS(Structure):
         _fields_ = [ ('Count', c_ulong), ('Start', c_ulong), ("Children",c_ulong * count),]
-    return TI_FINDCHILDREN_PARAMS()
+    tif = TI_FINDCHILDREN_PARAMS()
+    tif.Count = count
+    return tif
 
 def raiseWin32Error(name):
     raise vtrace.PlatformException("Win32 Error %s failed: %s" % (name,kernel32.GetLastError()))
@@ -1044,6 +1113,14 @@ class WindowsMixin:
            eventdict["StartAddress"] = event.u.CreateProcessInfo.StartAddress
            eventdict["ThreadLocalBase"] = teb
 
+           wow64 = False
+           if IsWow64Process != None:
+               b = BOOL()
+               IsWow64Process(self.phandle, addressof(b))
+               if b.value:
+                   wow64 = True
+           self.setMeta('IsWow64', wow64)
+
            self.fireNotifiers(vtrace.NOTIFY_ATTACH)
            self.addLibraryBase(ImageName, baseaddr)
 
@@ -1303,10 +1380,6 @@ class WindowsAmd64Trace(
     def _winGetMemStruct(self):
         return MEMORY_BASIC_INFORMATION64()
 
-if sys.platform == "win32":
-    SYMCALLBACK = WINFUNCTYPE(c_int, POINTER(SYMBOL_INFO), c_ulong, c_ulong)
-    PDBCALLBACK = WINFUNCTYPE(c_int, c_char_p, LPVOID)
-
 class Win32SymbolParser:
 
     def __init__(self, phandle, filename, loadbase):
@@ -1315,6 +1388,7 @@ class Win32SymbolParser:
         self.loadbase = loadbase
         self.symbols = []
         self.symopts = (SYMOPT_UNDNAME | SYMOPT_NO_PROMPTS | SYMOPT_NO_CPP)
+        self.types = []
 
     def printSymbolInfo(self, info):
         # Just a helper function for "reversing" how dbghelp works
@@ -1322,36 +1396,76 @@ class Win32SymbolParser:
             print n,repr(getattr(info, n))
 
     def symGetTypeInfo(self, tindex, tinfo, tparam):
-        x = dbghelp.SymGetTypeInfo(self.phandle, c_ulonglong(self.loadbase),
+        x = dbghelp.SymGetTypeInfo(self.phandle, self.loadbase,
                                    tindex, tinfo, tparam)
         if x == 0:
             return False
         return True
 
+    def symGetTypeName(self, typeid):
+        n = c_wchar_p()
+        self.symGetTypeInfo(typeid, TI_GET_SYMNAME, pointer(n))
+        return n.value
+
+    def symGetTypeOffset(self, typeid):
+        offset = c_ulong(0)
+        self.symGetTypeInfo(typeid, TI_GET_OFFSET, pointer(offset))
+        return offset.value
+
+    def symGetTypeLength(self, typeid):
+        size = c_ulonglong(0)
+        self.symGetTypeInfo(typeid, TI_GET_LENGTH, pointer(size))
+        return size.value
+
+    def symGetTypeBase(self, typeid):
+        btype = c_ulong(typeid)
+        # Resolve the deepest base type
+        while self.symGetTypeTag(btype.value) == SymTagTypedef:
+            self.symGetTypeInfo(btype.value, TI_GET_BASETYPE, pointer(btype))
+        return btype.value
+
+    def symGetChildType(self, child):
+        ktype = c_ulong(0)
+        self.symGetTypeInfo(child, TI_GET_TYPE, pointer(ktype))
+        return ktype.value
+
+    def symGetTypeTag(self, typeid):
+        btype = c_ulong(0)
+        self.symGetTypeInfo(typeid, TI_GET_SYMTAG, pointer(btype))
+        return btype.value
+
     def typeEnumCallback(self, psym, size, ctx):
         sym = psym.contents
         if sym.Name == "__unnamed":
             return True
-        #self.printSymbolInfo(sym)
+
+        #FIXME more big deltas comming here!
         s = c_ulong(0)
-        self.symGetTypeInfo(sym.TypeIndex, TI_GET_CHILDRENCOUNT, addressof(s))
-        print sym.Name
-        print "KIDS %s" % s.value
+        self.symGetTypeInfo(sym.TypeIndex, TI_GET_CHILDRENCOUNT, pointer(s))
         tif = buildFindChildrenParams(s.value)
-        tif.Count = s.value
-        self.symGetTypeInfo(sym.TypeIndex, TI_FINDCHILDREN, addressof(tif))
-        n = c_ulong(0)
-        offset = c_ulong(0)
-        size = c_ulonglong(0)
+        self.symGetTypeInfo(sym.TypeIndex, TI_FINDCHILDREN, pointer(tif))
+        btype = c_ulong(0)
+        kids = []
         for i in range(s.value):
-            #print "CHID",tif.Children[i]
-            #self.symGetTypeInfo(
             child = tif.Children[i]
-            self.symGetTypeInfo(child, TI_GET_SYMNAME, addressof(n))
-            self.symGetTypeInfo(child, TI_GET_OFFSET, addressof(offset))
-            self.symGetTypeInfo(child, TI_GET_COUNT, addressof(size))
-            print "CHILD %.4x %s %d" % (offset.value, wstring_at(n.value), size.value)
+
+            kidname = self.symGetTypeName(child)
+            kidoff = self.symGetTypeOffset(child)
+            ktype = self.symGetChildType(child)
+            ksize = self.symGetTypeLength(ktype)
+
+            ktag = self.symGetTypeTag(ktype)
+            if ktag == SymTagPointerType:
+                kidname += "*"
+            elif ktag == SymTagArrayType:
+                kidname += "[]"
+            elif ktag == SymTagBaseType:
+                kidname += "_base"
+
+            kids.append((kidoff, kidname, ksize))
             #FIXME free type info!
+        self.types.append((sym.Name, kids))
+
         return True
 
     def symEnumCallback(self, psym, size, ctx):
@@ -1359,39 +1473,52 @@ class Win32SymbolParser:
         self.symbols.append((sym.Name, int(sym.Address), int(sym.Size), sym.Flags))
         return True
 
-    def parse(self):
-        try:
-
+    def symInit(self):
             dbghelp.SymInitialize(self.phandle, None, False)
             dbghelp.SymSetOptions(self.symopts)
 
             x = dbghelp.SymLoadModule64(self.phandle,
                         0, 
-                        c_char_p(self.filename),
+                        self.filename,
                         None,
-                        c_ulonglong(self.loadbase),
-                        None)
+                        self.loadbase,
+                        0)
+
+            # FIXME why don't we pull symbols down to the local store?
 
             # This is for debugging which pdb got loaded
             #imghlp = IMAGEHLP_MODULE64()
-            #dbghelp.SymGetModuleInfo64(None, c_ulonglong(x), addressof(imghlp))
-            #print "PDB",imghlp.LoadedPdbName
+            #imghlp.SizeOfStruct = sizeof(imghlp)
+            #dbghelp.SymGetModuleInfo64(self.phandle, x, pointer(imghlp))
+            #print "PDB",repr(imghlp.LoadedPdbName)
+
+    def symCleanup(self):
+        dbghelp.SymCleanup(self.phandle)
+
+    def parse(self):
+        try:
+
+            self.symInit()
 
             dbghelp.SymEnumSymbols(self.phandle,
-                        c_ulonglong(self.loadbase),
+                        self.loadbase,
                         None,
                         SYMCALLBACK(self.symEnumCallback),
-                        0)
+                        NULL)
 
-            # This is how you enumerate type information
-            #dbghelp.SymEnumTypes(self.phandle,
-                        #c_ulonglong(self.loadbase),
-                        #SYMCALLBACK(self.typeEnumCallback),
-                        #0)
 
-            dbghelp.SymCleanup(self.phandle)
+            self.symCleanup()
 
         except Exception, e:
             traceback.print_exc()
             raise
+
+    def parseTypes(self):
+        self.symInit()
+        # This is how you enumerate type information
+        dbghelp.SymEnumTypes(self.phandle,
+                    self.loadbase,
+                    SYMCALLBACK(self.typeEnumCallback),
+                    NULL)
+        self.symCleanup()
 

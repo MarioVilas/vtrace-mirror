@@ -10,6 +10,7 @@ import envi.cli as e_cli
 import envi.bits as e_bits
 
 import PE
+import vstruct.defs.pe as vs_pe
 
 def teb(vdb, line):
     """
@@ -427,8 +428,68 @@ def stealth(vdb, line):
         win32_stealth.stealthify(vdb.trace)
         vdb.vprint("Stealth enabled")
 
+def pe(vdb, line):
+    """
+    Show extended info about loaded PE binaries.
+
+    Usage: pe [opts] [<libname>...]
+    -I      Show PE import files.
+    -t      Show PE timestamp information
+    """
+    #-v      Show PE version information
+    argv = e_cli.splitargs(line)
+    try:
+        opts,args = getopt.getopt(argv, "Itv")
+    except Exception, e:
+        vdb.vprint(pe.__doc__)
+        return 
+
+    showvers = False
+    showtime = False
+    showimps = False
+    for opt,optarg in opts:
+        if opt == '-I':
+            showimps = True
+        elif opt == '-t':
+            showtime = True
+        elif opt == '-v':
+            showvers = True
+
+    t = vdb.trace
+    bases = t.getMeta("LibraryBases")
+    paths = t.getMeta("LibraryPaths")
+
+    names = args
+    if len(names) == 0:
+        names = t.getNormalizedLibNames()
+
+    names.sort()
+    names = vdb.columnstr(names)
+    for libname in names:
+        base = bases.get(libname.strip(), -1)
+        path = paths.get(base, "unknown")
+
+        mem = PE.MemObjFile(t, base)
+        pobj = PE.PE(mem, inmem=True)
+
+        if showimps:
+            ldeps = {}
+            for rva,lname,fname in pobj.getImports():
+                ldeps[lname.lower()] = True
+            lnames = ldeps.keys()
+            lnames.sort()
+            vdb.vprint('0x%.8x - %.30s %s' % (base, libname, ' '.join(lnames)))
+        elif showvers:
+            vdb.vprint('0x%.8x - %.30s %s' % (base, libname, path))
+        elif showtime:
+            tstamp = pobj.IMAGE_NT_HEADERS.FileHeader.TimeDateStamp
+            vdb.vprint('0x%.8x - %.30s 0x%.8x' % (base, libname, tstamp))
+        else:
+            vdb.vprint('0x%.8x - %.30s %s' % (base, libname, path))
+
 # The necissary module extension function
 def vdbExtension(vdb, trace):
+    vdb.registerCmdExtension(pe)
     vdb.registerCmdExtension(peb)
     vdb.registerCmdExtension(einfo)
     vdb.registerCmdExtension(heaps)

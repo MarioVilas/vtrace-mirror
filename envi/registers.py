@@ -56,15 +56,18 @@ class RegisterContext:
 
         NOTE: All widths in envi RegisterContexts are in bits.
         """
+        self._rctx_regdef = regdef # Save this for 
         self._rctx_names = {}
         self._rctx_ids = {}
         self._rctx_widths = []
         self._rctx_vals  = []
+        self._rctx_masks = []
 
         for i,(name,width) in enumerate(regdef):
             self._rctx_names[name] = i
             self._rctx_ids[i] = name
             self._rctx_widths.append(width)
+            self._rctx_masks.append((2**width)-1)
             self._rctx_vals.append(0)
 
     def loadRegMetas(self, metas):
@@ -79,6 +82,7 @@ class RegisterContext:
         reg_shift_offset: 0
         reg_width: 16
         """
+        self._rctx_regmetas = metas
         for name,idx,offset,width in metas:
             self.addMetaRegister(name,idx, offset, width)
 
@@ -144,20 +148,23 @@ class RegisterContext:
         to re-initialize a register context.  (much like snapshot
         but it takes the definitions with it)
         """
-        ret = []
-        for name,idx in self._rctx_names.items():
-            # Possibly skip meta registers
-            if not meta and (idx & 0xffff) != idx:
-                continue
-            val = self._rctx_vals[idx]
-            width = self._rctx_widths[idx]
-            ret.append((name, idx, width, val))
-        return ret
+        regdef = self._rctx_regdef
+        regmeta = self._rctx_regmetas
+        pcindex = self._rctx_pcindex
+        spindex = self._rctx_spindex
+        snap = self.getRegisterSnap()
+
+        return (regdef, regmeta, pcindex, spindex, snap)
 
     def setRegisterInfo(self, info):
         """
         Import the exported data from 
         """
+        regdef, regmeta, pcindex, spindex, snap = info
+        self.loadRegDef(regdef)
+        self.loadRegMetas(regmeta)
+        self.setRegisterIndexes(pcindex, spindex)
+        self.setRegisterSnap(snap)
 
     def getRegisterName(self, index):
         return self._rctx_ids.get(index,"REG%.8x" % index)
@@ -261,7 +268,7 @@ class RegisterContext:
 
         ridx = index & 0xffff
         if ridx == index:
-            self._rctx_vals[ridx] = value
+            self._rctx_vals[ridx] = (value & self._rctx_masks[ridx])
             return
 
         # If we get here, it's a meta register index.

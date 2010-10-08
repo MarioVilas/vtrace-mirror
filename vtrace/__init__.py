@@ -1132,7 +1132,7 @@ def getTrace():
             return v_freebsd.FreeBSDi386Trace()
 
         elif arch == "amd64":
-            v_freebsd.FreeBSDAmd64Trace()
+            return v_freebsd.FreeBSDAmd64Trace()
 
         else:
             raise Exception("Sorry, no FreeBSD support for %s" % arch)

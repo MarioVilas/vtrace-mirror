@@ -204,3 +204,15 @@ class IMAGE_SECTION_HEADER(vstruct.VStruct):
         self.NumberOfLineNumbers  = v_uint16()
         self.Characteristics      = v_uint32()
 
+
+class IMAGE_RUNTIME_FUNCTION_ENTRY(vstruct.VStruct):
+    """
+    Used in the .pdata section of a PE32+ for all non
+    leaf functions.
+    """
+    def __init__(self):
+        vstruct.VStruct.__init__(self)
+        self.BeginAddress = v_uint32()
+        self.EndAddress = v_uint32()
+        self.UnwindInfoAddress = v_uint32()
+

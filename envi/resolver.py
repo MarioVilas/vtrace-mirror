@@ -219,6 +219,15 @@ class FileSymbol(Symbol,SymbolResolver):
         """
         ret = self.getSymByName(name)
         if ret == None:
-            raise AttributeError("Resolver has no %s" % name)
+            raise AttributeError("%s has no symbol %s" % (self.name,name))
+        return ret
+
+    def __getitem__(self, name):
+        """
+        Allow dictionary style access for mangled incompatible names...
+        """
+        ret = self.getSymByName(name)
+        if ret == None:
+            raise KeyError("%s has no symbol %s" % (self.name,name))
         return ret
 

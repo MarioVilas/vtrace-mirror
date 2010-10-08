@@ -498,9 +498,11 @@ class TracerBase(vtrace.Notifier):
         self.setMeta("LatestLibraryNorm", None)
 
         normname = self.normFileName(libname)
+        if self.getSymByName(normname) != None:
+            normname = "%s_%.8x" % (normname,address)
 
         # Only actually do library work
-        if os.path.exists(libname) and self.getSymByName(normname) == None:
+        if os.path.exists(libname):
 
             self.getMeta("LibraryPaths")[address] = libname
             self.getMeta("LibraryBases")[normname] = address

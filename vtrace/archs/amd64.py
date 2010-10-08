@@ -14,7 +14,7 @@ class Amd64Mixin(e_amd64.Amd64Module, e_amd64.Amd64RegisterContext):
         e_amd64.Amd64Module.__init__(self)
         e_amd64.Amd64RegisterContext.__init__(self)
 
-    def getStackTrace(self):
+    def archGetStackTrace(self):
         self.requireAttached()
         current = 0
         sanity = 1000

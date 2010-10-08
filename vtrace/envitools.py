@@ -90,6 +90,8 @@ class TraceEmulator(vtrace.Trace, v_base.TracerBase):
         self.attached = True
         self.pid = 0x56
 
+        self.setRegisterInfo(emu.getRegisterInfo())
+
     def platformStepi(self):
         self.emu.stepi()
 
@@ -97,13 +99,14 @@ class TraceEmulator(vtrace.Trace, v_base.TracerBase):
         # We only support single step events now
         return True
 
-    def getRegisterFormat(self):
-        # Fake this out for the Trace constructor
-        return ""
+    def archGetRegCtx(self):
+        return self.emu
 
-    def getRegisterNames(self):
-        # Fake this out for the Trace constructor
-        return ""
+    def platformGetRegCtx(self, threadid):
+        return self.emu
+
+    def platformSetRegCtx(self, threadid, ctx):
+        self.setRegisterSnap(ctx.getRegisterSnap())
 
     def platformProcessEvent(self, event):
         self.fireNotifiers(vtrace.NOTIFY_STEP)
@@ -118,29 +121,17 @@ class TraceEmulator(vtrace.Trace, v_base.TracerBase):
         return self.emu.getMemoryMaps()
 
     def platformGetThreads(self):
-        return ((1, 0xffff0000), )
+        return {1:0xffff0000,}
+
+    def platformGetFds(self):
+        return [] #FIXME perhaps tie this into magic?
+
+    def getStackTrace(self):
+        # FIXME i386...
+        return [(self.emu.getProgramCounter(), 0), (0,0)]
 
     def platformDetach(self):
         pass
-
-    # Over-ride register *caching* subsystem to store/retrieve
-    # register information in pure dictionaries
-    def cacheRegs(self, threadid):
-        if self.regcache == None:
-            self.regcache = {}
-            for i in range(self.emu.arch.getRegisterCount()):
-                name = self.emu.arch.getRegisterName(i)
-                val = self.emu.getRegister(i)
-                self.regcache[name] = val
-        return self.regcache
-
-    def syncRegs(self):
-        if self.regcachedirty:
-            for i in range(self.emu.arch.getRegisterCount()):
-                name = self.emu.arch.getRegisterName(i)
-                val = self.emu.setRegister(i, self.regcache.get(name))
-            self.regcachedirty = False
-        self.regcache = None
 
 def main():
     import vtrace

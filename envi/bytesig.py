@@ -23,6 +23,7 @@ class SignatureTree:
 
     def __init__(self):
         self.basenode = (0, [], [None for i in range(256)])
+        self.sigs = {} # track duplicates
 
     def _addChoice(self, siginfo, node):
 
@@ -70,11 +71,19 @@ class SignatureTree:
         Additionally, you may specify "val" as the object to get back with
         getSignature().
         """
+        # FIXME perhaps make masks None on all ff's
         if masks == None:
             masks = "\xff" * len(bytes)
 
         if val == None:
             val = True
+
+        # Detect and skip duplicate additions...
+        bytekey = bytes + masks
+        if self.sigs.get(bytekey) != None:
+            return
+
+        self.sigs[bytekey] = True
 
         byteord = [ord(c) for c in bytes]
         maskord = [ord(c) for c in masks]

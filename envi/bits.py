@@ -112,6 +112,8 @@ def parsebytes(bytes, offset, size, sign=False, bigend=False):
     """
     Mostly for pulling immediates out of strings...
     """
+    if size > 8:
+        return slowparsebytes(bytes, offset, size, sign=sign, bigend=bigend)
     if bigend:
         f = be_fmt_chars[size]
     else:

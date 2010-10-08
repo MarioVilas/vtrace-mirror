@@ -95,8 +95,10 @@ class Elf:
             for i in range(self.e_phnum):
                 if self.bits == 32:
                     pgm = Elf32Pheader(bytes[pbase:pbase+plen],elf=self)
-                else:
+                elif self.bits == 64:
                     pgm = Elf64Pheader(bytes[pbase:pbase+plen],elf=self)
+                else:
+                    raise Exception('Platform not supported: %d' % (self.bits))
                 self.pheaders.append(pgm)
                 pbase += plen
 
@@ -109,8 +111,10 @@ class Elf:
             for i in range(self.e_shnum):
                 if self.bits == 32:
                     sec = Elf32Section(bytes[sbase:sbase+slen],elf=self)
-                else:
+                elif self.bits == 64:
                     sec = Elf64Section(bytes[sbase:sbase+slen],elf=self)
+                else:
+                    raise Exception('Platform not supported: %d' % (self.bits))
                 self.sections.append(sec)
                 sbase += slen
 
@@ -413,8 +417,10 @@ class Elf:
                 while symtab:
                     if self.bits == 32:
                         newsym = Elf32Symbol(symtab)
-                    else:
+                    elif self.bits == 64:
                         newsym = Elf64Symbol(symtab)
+                    else:
+                        raise Exception('Platform not supported: %d' % (self.bits))
 
                     #FIXME this is dorked!
                     if newsym.st_name:
@@ -435,8 +441,10 @@ class Elf:
                 while bytes:
                     if self.bits == 32:
                         reloc = Elf32Reloc(bytes)
-                    else:
+                    elif self.bits == 64:
                         reloc = Elf64Reloc(bytes)
+                    else:
+                        raise Exception('Platform not supported: %d' % (self.bits))
                     index = reloc.getSymTabIndex()
                     try:
                         sym = self.dynamic_symbols[index]
@@ -451,8 +459,10 @@ class Elf:
                 while bytes:
                     if self.bits == 32:
                         reloc = Elf32Reloca(bytes)
+                    elif self.bits == 64:
+                        reloc = Elf64Reloca(bytes)
                     else:
-                        raise "FIXME"
+                        raise Exception('Platform not supported: %d' % (self.bits))
                     index = reloc.getSymTabIndex()
                     try:
                         sym = self.dynamic_symbols[index]
@@ -474,8 +484,10 @@ class Elf:
         while symtab:
             if self.bits == 32:
                 newsym = Elf32Symbol(symtab)
-            else:
+            elif self.bits == 64:
                 newsym = Elf64Symbol(symtab)
+            else:
+                raise Exception('Platform not supported: %d' % (self.bits))
             if newsym.st_name:
                 name = self.getStrtabString(newsym.st_name, ".dynstr")
                 newsym.setName(name)
@@ -487,9 +499,10 @@ class Elf:
         while dynbytes:
             if self.bits == 32:
                 dyn = Elf32Dynamic(dynbytes)
-            else:
+            elif self.bits == 64:
                 dyn = Elf64Dynamic(dynbytes)
-
+            else:
+                raise Exception('Platform not supported: %d' % (self.bits))
             if dyn.d_tag in Elf32Dynamic.has_string:
                 name = self.getStrtabString(dyn.d_value, ".dynstr")
                 dyn.setName(name)
@@ -546,7 +559,11 @@ class Elf32Dynamic:
         return struct.calcsize("2L")
 
 class Elf64Dynamic(Elf32Dynamic):
-    pass
+    def initFromBytes(self, bytes):
+        self.d_tag,self.d_value = struct.unpack("2Q", bytes[:len(self)])
+
+    def __len__(self):
+        return struct.calcsize("2Q")
 
 class Elf32Reloc:
     """
@@ -599,7 +616,28 @@ class Elf32Reloca(Elf32Reloc):
         return struct.calcsize("3L")
 
 class Elf64Reloc(Elf32Reloc):
-    pass
+    def initFromBytes(self, bytes):
+        self.r_offset, self.r_info = struct.unpack('2Q', bytes[:len(self)])
+
+    def getType(self):
+        return self.r_info & 0xffffffff
+
+    def getSymTabIndex(self):
+        return self.r_info >> 32
+
+    def __len__(self):
+        return struct.calcsize("2Q")
+
+class Elf64Reloca(Elf64Reloc):
+    def __init__(self, bytes=None):
+        self.r_addend = 0
+        Elf64Reloc.__init__(self, bytes)
+
+    def initFromBytes(self, bytes):
+        self.r_offset, self.r_info, self.r_addend = struct.unpack('3Q', bytes[:len(self)])
+
+    def __len__(self):
+        return struct.calcsize("3Q")
 
 class Elf32Symbol:
     """
@@ -666,7 +704,6 @@ class Elf32Symbol:
         return struct.calcsize("3L2BH")
 
 class Elf64Symbol(Elf32Symbol):
-
     def initFromBytes(self,bytes):
         fmt = "IBBHLL"
         (self.st_name,

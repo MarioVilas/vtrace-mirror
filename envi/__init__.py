@@ -94,7 +94,8 @@ class ArchitectureModule:
         raise ArchNotImplemented("getStackDelta")
 
 class EnviException(Exception):
-    pass
+    def __str__(self):
+        return repr(self)
 
 class InvalidInstruction(EnviException):
     """
@@ -174,6 +175,17 @@ class UnknownCallingConvention(EmuException):
     Raised when the getCallArgs() or setReturnValue() methods
     are given an unknown calling convention type.
     """
+
+class MapOverlapException(EnviException):
+    """
+    Raised when adding a memory map to a MemoryObject which overlaps
+    with another already existing map.
+    """
+    def __init__(self, map1, map2):
+        self.map1 = map1
+        self.map2 = map2
+        margs = (map1[0], map1[1], map2[0], map2[1])
+        EnviException.__init__(self, "Map At 0x%.8x (%d) overlaps map at 0x%.8x (%d)" % margs)
 
 class Operand:
 
@@ -536,6 +548,7 @@ arch_xlate_32 = {
 arch_xlate_64 = {
     'x86_64':'amd64',
     'AMD64':'amd64',
+    'amd64':'amd64',
     '':'amd64', # And again....
 }
 

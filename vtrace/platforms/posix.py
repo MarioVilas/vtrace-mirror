@@ -220,7 +220,8 @@ def ptrace(code, pid, addr, data):
         if not cloc:
             raise Exception("ERROR: can't find C library on posix system!")
         libc = CDLL(cloc)
-    return libc.ptrace(code, pid, addr, data)
+        libc.ptrace.argtypes = [c_int, c_uint32, c_char_p, c_int]
+    return libc.ptrace(code, pid, c_char_p(addr), data)
 
 #def waitpid(pid, status, options):
     #global libc

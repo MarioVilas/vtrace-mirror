@@ -1,6 +1,7 @@
 
 import struct
 import vstruct
+import vstruct.defs.pe as vs_pe
 
 IMAGE_FILE_MACHINE_I386  = 0x014c
 IMAGE_FILE_MACHINE_IA64  = 0x0200
@@ -104,6 +105,19 @@ class PE(object):
 
         self.IMAGE_NT_HEADERS = nt
 
+    def getPdataEntries(self):
+        sec = self.getSectionByName('.pdata')
+        if sec == None:
+            return ()
+        ret = []
+        bytes = self.readAtRva(sec.VirtualAddress, sec.VirtualSize)
+        while len(bytes):
+            f = vs_pe.IMAGE_RUNTIME_FUNCTION_ENTRY()
+            f.vsParse(bytes)
+            bytes = bytes[len(f):]
+            ret.append(f)
+        return ret
+
     def getDllName(self):
         if self.IMAGE_EXPORT_DIRECTORY != None:
             ordoff = self.rvaToOffset(self.IMAGE_EXPORT_DIRECTORY.AddressOfOrdinals)
@@ -148,7 +162,7 @@ class PE(object):
 
     def getSectionByName(self, name):
         for s in self.getSections():
-            if s.Name.value.split("\x00", 1)[0] == name:
+            if s.Name.split("\x00", 1)[0] == name:
                 return s
         return None
 
