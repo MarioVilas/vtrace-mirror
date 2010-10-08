@@ -1,4 +1,6 @@
 
+import traceback
+
 import sys
 import envi
 import envi.memory as e_mem
@@ -36,6 +38,7 @@ class MemoryRenderer:
         is the virtual address you are expected to render.
         """
         raise Exception("Implement render!")
+
 
 class MemoryCanvas:
     """
@@ -121,7 +124,20 @@ class MemoryCanvas:
             while va < maxva:
                 va += rend.render(self, va)
         except Exception, e:
-            self.addText("\nException At %s: %s\n" % (hex(va),e))
+            s = traceback.format_exc()
+            self.addText("\nException At %s: %s\n" % (hex(va),s))
+
+class StringMemoryCanvas(MemoryCanvas):
+
+    def __init__(self, mem, syms=None):
+        MemoryCanvas.__init__(self, mem, syms=None)
+        self.strval = ""
+
+    def addText(self, text, tag=None):
+        self.strval += text
+
+    def __str__(self):
+        return self.strval
 
 class HtmlMemoryCanvas(MemoryCanvas):
 

@@ -2,6 +2,10 @@
 import struct
 import vstruct
 
+IMAGE_FILE_MACHINE_I386  = 0x014c
+IMAGE_FILE_MACHINE_IA64  = 0x0200
+IMAGE_FILE_MACHINE_AMD64 = 0x8664
+
 IMAGE_DIRECTORY_ENTRY_EXPORT          =0   # Export Directory
 IMAGE_DIRECTORY_ENTRY_IMPORT          =1   # Import Directory
 IMAGE_DIRECTORY_ENTRY_RESOURCE        =2   # Resource Directory
@@ -81,6 +85,8 @@ class PE(object):
         self.inmem = inmem
         self.fd = fd
         self.fd.seek(0)
+        self.pe32p = False
+        self.psize = 4
 
         self.IMAGE_DOS_HEADER = vstruct.getStructure("pe.IMAGE_DOS_HEADER")
         dosbytes = fd.read(len(self.IMAGE_DOS_HEADER))
@@ -88,12 +94,15 @@ class PE(object):
 
         nt = self.readStructAtOffset(self.IMAGE_DOS_HEADER.e_lfanew,
                                 "pe.IMAGE_NT_HEADERS")
+
+        # Parse in a default 32 bit, and then check for 64...
+        if nt.FileHeader.Machine == IMAGE_FILE_MACHINE_AMD64:
+            nt = self.readStructAtOffset(self.IMAGE_DOS_HEADER.e_lfanew,
+                                "pe.IMAGE_NT_HEADERS64")
+            self.pe32p = True
+            self.psize = 8
+
         self.IMAGE_NT_HEADERS = nt
-
-        ohdrsize = nt.FileHeader.SizeOfOptionalHeader
-
-        if ohdrsize != 224:
-            print "ERROR: SizeOfOptionalHeader is %d (should be 224)" % ohdrsize
 
     def getDllName(self):
         if self.IMAGE_EXPORT_DIRECTORY != None:
@@ -224,7 +233,8 @@ class PE(object):
         ret = ""
         self.fd.seek(offset)
         while len(ret) != size:
-            x = self.fd.read(size - len(ret))
+            rlen = size - len(ret)
+            x = self.fd.read(rlen)
             if x == "":
                 raise Exception("EOF In readAtOffset()")
             ret += x
@@ -236,6 +246,12 @@ class PE(object):
         rva = cdir.VirtualAddress
         if rva != 0:
             self.IMAGE_LOAD_CONFIG = self.readStructAtRva(rva, "pe.IMAGE_LOAD_CONFIG_DIRECTORY")
+
+    def readPointerAtOffset(self, off):
+        fmt = "<L"
+        if self.psize == 8:
+            fmt = "<Q"
+        return struct.unpack(fmt, self.readAtOffset(off, self.psize))[0]
         
     def parseImports(self):
         self.imports = []
@@ -259,18 +275,19 @@ class PE(object):
             aoff = self.rvaToOffset(x.FirstThunk)
 
             while True:
-                ava = struct.unpack("<L", self.readAtOffset(aoff+(4*idx), 4))[0]
+                ava = self.readPointerAtOffset(aoff+(self.psize*idx))
                 if ava == 0:
                     break
 
-                nva = struct.unpack("<L", self.readAtOffset(noff+(4*idx), 4))[0]
+                nva = self.readPointerAtOffset(noff+(self.psize*idx))
+                #FIXME high bit testing for 64 bit
                 if nva & 0x80000000:
                     name = "ord%d" % (nva & 0x7fffffff,)
                 else:
                     nameoff = self.rvaToOffset(nva) + 2 # Skip the short "hint"
                     name = self.readAtOffset(nameoff, 256).split("\x00")[0]
 
-                self.imports.append((x.FirstThunk+(idx*4),libname,name))
+                self.imports.append((x.FirstThunk+(idx*self.psize),libname,name))
 
                 idx += 1
                 
@@ -299,7 +316,10 @@ class PE(object):
             pageva, chunksize = struct.unpack("<LL", relbytes[:8])
             relcnt = (chunksize - 8) / 2
             rels = struct.unpack("<%dH" % relcnt, relbytes[8:chunksize])
-            self.relocations.extend([x+pageva for x in rels])
+            for r in rels:
+                rtype = r >> 12
+                roff  = r & 0xfff
+                self.relocations.append((pageva+roff, rtype))
             relbytes = relbytes[chunksize:]
 
     def parseExports(self):

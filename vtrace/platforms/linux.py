@@ -9,13 +9,12 @@ import traceback
 import platform
 
 import envi.memory as e_mem
+import envi.registers as e_reg
 
 import vtrace
-import vtrace.breakpoints as breakpoints
+import vtrace.platforms.base as v_base
 import vtrace.platforms.posix as v_posix
-from vtrace.platforms.base import UtilMixin
-
-import types
+import vtrace.archs.i386 as v_i386
 
 from ctypes import *
 import ctypes.util as cutil
@@ -65,14 +64,70 @@ PT_EVENT_EXIT       = 6
 SIG_LINUX_SYSCALL = signal.SIGTRAP | 0x80
 SIG_LINUX_CLONE = signal.SIGTRAP | (PT_EVENT_CLONE << 8)
 
-class LinuxMixin:
+class user_regs_i386(Structure):
+    _fields_ = (
+        ("ebx",  c_ulong),
+        ("ecx",  c_ulong),
+        ("edx",  c_ulong),
+        ("esi",  c_ulong),
+        ("edi",  c_ulong),
+        ("ebp",  c_ulong),
+        ("eax",  c_ulong),
+        ("ds",   c_ushort),
+        ("__ds", c_ushort),
+        ("es",   c_ushort),
+        ("__es", c_ushort),
+        ("fs",   c_ushort),
+        ("__fs", c_ushort),
+        ("gs",   c_ushort),
+        ("__gs", c_ushort),
+        ("orig_eax", c_ulong),
+        ("eip",  c_ulong),
+        ("cs",   c_ushort),
+        ("__cs", c_ushort),
+        ("eflags", c_ulong),
+        ("esp",  c_ulong),
+        ("ss",   c_ushort),
+        ("__ss", c_ushort),
+    )
+
+class USER_i386(Structure):
+    _fields_ = (
+        # NOTE: Expand out the user regs struct so
+        #       we can make one call to _rctx_Import
+        ("regs",       user_regs_i386),
+        ("u_fpvalid",  c_ulong),
+        ("u_tsize",    c_ulong),
+        ("u_dsize",    c_ulong),
+        ("u_ssize",    c_ulong),
+        ("start_code", c_ulong),
+        ("start_stack",c_ulong),
+        ("signal",     c_ulong),
+        ("reserved",   c_ulong),
+        ("u_ar0",      c_void_p),
+        ("u_fpstate",  c_void_p),
+        ("magic",      c_ulong),
+        ("u_comm",     c_char*32),
+        ("debug0",     c_ulong),
+        ("debug1",     c_ulong),
+        ("debug2",     c_ulong),
+        ("debug3",     c_ulong),
+        ("debug4",     c_ulong),
+        ("debug5",     c_ulong),
+        ("debug6",     c_ulong),
+        ("debug7",     c_ulong),
+    )
+
+class LinuxMixin(v_posix.PtraceMixin, v_posix.PosixMixin):
     """
     The mixin to take care of linux specific platform traits.
     (mostly proc)
     """
 
-    def initMixin(self):
+    def __init__(self):
         # Wrap reads from proc in our worker thread
+        v_posix.PtraceMixin.__init__(self)
+        v_posix.PosixMixin.__init__(self)
         self.pthreads = [] # FIXME perhaps make this posix-wide not just linux eventually...
         self.threadWrap("platformAllocateMemory", self.platformAllocateMemory)
         self.threadWrap("getPtraceEvent", self.getPtraceEvent)
@@ -130,7 +185,7 @@ class LinuxMixin:
         self.writeMemory(pc, "\xcd\x80")
         self.setRegisterByName("eax", SYS_mmap)
         self.setRegisterByName("ebx", sp)
-        self.syncRegs()
+        self._syncRegs()
 
         try:
             # Step over our syscall instruction
@@ -169,7 +224,7 @@ class LinuxMixin:
         # We have to slice cause ctypes "helps" us by adding a null byte...
         return buf.raw[:size]
 
-    #def whynot_platformWriteMemory(self, address, data):
+    def whynot_platformWriteMemory(self, address, data):
         """
         A *much* faster way of writting memory that the 4 bytes
         per syscall allowed by ptrace
@@ -389,35 +444,53 @@ class LinuxMixin:
 
         return fds
 
-class LinuxIntelRegisters:
-    """
-    The actual trace object for IntelLinux, which inherits
-    what it can from IntelMixin/LinuxMixin and implements
-    what is must.
+class Linuxi386Trace(
+        vtrace.Trace,
+        LinuxMixin,
+        v_i386.i386Mixin,
+        v_posix.ElfMixin,
+        v_base.TracerBase):
 
-    The size of the linux user area struct is 284 bytes...
+    def __init__(self):
+        vtrace.Trace.__init__(self)
+        v_base.TracerBase.__init__(self)
+        v_posix.ElfMixin.__init__(self)
+        v_i386.i386Mixin.__init__(self)
+        LinuxMixin.__init__(self)
 
-    """
+        u = USER_i386()
+        # Pre-calc the offset to the debug regs...
+        self.dbgoff = sizeof(u) - (4*8)
+        self.dbgidx = self.archGetRegCtx().getRegisterIndex("debug0")
 
-    def initMixin(self):
-        self.usize = 284
-
-    def maybeCalcUserSize(self):
+    def platformGetRegCtx(self, tid):
         """
-        LOL... this works actually... but we're not using it...
         """
-        if self.usize != 0:
-            return
-        tid = self.getMeta("ThreadId", self.getPid())
-        val = -1
-        off = 500
-        while val == -1:
-            off -= 4
-            val = v_posix.ptrace(v_posix.PT_READ_U, tid, off, 0)
-            if off == 0:
-                return
-        self.usize = off + 4
+        ctx = self.archGetRegCtx()
+        u = user_regs_i386()
+        if v_posix.ptrace(PT_GETREGS, tid, 0, addressof(u)) == -1:
+            raise Exception("Error: ptrace(PT_GETREGS...) failed!")
 
+        ctx._rctx_Import(u)
+
+        for i in range(8):
+            r = v_posix.ptrace(v_posix.PT_READ_U, tid, self.dbgoff+(4*i), 0)
+            ctx.setRegister(self.dbgidx+i, r & 0xffffffff)
+
+        return ctx
+
+    def platformSetRegCtx(self, tid, ctx):
+        u = user_regs_i386()
+        ctx._rctx_Export(u)
+        if v_posix.ptrace(PT_SETREGS, tid, 0, addressof(u)) == -1:
+            raise Exception("Error: ptrace(PT_SETREGS...) failed!")
+
+        for i in range(8):
+            val = ctx.getRegister(self.dbgidx + i)
+            if v_posix.ptrace(v_posix.PT_WRITE_U, tid, self.dbgoff+(4*i), val) != 0:
+                raise Exception("PT_WRITE_U for debug%d failed!" % i)
+
+class NOTHING:
     def platformGetRegs(self, tid):
         """
         Start with what's given by PT_GETREGS and pre-pend
@@ -444,34 +517,4 @@ class LinuxIntelRegisters:
         off = self.usize - 32
         for i in range(8):
             v_posix.ptrace(v_posix.PT_WRITE_U, tid, off+(4*i), dbgs[i])
-
-    def getRegisterFormat(self):
-        return "15L8H2L2H2L2H"
-
-    def getRegisterNames(self):
-        return (
-            "debug0","debug1","debug2","debug3","debug4","debug5",
-            "debug6","debug7",
-            "ebx","ecx","edx","esi","edi","ebp","eax","ds","__ds",
-            "es","__es","fs","__fs","gs","__gs","orig_eax","eip",
-            "cs","__cs","eflags","esp","ss","__ss")
-
-class LinuxAmd64Registers:
-    """
-    Mixin for the register format on Linux AMD64
-    """
-    def initMixin(self):
-        pass
-
-    def getRegisterFormat(self):
-        return "27L"
-
-    def getRegisterNames(self):
-        return (
-            "r15","r14","r13","r12","rbp","rbx","r11","r10",
-            "r9","r8","rax","rcx","rdx","rsi","rdi","orig_rax",
-            "rip","cs","eflags",
-            "rsp","ss",
-            "fs_base"," gs_base",
-            "ds","es","fs","gs")
 

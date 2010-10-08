@@ -24,8 +24,8 @@ class ClusterServerView(vw_views.VTreeView,
         ("Percent",3,int)
     )
 
-    def __init__(self, layout=None):
-        vw_views.VTreeView.__init__(self, layout=layout)
+    def __init__(self):
+        vw_views.VTreeView.__init__(self)
         # Hook all the GUI callbacks in the server.
         #FIXME make this a callback object in the server
         self.id_iter = {}

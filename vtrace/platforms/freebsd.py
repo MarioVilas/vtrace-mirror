@@ -10,6 +10,8 @@ import envi.memory as e_mem
 import envi.cli as e_cli
 
 import vtrace
+import vtrace.archs.i386 as v_i386
+import vtrace.platforms.base as v_base
 import vtrace.platforms.posix as v_posix
 import vtrace.util as v_util
 
@@ -239,7 +241,7 @@ PL_FLAGS_BOUND = 1
 
 class FreeBSDMixin:
 
-    def initMixin(self):
+    def __init__(self):
         self.initMode("Syscall", False, "Break on Syscalls")
         self.kvmh = libkvm.kvm_open(None, None, None, 0, "vtrace")
 
@@ -339,6 +341,14 @@ class FreeBSDMixin:
             ret[x] = x
         return ret
 
+    def platformSuspendThread(self, tid):
+        if v_posix.ptrace(PT_SUSPEND, tid, 0, 0) != 0:
+            raise Exception("ptrace PT_SUSPEND failed!")
+
+    def platformResumeThread(self, tid):
+        if v_posix.ptrace(PT_RESUME, tid, 0, 0) != 0:
+            raise Exception("ptrace PT_RESUME failed!")
+
     def _getThreadCount(self):
         return v_posix.ptrace(PT_GETNUMLWPS, self.pid, 0, 0)
 
@@ -350,7 +360,7 @@ class FreeBSDMixin:
         ret = []
         mpath = "/proc/%d/map" % self.pid
         if not os.path.isfile(mpath):
-            raise Exception("Memory map enumeration requires /proc on FreeBSD")
+            raise Exception("Memory maps need /proc! (use: mount -t procfs procfs /proc)")
 
         mapfile = file(mpath, "rb")
         for line in mapfile:
@@ -394,36 +404,76 @@ class FreeBSDMixin:
 
         return ret
 
-GEN_REG_CNT = 19
-DBG_REG_CNT = 8
-TOT_REG_CNT = GEN_REG_CNT + DBG_REG_CNT
+class bsd_regs_i386(ctypes.Structure):
+    _fields_ = (
+        ("fs",  ctypes.c_ulong),
+        ("es",  ctypes.c_ulong),
+        ("ds",  ctypes.c_ulong),
+        ("edi",  ctypes.c_ulong),
+        ("esi",  ctypes.c_ulong),
+        ("ebp",  ctypes.c_ulong),
+        ("isp",  ctypes.c_ulong),
+        ("ebx",  ctypes.c_ulong),
+        ("edx",  ctypes.c_ulong),
+        ("ecx",  ctypes.c_ulong),
+        ("eax",  ctypes.c_ulong),
+        ("trapno",  ctypes.c_ulong),
+        ("err",  ctypes.c_ulong),
+        ("eip",  ctypes.c_ulong),
+        ("cs",  ctypes.c_ulong),
+        ("eflags",  ctypes.c_ulong),
+        ("esp",  ctypes.c_ulong),
+        ("ss",  ctypes.c_ulong),
+        ("gs",  ctypes.c_ulong),
+        ("debug0",  ctypes.c_ulong),
+        ("debug1",  ctypes.c_ulong),
+        ("debug2",  ctypes.c_ulong),
+        ("debug3",  ctypes.c_ulong),
+        ("debug4",  ctypes.c_ulong),
+        ("debug5",  ctypes.c_ulong),
+        ("debug6",  ctypes.c_ulong),
+        ("debug7",  ctypes.c_ulong),
+    )
 
-class FreeBSDIntelRegisters:
+i386_DBG_OFF = (19*4)
 
-    def platformGetRegs(self, tid):
-        buf = ctypes.create_string_buffer(TOT_REG_CNT*4)
-        #FIXME thread specific
-        if v_posix.ptrace(PT_GETREGS, self.pid, buf, 0) != 0:
+class FreeBSDi386Trace(
+    vtrace.Trace,
+    FreeBSDMixin,
+    v_i386.i386Mixin,
+    v_posix.ElfMixin,
+    v_posix.PosixMixin,
+    v_base.TracerBase):
+
+    def __init__(self):
+        vtrace.Trace.__init__(self)
+        v_base.TracerBase.__init__(self)
+        v_posix.ElfMixin.__init__(self)
+        v_posix.PosixMixin.__init__(self)
+        v_i386.i386Mixin.__init__(self)
+        FreeBSDMixin.__init__(self)
+
+    def platformGetRegCtx(self, tid):
+        ctx = self.archGetRegCtx()
+        u = bsd_regs_i386()
+
+        addr = ctypes.addressof(u)
+        if v_posix.ptrace(PT_GETREGS, tid, addr, 0) != 0:
             raise Exception("ptrace PT_GETREGS failed!")
-        if v_posix.ptrace(PT_GETDBREGS, self.pid, ctypes.addressof(buf)+(GEN_REG_CNT*4), 0) != 0:
+        if v_posix.ptrace(PT_GETDBREGS, tid, addr+i386_DBG_OFF, 0) != 0:
             raise Exception("ptrace PT_GETDBREGS failed!")
-        return buf.raw
 
-    def platformSetRegs(self, buf, tid):
-        #FIXME thread specific
-        if v_posix.ptrace(PT_SETREGS, self.pid, buf, 0) != 0:
+        ctx._rctx_Import(u)
+
+        return ctx
+
+    def platformSetRegCtx(self, tid, ctx):
+        u = bsd_regs_i386()
+        ctx._rctx_Export(u)
+        addr = ctypes.addressof(u)
+        if v_posix.ptrace(PT_SETREGS, self.pid, addr, 0) != 0:
             raise Exception("ptrace PT_SETREGS failed!")
-        if v_posix.ptrace(PT_SETDBREGS, self.pid, buf[(GEN_REG_CNT*4):], 0) != 0:
+        if v_posix.ptrace(PT_SETDBREGS, self.pid, addr+i386_DBG_OFF, 0) != 0:
             raise Exception("ptrace PT_SETDBREGS failed!")
 
-    def getRegisterFormat(self):
-        return "<27L"
-
-    def getRegisterNames(self):
-        return ["fs","es","ds","edi","esi","ebp","isp",
-                "ebx","edx","ecx","eax","trapno","err",
-                "eip","cs","eflags","esp","ss","gs","debug0",
-                "debug1","debug2","debug3","debug4","debug5",
-                "debug6","debug7"]
-                
 

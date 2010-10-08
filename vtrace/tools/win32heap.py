@@ -1,4 +1,32 @@
 
+# Heap Flags
+HEAP_NO_SERIALIZE               = 0x00000001
+HEAP_GROWABLE                   = 0x00000002
+HEAP_GENERATE_EXCEPTIONS        = 0x00000004
+HEAP_ZERO_MEMORY                = 0x00000008
+HEAP_REALLOC_IN_PLACE_ONLY      = 0x00000010
+HEAP_TAIL_CHECKING_ENABLED      = 0x00000020
+HEAP_FREE_CHECKING_ENABLED      = 0x00000040
+HEAP_DISABLE_COALESCE_ON_FREE   = 0x00000080
+HEAP_CREATE_ALIGN_16            = 0x00010000
+HEAP_CREATE_ENABLE_TRACING      = 0x00020000
+HEAP_CREATE_ENABLE_EXECUTE      = 0x00040000
+
+heap_flag_names = {
+HEAP_NO_SERIALIZE:"HEAP_NO_SERIALIZE",
+HEAP_GROWABLE:"HEAP_GROWABLE",
+HEAP_GENERATE_EXCEPTIONS:"HEAP_GENERATE_EXCEPTIONS",
+HEAP_ZERO_MEMORY:"HEAP_ZERO_MEMORY",
+HEAP_REALLOC_IN_PLACE_ONLY:"HEAP_REALLOC_IN_PLACE_ONLY",
+HEAP_TAIL_CHECKING_ENABLED:"HEAP_TAIL_CHECKING_ENABLED",
+HEAP_FREE_CHECKING_ENABLED:"HEAP_FREE_CHECKING_ENABLED",
+HEAP_DISABLE_COALESCE_ON_FREE:"HEAP_DISABLE_COALESCE_ON_FREE",
+HEAP_CREATE_ALIGN_16:"HEAP_CREATE_ALIGN_16",
+HEAP_CREATE_ENABLE_TRACING:"HEAP_CREATE_ENABLE_TRACING",
+HEAP_CREATE_ENABLE_EXECUTE:"HEAP_CREATE_ENABLE_EXECUTE",
+}
+
+# Heap Chunk Flags
 HEAP_ENTRY_BUSY             = 0x01
 HEAP_ENTRY_EXTRA_PRESENT    = 0x02
 HEAP_ENTRY_FILL_PATTERN     = 0x04
@@ -7,6 +35,8 @@ HEAP_ENTRY_LAST_ENTRY       = 0x10
 HEAP_ENTRY_SETTABLE_FLAG1   = 0x20
 HEAP_ENTRY_SETTABLE_FLAG2   = 0x40
 HEAP_ENTRY_SETTABLE_FLAG3   = 0x80
+
+
 
 def reprHeapFlags(flags):
     ret = []
@@ -91,6 +121,16 @@ class Win32Heap:
         self.heap = trace.getStruct("win32.HEAP", address)
         self.seglist = None
 
+    def hasLookAside(self):
+        """
+        Does this heap have a lookaside?
+        """
+        if not self.heap.Flags & HEAP_GROWABLE:
+            return False
+        if self.heap.Flags & HEAP_NO_SERIALIZE:
+            return False
+        return True
+
     def getSegments(self):
         """
         Return a list of Win32Segment objects.
@@ -101,6 +141,25 @@ class Win32Heap:
                 sa = self.heap.Segments[i]
                 self.seglist.append(Win32Segment(self.trace, self, long(sa)))
         return self.seglist
+
+    def getLookAsideLists(self):
+        """
+        Return a list of the lookaside list for this heap
+        """
+        if not self.hasLookAside():
+            raise Exception("Heap at 0x%.8x has no lookaside!" % (self.address))
+        laside = self.address + 0x688
+        ret = []
+        for i in range(128):
+            slot = laside + (i * 0x30)
+            bucket = []
+            base = self.trace.readMemoryFormat(slot, "<L")[0]
+            while base != 0:
+                chunk = Win32Chunk(self.trace, base-8)
+                bucket.append(chunk)
+                base,blink = chunk.getFlinkBlink()
+            ret.append(bucket)
+        return ret
 
     def getFreeLists(self):
         """
@@ -140,6 +199,17 @@ class Win32Heap:
 
             ret.append(bucket)
         return ret
+
+    def getFlagNames(self):
+        ret = []
+        for k,v in heap_flag_names.items():
+            if self.heap.Flags & k:
+                ret.append(v)
+        return ret
+
+    def __repr__(self):
+        fnames = "|".join(self.getFlagNames())
+        return "heap: 0x%.8x flags:%s" % (self.address, fnames)
 
 class Win32Segment:
     def __init__(self, trace, heap, address):

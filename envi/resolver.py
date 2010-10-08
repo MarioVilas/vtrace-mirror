@@ -170,11 +170,18 @@ class SymbolResolver:
         """
         return self.symaddrs.values()
 
-    def __getattr__(self, name):
-        ret = self.getSymByName(name)
-        if ret == None:
-            raise AttributeError("Resolver has no %s" % name)
-        return ret
+    def getSymHint(self, va, hidx):
+        """
+        May be used by symbol resolvers who know what type they are
+        resolving to store and retrieve "hints" with indexes.
+
+        Used specifically by opcode render methods to resolve
+        any memory dereference info for a given operand.
+
+        NOTE: These are mostly symbolic references to FRAME LOCAL
+              names....
+        """
+        return None
 
 # Some extension types
 
@@ -204,4 +211,14 @@ class FileSymbol(Symbol,SymbolResolver):
     def __init__(self, fname, base, size, width=4):
         SymbolResolver.__init__(self, width=width)
         Symbol.__init__(self, fname, base, size)
+
+    def __getattr__(self, name):
+        """
+        File symbols may be dereferenced like python objects to resolve
+        symbols within them.
+        """
+        ret = self.getSymByName(name)
+        if ret == None:
+            raise AttributeError("Resolver has no %s" % name)
+        return ret
 

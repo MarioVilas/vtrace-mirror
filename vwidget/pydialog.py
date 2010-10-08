@@ -16,6 +16,10 @@ class ScriptThread(Thread):
         self.locals = locals
 
     def run(self):
+        # Seems there's a bug in GTK/pygtk which causes a race...
+        # this eliminates it.
+        vw_main.guilock.acquire()
+        vw_main.guilock.release()
         try:
             exec(self.cobj, self.locals)
         except Exception, e:
@@ -42,10 +46,7 @@ class PyDialog(vw_windows.VWindow):
         """
         cobj = compile(pystring, "pydialog_exec.py", "exec")
         sthr = ScriptThread(cobj, self.locals)
-        vw_main.guilock.release()
-        # FIXME for some reason, start causes SEGV
-        try:
-            sthr.run()
-        finally:
-            vw_main.guilock.acquire()
+        sthr.start()
+        # FIXME set button insensitive and have ScriptThread take
+        # a reference to the dialog and change it back when run is complete
 

@@ -8,6 +8,8 @@ import traceback
 import types
 import vtrace.breakpoints as breakpoints
 
+import envi.archs.i386 as e_i386
+
 # Pre-populating these saves a little processing
 # time (important in tight watchpoint loops)
 drnames = ["debug%d" % d for d in range(8)]
@@ -15,19 +17,29 @@ drnames = ["debug%d" % d for d in range(8)]
 dbg_status = "debug6"
 dbg_ctrl = "debug7"
 
+dbg_execute    = 0
+dbg_write      = 1
+dbg_read_write = 3
+
 dbg_types = {
-    "x":0,
-    "w":1,
-    "rw":3,
+    "x":dbg_execute,
+    "w":dbg_write,
+    "rw":dbg_read_write,
 }
 
 dbg_single_step = 1 << 14
 
-class IntelMixin:
+class i386Mixin(e_i386.i386Module, e_i386.i386RegisterContext):
 
-    def initMixin(self):
+    def __init__(self):
         # Which ones are in use / enabled.
         self.hwdebug = [0, 0, 0, 0]
+        # Mixin our i386 envi architecture module and register context
+        e_i386.i386Module.__init__(self)
+        e_i386.i386RegisterContext.__init__(self)
+
+    def getBreakInstruction(self):
+        return "\xcc"
 
     def archAddWatchpoint(self, address, size=4, perms="rw"):
 
@@ -43,6 +55,9 @@ class IntelMixin:
         pbits = dbg_types.get(perms)
         if pbits == None:
             raise Exception("Unsupported watchpoint perms %s (x86 supports x,w,rw)" % perms)
+
+        if pbits == dbg_execute and size != 1:
+            raise Exception("Watchpoint for execute *must* be 1 byte long!")
 
         if size not in [1,2,4]:
             raise Exception("Unsupported watchpoint size %d (x86 supports 1,2,4)" % size)
@@ -132,11 +147,14 @@ class IntelMixin:
             eflags &= ~0x100 # TF flag
         self.setRegisterByName("eflags",eflags)
 
-    def getStackTrace(self):
+    def archGetStackTrace(self):
         self.requireAttached()
         current = 0
         sanity = 1000
         frames = []
+
+        #FIXME make these by register index
+        #FIXME make these GPREG stuff! (then both are the same)
         ebp = self.getRegisterByName("ebp")
         eip = self.getRegisterByName("eip")
         frames.append((eip,ebp))
@@ -151,15 +169,6 @@ class IntelMixin:
                 break
 
         return frames
-
-    def getBreakInstruction(self):
-        return "\xcc"
-
-    def archGetPcName(self):
-        return "eip"
-
-    def archGetSpName(self):
-        return "esp"
 
     def platformCall(self, address, args, convention=None):
         buf = ""

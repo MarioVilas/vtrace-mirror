@@ -29,7 +29,7 @@ class PosixMixin:
     things like wait()
     """
 
-    def initMixin(self):
+    def __init__(self):
         """
         Setup for the fact that we support signal driven
         debugging on posix platforms
@@ -80,6 +80,7 @@ class PosixMixin:
         self.posixLibraryLoadHack()
         # We'll emulate windows here and send an additional
         # break after our library load events to make things easy
+        self.runAgain(False) # Clear this, if they want BREAK to run, it will
         self.fireNotifiers(vtrace.NOTIFY_BREAK)
 
     def platformProcessEvent(self, status):
@@ -149,6 +150,9 @@ class ElfMixin:
     """
     A platform mixin to parse Elf binaries
     """
+    def __init__(self):
+        pass
+
     def platformParseBinary(self, filename, baseaddr, normname):
         typemap = {
             Elf.STT_FUNC:e_resolv.FunctionSymbol,
@@ -239,7 +243,7 @@ class PtraceMixin:
     exist... but the darwin mixin over-rides platformGetRegs)
     """
 
-    def initMixin(self):
+    def __init__(self):
         """
         Setup supported modes
         """
@@ -249,8 +253,8 @@ class PtraceMixin:
             self.conthack = 1
 
         # Make a worker thread do these for us...
-        self.threadWrap("platformGetRegs", self.platformGetRegs)
-        self.threadWrap("platformSetRegs", self.platformSetRegs)
+        self.threadWrap("platformGetRegCtx", self.platformGetRegCtx)
+        self.threadWrap("platformSetRegCtx", self.platformSetRegCtx)
         self.threadWrap("platformAttach", self.platformAttach)
         self.threadWrap("platformDetach", self.platformDetach)
         self.threadWrap("platformStepi", self.platformStepi)

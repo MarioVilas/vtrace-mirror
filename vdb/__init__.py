@@ -21,13 +21,15 @@ import vdb
 import vdb.extensions as v_ext
 
 import envi
-import envi.memcanvas as e_canvas
-import envi.resolver as e_resolv
-import envi.memory as e_mem
 import envi.cli as e_cli
+import envi.bits as e_bits
+import envi.memory as e_mem
 import envi.config as e_config
+import envi.resolver as e_resolv
+import envi.memcanvas as e_canvas
 
 import vstruct
+import vstruct.primitives as vs_prims
 
 vdb.basepath = vdb.__path__[0] + "/"
 
@@ -139,7 +141,7 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
         self.prompt = "vdb > "
         self.banner = "Welcome To VDB!\n"
 
-        self.loadDefaultRenderers()
+        self.loadDefaultRenderers(trace)
         self.loadExtensions(trace)
 
     def loadConfig(self):
@@ -151,7 +153,7 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
 
         self.config = e_config.EnviConfig(filename=cfgfile, defaults=defconfig)
 
-    def loadDefaultRenderers(self):
+    def loadDefaultRenderers(self, trace):
         import envi.memcanvas.renderers as e_render
         import vdb.renderers as v_rend
         # FIXME check endianness
@@ -159,6 +161,7 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
         self.canvas.addRenderer("u_int_16", e_render.ShortRend())
         self.canvas.addRenderer("u_int_32", e_render.LongRend())
         self.canvas.addRenderer("u_int_64", e_render.QuadRend())
+        self.canvas.addRenderer("disasm", v_rend.OpcodeRenderer(self.trace))
         drend = v_rend.DerefRenderer(self.trace)
         self.canvas.addRenderer("Deref View", drend)
 
@@ -212,7 +215,9 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
         return self.trace.parseExpression(exprstr)
 
     def getExpressionLocals(self):
-        return vtrace.VtraceExpressionLocals(self.trace)
+        r = vtrace.VtraceExpressionLocals(self.trace)
+        r["db"] = self
+        return r
 
     def reprPointer(self, address):
         """
@@ -229,7 +234,8 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
 
         # Check if it's a thread's stack
         for tid,tinfo in self.trace.getThreads().items():
-            sp = self.trace.getStackCounter(threadid=tid)
+            ctx = self.trace.getRegisterContext(tid)
+            sp = ctx.getStackCounter()
             stack,size,perms,fname = self.trace.getMemoryMap(sp)
             if address >= stack and address < (stack+size):
                 off = address - sp
@@ -257,7 +263,7 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
         Do the actual compile and execute for the script data
         contained in script which was read from filename.
         """
-        local = vtrace.VtraceExpressionLocals(self.trace)
+        local = self.getExpressionLocals()
         cobj = compile(script, filename, "exec")
         sthr = ScriptThread(cobj, local)
         sthr.start()
@@ -308,7 +314,8 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
             self.vprint("New Thread: %d" % trace.getMeta("ThreadId"))
 
         elif event == vtrace.NOTIFY_EXIT_THREAD:
-            self.vprint("Exit Thread: %d" % trace.getMeta("ThreadId"))
+            ecode = trace.getMeta("ExitCode", 0)
+            self.vprint("Exit Thread: %d (ecode: 0x%.8x (%d))" % (trace.getMeta("ThreadId"),ecode,ecode))
 
         elif event == vtrace.NOTIFY_DEBUG_PRINT:
             s = "<unknown>"
@@ -348,17 +355,21 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
 
         Usage: dis <address expression> [<size expression>]
         """
-        if len(line) == 0:
-            return self.do_help("dis")
 
         argv = e_cli.splitargs(line)
 
-        size = 12
-        addr = self.parseExpression(argv[0])
-        if len(argv) > 1:
+        size = 20
+        argc = len(argv)
+        if argc == 0:
+            addr = self.trace.getProgramCounter()
+        else:
+            addr = self.parseExpression(argv[0])
+
+        if argc > 1:
             size = self.parseExpression(argv[1])
 
-        rend = self.arch.getOpcodeRenderer()
+        import vdb.renderers as v_rend
+        rend = v_rend.OpcodeRenderer(self.trace)
         self.vprint("Dissassembly:")
         self.canvas.render(addr, size, rend=rend)
 
@@ -512,7 +523,10 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
         the current thread context for the target tracer.
         Usage: threads [thread id]
         """
-        self.trace.requireAttached()
+        self.trace.requireNotRunning()
+        if self.trace.isRunning():
+            self.vprint("Can't list threads while running!")
+            return
 
         if len(line) > 0:
             thrid = int(line, 0)
@@ -530,7 +544,8 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
             sus = ""
             if self.trace.isThreadSuspended(tid):
                 sus = "(suspended)"
-            pc = self.trace.getProgramCounter(threadid=tid)
+            ctx = self.trace.getRegisterContext(tid)
+            pc = ctx.getProgramCounter()
             self.vprint("%s%6d 0x%.8x 0x%.8x %s" % (a, tid, tinfo, pc, sus))
 
     def do_suspend(self, line):
@@ -624,6 +639,7 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
             if r.lower() != r:
                 continue
             val = regs.get(r)
+            vstr = e_bits.hex(val, 4)
             final.append(("%12s:0x%.8x (%d)" % (r,val,val)))
         self.columnize(final)
 
@@ -907,6 +923,23 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
                 msize = len(s)
         return [x.ljust(msize) for x in slist]
 
+    def do_guid(self, line):
+        """
+        Parse and display a Global Unique Identifier (GUID) from memory
+        (eventually, use GUID db to lookup the name/meaning of the GUID).
+
+        Usage: guid <addr_exp>
+        """
+        self.trace.requireNotRunning()
+        if not line:
+            return self.do_help("guid")
+
+        addr = self.parseExpression(line)
+        guid = vs_prims.GUID()
+        bytes = self.trace.readMemory(addr, len(guid))
+        guid.vsSetValue(bytes)
+        self.vprint("GUID 0x%.8x %s" % (addr, repr(guid)))
+
     def do_bpfile(self, line):
         """
         Set the python code for a breakpoint from the contents
@@ -966,6 +999,8 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
                 trace   - the tracer
                 bp      - the breakpoint object
         """
+        self.trace.requireNotRunning()
+
         argv = e_cli.splitargs(line)
         opts,args = getopt(argv, "F:e:d:o:r:L:Cc:W:")
         pycode = None

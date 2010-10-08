@@ -11,8 +11,14 @@ import platform
 import PE
 
 import vtrace
-import envi.resolver as e_resolv
+import vtrace.archs.i386 as v_i386
+import vtrace.archs.amd64 as v_amd64
+import vtrace.platforms.base as v_base
+
 import envi.memory as e_mem
+import envi.resolver as e_resolv
+import envi.archs.i386 as e_i386
+import envi.archs.amd64 as e_amd64
 
 from ctypes import *
 #from ctypes.wintypes import *
@@ -25,14 +31,59 @@ psapi = None
 ntdll = None
 advapi32 = None
 
+# Setup some ctypes helpers:
+# NOTE: we don't use LPVOID because it can return None.
+#       c_size_t is the designated platform word width int.
+LPVOID = c_size_t
+HANDLE  = LPVOID
+SIZE_T  = LPVOID
+DWORD   = c_ulong
+WORD    = c_ushort
+BOOL    = c_ulong
+
 # All platforms must be able to import this module (for exceptions etc..)
 if sys.platform == "win32":
+
     kernel32 = windll.kernel32
-    ntdll = windll.ntdll
+    # We need to inform some of the APIs about their args
+    kernel32.OpenProcess.argtypes = [DWORD, BOOL, DWORD]
+    kernel32.OpenProcess.restype = HANDLE
+    kernel32.CreateProcessA.argtypes = [LPVOID, c_char_p, LPVOID, LPVOID, c_uint, DWORD, LPVOID, LPVOID, LPVOID, LPVOID]
+    kernel32.ReadProcessMemory.argtypes = [HANDLE, LPVOID, LPVOID, SIZE_T, LPVOID]
+    #kernel32.WriteProcessMemory.argtypes = [HANDLE, LPVOID, LPVOID, SIZE_T, LPVOID]
+    kernel32.GetThreadContext.argtypes = [HANDLE, LPVOID]
+    kernel32.SetThreadContext.argtypes = [HANDLE, LPVOID]
+    kernel32.SuspendThread.argtypes = [HANDLE,]
+    kernel32.ResumeThread.argtypes = [HANDLE,]
+    kernel32.VirtualQueryEx.argtypes = [HANDLE, LPVOID, LPVOID, SIZE_T]
+    kernel32.DebugBreakProcess.argtypes = [HANDLE,]
+    kernel32.CloseHandle.argtypes = [HANDLE,]
+    kernel32.GetLogicalDriveStringsA.argtypes = [DWORD, LPVOID]
+    kernel32.TerminateProcess.argtypes = [HANDLE, DWORD]
+    kernel32.VirtualProtectEx.argtypes = [HANDLE, LPVOID, SIZE_T, DWORD, LPVOID]
+    kernel32.VirtualAllocEx.argtypes = [HANDLE, LPVOID, SIZE_T, DWORD, DWORD]
+    kernel32.DuplicateHandle.argtypes = [HANDLE, HANDLE, HANDLE, LPVOID, DWORD, DWORD, DWORD]
+
+
     psapi = windll.psapi
-    symsrv = windll.LoadLibrary(os.path.join(platdir, "symsrv.dll"))
-    dbghelp = windll.LoadLibrary(os.path.join(platdir, "dbghelp.dll"))
+    psapi.GetModuleFileNameExW.argtypes = [HANDLE, HANDLE, LPVOID, DWORD]
+    psapi.GetMappedFileNameW.argtypes = [HANDLE, LPVOID, LPVOID, DWORD]
+
+    ntdll = windll.ntdll
+    ntdll.NtQuerySystemInformation.argtypes = [DWORD, LPVOID, DWORD, LPVOID]
+    ntdll.NtQueryObject.argtypes = [HANDLE, DWORD, c_void_p, DWORD, LPVOID]
+
+    try:
+        symsrv = windll.LoadLibrary(os.path.join(platdir, "symsrv.dll"))
+        dbghelp = windll.LoadLibrary(os.path.join(platdir, "dbghelp.dll"))
+    except Exception, e:
+        print "WARNING: Failed to import dbghelp/symsrv: %s" % e
+
     advapi32 = windll.advapi32
+    advapi32.LookupPrivilegeValueA.argtypes = [LPVOID, c_char_p, LPVOID]
+    advapi32.OpenProcessToken.argtypes = [HANDLE, DWORD, HANDLE]
+    advapi32.AdjustTokenPrivileges.argtypes = [HANDLE, DWORD, LPVOID, DWORD, LPVOID, LPVOID]
+
 
 INFINITE = 0xffffffff
 EXCEPTION_MAXIMUM_PARAMETERS = 15
@@ -62,8 +113,6 @@ SYMFLAG_FUNCTION         = 0x00000800
 SYMFLAG_VIRTUAL          = 0x00001000
 SYMFLAG_THUNK            = 0x00002000
 SYMFLAG_TLSREL           = 0x00004000
-
-
 
 # Symbol Resolution Options
 SYMOPT_CASE_INSENSITIVE         = 0x00000001
@@ -134,14 +183,17 @@ EXCEPTION_REG_NAT_CONSUMPTION        = 0xC00002C9L
 # Context Info
 CONTEXT_i386    = 0x00010000    # this assumes that i386 and
 CONTEXT_i486    = 0x00010000    # i486 have identical context records
-CONTEXT_CONTROL         = (CONTEXT_i386 | 0x00000001L) # SS:SP, CS:IP, FLAGS, BP
-CONTEXT_INTEGER         = (CONTEXT_i386 | 0x00000002L) # AX, BX, CX, DX, SI, DI
-CONTEXT_SEGMENTS        = (CONTEXT_i386 | 0x00000004L) # DS, ES, FS, GS
-CONTEXT_FLOATING_POINT  = (CONTEXT_i386 | 0x00000008L) # 387 state
-CONTEXT_DEBUG_REGISTERS = (CONTEXT_i386 | 0x00000010L) # DB 0-3,6,7
-CONTEXT_EXTENDED_REGISTERS  = (CONTEXT_i386 | 0x00000020L) # cpu specific extensions
+CONTEXT_AMD64   = 0x00100000    # For amd x64...
+
+CONTEXT_CONTROL         = 0x00000001L # SS:SP, CS:IP, FLAGS, BP
+CONTEXT_INTEGER         = 0x00000002L # AX, BX, CX, DX, SI, DI
+CONTEXT_SEGMENTS        = 0x00000004L # DS, ES, FS, GS
+CONTEXT_FLOATING_POINT  = 0x00000008L # 387 state
+CONTEXT_DEBUG_REGISTERS = 0x00000010L # DB 0-3,6,7
+CONTEXT_EXTENDED_REGISTERS  = 0x00000020L # cpu specific extensions
 CONTEXT_FULL = (CONTEXT_CONTROL | CONTEXT_INTEGER | CONTEXT_SEGMENTS)
 CONTEXT_ALL = (CONTEXT_CONTROL | CONTEXT_INTEGER | CONTEXT_SEGMENTS | CONTEXT_FLOATING_POINT | CONTEXT_DEBUG_REGISTERS | CONTEXT_EXTENDED_REGISTERS)
+
 
 # Thread Permissions
 THREAD_ALL_ACCESS = 0x001f03ff
@@ -197,12 +249,12 @@ MAX_PATH=260
 
 class EXCEPTION_RECORD(Structure):
     _fields_ = [
-            ("ExceptionCode", c_ulong),
-            ("ExceptionFlags", c_ulong),
-            ("ExceptionRecord", c_ulong),
-            ("ExceptionAddress", c_ulong), # Aparently c_void_p can be None
+            ("ExceptionCode", DWORD),
+            ("ExceptionFlags", DWORD),
+            ("ExceptionRecord", LPVOID),
+            ("ExceptionAddress", LPVOID),
             ("NumberParameters", c_ulong),
-            ("ExceptionInformation", c_ulong * EXCEPTION_MAXIMUM_PARAMETERS)
+            ("ExceptionInformation", LPVOID * EXCEPTION_MAXIMUM_PARAMETERS)
             ]
 
 class EXCEPTION_DEBUG_INFO(Structure):
@@ -210,45 +262,50 @@ class EXCEPTION_DEBUG_INFO(Structure):
             ("ExceptionRecord", EXCEPTION_RECORD),
             ("FirstChance", c_ulong)
             ]
+
 class CREATE_THREAD_DEBUG_INFO(Structure):
     _fields_ = [
-            ("Thread", c_ulong),
-            ("ThreadLocalBase", c_ulong),
-            ("StartAddress", c_ulong)
+            ("Thread", HANDLE),
+            ("ThreadLocalBase", LPVOID),
+            ("StartAddress", LPVOID)
             ]
+
 class CREATE_PROCESS_DEBUG_INFO(Structure):
     _fields_ = [
-            ("File", c_ulong), # HANDLE 
-            ("Process", c_ulong), # HANDLE
-            ("Thread", c_ulong), # HANDLE
-            ("BaseOfImage", c_ulong),
+            ("File", HANDLE),
+            ("Process", HANDLE),
+            ("Thread", HANDLE),
+            ("BaseOfImage", LPVOID),
             ("DebugInfoFileOffset", c_ulong),
             ("DebugInfoSize", c_ulong),
-            ("ThreadLocalBase", c_ulong),
-            ("StartAddress", c_ulong),
-            ("ImageName", c_ulong),
+            ("ThreadLocalBase", LPVOID),
+            ("StartAddress", LPVOID),
+            ("ImageName", LPVOID),
             ("Unicode", c_short),
             ]
+
 class EXIT_THREAD_DEBUG_INFO(Structure):
     _fields_ = [("ExitCode", c_ulong),]
+
 class EXIT_PROCESS_DEBUG_INFO(Structure):
     _fields_ = [("ExitCode", c_ulong),]
+
 class LOAD_DLL_DEBUG_INFO(Structure):
     _fields_ = [
-            ("File", c_ulong), #HANDLE
-            ("BaseOfDll", c_ulong),
+            ("File", HANDLE),
+            ("BaseOfDll", LPVOID),
             ("DebugInfoFileOffset", c_ulong),
             ("DebugInfoSize", c_ulong),
-            ("ImageName", c_ulong),
+            ("ImageName", LPVOID),
             ("Unicode", c_ushort),
             ]
 class UNLOAD_DLL_DEBUG_INFO(Structure):
     _fields_ = [
-            ("BaseOfDll", c_ulong),
+            ("BaseOfDll", LPVOID),
             ]
 class OUTPUT_DEBUG_STRING_INFO(Structure):
     _fields_ = [
-            ("DebugStringData", c_ulong), #FIXME 64bit
+            ("DebugStringData", LPVOID),
             ("Unicode", c_ushort),
             ("DebugStringLength", c_ushort),
             ]
@@ -289,21 +346,101 @@ class FloatSavex86(Structure):
                   ("Cr0NpxState", c_ulong),
                   ]
 
+class CONTEXTx64(Structure):
+    _fields_ = [
+
+        ("P1Home",c_ulonglong),
+        ("P2Home",c_ulonglong),
+        ("P3Home",c_ulonglong),
+        ("P4Home",c_ulonglong),
+        ("P5Home",c_ulonglong),
+        ("P6Home",c_ulonglong),
+
+        ("ContextFlags", DWORD),
+        ("MxCsr",DWORD),
+
+        ("cs",WORD),
+        ("ds",WORD),
+        ("es",WORD),
+        ("fs", WORD),
+        ("gs",WORD),
+        ("ss",WORD),
+        ("eflags",DWORD),
+
+        ("debug0",c_ulonglong),
+        ("debug1",c_ulonglong),
+        ("debug2",c_ulonglong),
+        ("debug3",c_ulonglong),
+        ("debug6",c_ulonglong),
+        ("debug7",c_ulonglong),
+
+        ("rax",c_ulonglong),
+        ("rcx",c_ulonglong),
+        ("rdx",c_ulonglong),
+        ("rbx",c_ulonglong),
+        ("rsp",c_ulonglong),
+        ("rbp",c_ulonglong),
+        ("rsi",c_ulonglong),
+        ("rdi",c_ulonglong),
+        ("r8",c_ulonglong),
+        ("r9",c_ulonglong),
+        ("r10",c_ulonglong),
+        ("r11",c_ulonglong),
+        ("r12",c_ulonglong),
+        ("r13",c_ulonglong),
+        ("r14",c_ulonglong),
+        ("r15",c_ulonglong),
+        ("rip",c_ulonglong),
+
+        ("foo",c_ulonglong*200),
+
+        #union {
+            #XMM_SAVE_AREA32 FltSave,
+            #struct {
+                #M128A Header[2],
+                #M128A Legacy[8],
+                #M128A Xmm0,
+                #M128A Xmm1,
+                #M128A Xmm2,
+                #M128A Xmm3,
+                #M128A Xmm4,
+                #M128A Xmm5,
+                #M128A Xmm6,
+                #M128A Xmm7,
+                #M128A Xmm8,
+                #M128A Xmm9,
+                #M128A Xmm10,
+                #M128A Xmm11,
+                #M128A Xmm12,
+                #M128A Xmm13,
+                #M128A Xmm14,
+                #M128A Xmm15,
+            #},
+        #},
+
+        #M128A VectorRegister[26],
+        #(VectorControl,c_ulonglong),
+
+        #(DebugControl,c_ulonglong),
+        #(LastBranchToRip,c_ulonglong),
+        #(LastBranchFromRip,c_ulonglong),
+        #(LastExceptionToRip,c_ulonglong),
+        #(LastExceptionFromRip,c_ulonglong),
+    ]
+
 class CONTEXTx86(Structure):
-    _fields_ = [ ("ContextFlags", c_ulong),
-                   ("Dr0", c_ulong),
-                   ("Dr1", c_ulong),
-                   ("Dr2", c_ulong),
-                   ("Dr3", c_ulong),
-                   ("Dr4", c_ulong),
-                   ("Dr5", c_ulong),
-                   ("Dr6", c_ulong),
-                   ("Dr7", c_ulong),
+    _fields_ = [   ("ContextFlags", c_ulong),
+                   ("debug0", c_ulong),
+                   ("debug1", c_ulong),
+                   ("debug2", c_ulong),
+                   ("debug3", c_ulong),
+                   ("debug6", c_ulong),
+                   ("debug7", c_ulong),
                    ("FloatSave", FloatSavex86),
-                   ("SegGs", c_ulong),
-                   ("SegFs", c_ulong),
-                   ("SegEs", c_ulong),
-                   ("SegDs", c_ulong),
+                   ("gs", c_ulong),
+                   ("fs", c_ulong),
+                   ("es", c_ulong),
+                   ("ds", c_ulong),
                    ("edi", c_ulong),
                    ("esi", c_ulong),
                    ("ebx", c_ulong),
@@ -312,10 +449,10 @@ class CONTEXTx86(Structure):
                    ("eax", c_ulong),
                    ("ebp", c_ulong),
                    ("eip", c_ulong),
-                   ("SegCs", c_ulong),
+                   ("cs", c_ulong),
                    ("eflags", c_ulong),
                    ("esp", c_ulong),
-                   ("SegSs", c_ulong),
+                   ("ss", c_ulong),
                    ("Extension", c_byte * 512),
                    ]
 
@@ -362,7 +499,7 @@ class STARTUPINFO(Structure):
             ("Flags", c_ulong),
             ("ShowWindow", c_ushort),
             ("Reserved2", c_ushort),
-            ("Reserved3", c_void_p),
+            ("Reserved3", LPVOID),
             ("StdInput", c_ulong),
             ("StdOutput", c_ulong),
             ("StdError", c_ulong),
@@ -577,21 +714,21 @@ dbgprivdone = False
 def getDebugPrivileges():
     tokprivs = TOKEN_PRIVILEGES()
     dbgluid = LUID()
-    token = c_uint(0)
+    token = HANDLE(0)
 
-    if not advapi32.LookupPrivilegeValueA(0, "seDebugPrivilege", byref(dbgluid)):
+    if not advapi32.LookupPrivilegeValueA(0, "seDebugPrivilege", addressof(dbgluid)):
         print "LookupPrivilegeValue Failed: %d" % kernel32.GetLastError()
         return False
 
-    if not advapi32.OpenProcessToken(-1, TOKEN_ADJUST_PRIVILEGES, byref(token)):
-        print "OpenProcessToken Failed: %d" % kernel32.GetLastError()
+    if not advapi32.OpenProcessToken(-1, TOKEN_ADJUST_PRIVILEGES, addressof(token)):
+        print "kernel32.OpenProcessToken Failed: %d" % kernel32.GetLastError()
         return False
 
     tokprivs.PrivilegeCount = 1
     tokprivs.Privilege = dbgluid
     tokprivs.PrivilegeAttribute = SE_PRIVILEGE_ENABLED
 
-    if not advapi32.AdjustTokenPrivileges(token, 0, byref(tokprivs), 0, 0, 0):
+    if not advapi32.AdjustTokenPrivileges(token, 0, addressof(tokprivs), 0, 0, 0):
         kernel32.CloseHandle(token)
         print "AdjustTokenPrivileges Failed: %d" % kernel32.GetLastError()
         return False
@@ -619,12 +756,16 @@ def GetModuleFileNameEx(phandle, mhandle):
     psapi.GetModuleFileNameExW(phandle, mhandle, addressof(buf), 1024)
     return buf.value
 
-class Win32Mixin:
+class WindowsMixin:
+
     """
-    The main mixin for calling the win32 api's via ctypes
+    A mixin to handle all non-arch specific win32 stuff.
     """
 
-    def initMixin(self):
+    def __init__(self):
+
+        self.casesens = False
+
         self.phandle = None
         self.thandles = {}
         self.win32threads = {}
@@ -658,8 +799,8 @@ class Win32Mixin:
         self.threadWrap("platformStepi", self.platformStepi)
         self.threadWrap("platformContinue", self.platformContinue)
         self.threadWrap("platformWait", self.platformWait)
-        self.threadWrap("platformGetRegs", self.platformGetRegs)
-        self.threadWrap("platformSetRegs", self.platformSetRegs)
+        self.threadWrap("platformGetRegCtx", self.platformGetRegCtx)
+        self.threadWrap("platformSetRegCtx", self.platformSetRegCtx)
         self.threadWrap("platformExec", self.platformExec)
 
     def platformGetFds(self):
@@ -687,7 +828,7 @@ class Win32Mixin:
         """
         hret = c_uint(0)
         kernel32.DuplicateHandle(self.phandle, handle,
-                                 kernel32.GetCurrentProcess(), byref(hret),
+                                 kernel32.GetCurrentProcess(), addressof(hret),
                                  0, False, 2) # DUPLICATE_SAME_ACCESS
         return hret.value
 
@@ -702,12 +843,12 @@ class Win32Mixin:
                 return "_TIMEOUT_"
 
         ntdll.NtQueryObject(handle, itype,
-                buf, sizeof(buf), byref(retSiz))
+                buf, sizeof(buf), addressof(retSiz))
 
         realbuf = create_string_buffer(retSiz.value)
 
         if ntdll.NtQueryObject(handle, itype,
-                realbuf, sizeof(realbuf), byref(retSiz)) == 0:
+                realbuf, sizeof(realbuf), addressof(retSiz)) == 0:
 
             uString = cast(realbuf, PUNICODE_STRING).contents
             return uString.Buffer
@@ -723,7 +864,7 @@ class Win32Mixin:
         hinfo = buildSystemHandleInformation(count)
         hsize = c_ulong(sizeof(hinfo))
 
-        ntdll.NtQuerySystemInformation(NT_LIST_HANDLES, addressof(hinfo), hsize, None)
+        ntdll.NtQuerySystemInformation(NT_LIST_HANDLES, addressof(hinfo), hsize, 0)
 
         return hinfo
 
@@ -740,20 +881,6 @@ class Win32Mixin:
 
     def platformKill(self):
         kernel32.TerminateProcess(self.phandle, 0)
-
-    def getRegisterFormat(self):
-        return "51L"
-
-    def getRegisterNames(self):
-        return ("ContextFlags","debug0","debug1","debug2","debug3",
-                "debug6","debug7","ControlWord","StatusWord","TagWord",
-                "ErrorOffset","ErrorSelector","DataOffset","DataSelector",
-                # FIXME is the float stuff returning 0 all the time?
-                "fa0","fa1","fa2","fa3","fa4","fa5","fa6","fa7","fa8","fa9",
-                "fa10","fa11","fa12","fa13","fa14","fa15","fa16","fa17","fa18","fa19",
-                "Cr0NpxState","gs","fs","es","ds",
-                "edi","esi","ebx","edx","ecx","eax","ebp","eip","cs","eflags",
-                "esp","ss")
 
     def platformExec(self, cmdline):
         sinfo = STARTUPINFO()
@@ -786,7 +913,7 @@ class Win32Mixin:
         # Do the crazy "can't supress exceptions from detach" dance.
         if ((not self.exited) and
             self.getCurrentBreakpoint() != None):
-            self.cleanupBreakpoints()
+            self._cleanupBreakpoints()
             self.platformContinue()
             self.platformSendBreak()
             self.platformWait()
@@ -800,14 +927,14 @@ class Win32Mixin:
         pval = perm_rev_lookup.get(perms, PAGE_EXECUTE_READWRITE)
         ret = kernel32.VirtualProtectEx(self.phandle, va, size, pval, addressof(pret))
         if ret == 0:
-            raiseWin32Error("VirtualProtectEx")
+            raiseWin32Error("kernel32.VirtualProtectEx")
 
     def platformAllocateMemory(self, size, perms=e_mem.MM_RWX, suggestaddr=0):
         pval = perm_rev_lookup.get(perms, PAGE_EXECUTE_READWRITE)
         ret = kernel32.VirtualAllocEx(self.phandle,
                 suggestaddr, size, MEM_COMMIT, pval)
         if ret == 0:
-            raiseWin32Error("VirtualAllocEx")
+            raiseWin32Error("kernel32.VirtualAllocEx")
         return ret
 
     def platformReadMemory(self, address, size):
@@ -815,7 +942,7 @@ class Win32Mixin:
         buf = btype()
         ret = c_ulong(0)
         if not kernel32.ReadProcessMemory(self.phandle, address, addressof(buf), size, addressof(ret)):
-            raiseWin32Error("ReadProcessMemory %s" % hex(address))
+            raiseWin32Error("kernel32.ReadProcessMemory %s" % hex(address))
         return buf.raw
 
     def platformContinue(self):
@@ -833,54 +960,31 @@ class Win32Mixin:
             raiseWin32Error("ContinueDebugEvent")
 
     def platformStepi(self):
-        self.setEflagsTf()
-        self.syncRegs()
+        # We have some flag fields broken out as meta regs
+        self.setRegisterByName("TF", 1)
+        self._syncRegs()
         self.platformContinue()
 
     def platformWriteMemory(self, address, buf):
         ret = c_ulong(0)
+        #print "WRITE",self.phandle,address,buf,len(buf),addressof(ret)
         if not kernel32.WriteProcessMemory(self.phandle, address, buf, len(buf), addressof(ret)):
-            raiseWin32Error("WriteProcessMemory")
+            raiseWin32Error("kernel32.WriteProcessMemory")
         # If we wrote memory, flush the instruction cache...
         self.flushcache = True
         return ret.value
 
-    def platformGetRegs(self, threadid):
-        ctx = CONTEXTx86()
-        ctx.ContextFlags = (CONTEXT_FULL | CONTEXT_DEBUG_REGISTERS)
-        thandle = self.thandles.get(threadid, None)
-        if not thandle:
-            raise Exception("Getting registers for unknown thread")
-        if not kernel32.GetThreadContext(thandle, addressof(ctx)):
-            raiseWin32Error("GetThreadContext")
-        return string_at(addressof(ctx), sizeof(ctx))
-
-    def platformSetRegs(self, bytes, threadid):
-        buf = c_buffer(bytes)
-        ctx = CONTEXTx86()
-        thandle = self.thandles.get(threadid, None)
-        if not thandle:
-            raise Exception("Getting registers for unknown thread")
-        if not kernel32.GetThreadContext(thandle, addressof(ctx)):
-            raiseWin32Error("GetThreadContext")
-
-        memmove(addressof(ctx), addressof(buf), len(bytes))
-        ctx.ContextFlags = (CONTEXT_FULL | CONTEXT_DEBUG_REGISTERS)
-
-        if not kernel32.SetThreadContext(thandle, addressof(ctx)):
-            raiseWin32Error("SetThreadContext")
-
     def platformSendBreak(self):
         #FIXME make this support windows 2000
         if not kernel32.DebugBreakProcess(self.phandle):
-            raiseWin32Error("DebugBreakProcess")
+            raiseWin32Error("kernel32.DebugBreakProcess")
 
     def platformPs(self):
         ret = []
         pcount = 128 # Hardcoded limit of 128 processes... oh well..
         pids = (c_int * pcount)()
         needed = c_int(0)
-        hmodule = c_int(0)
+        hmodule = HANDLE()
 
         psapi.EnumProcesses(addressof(pids), 4*pcount, addressof(needed))
         for i in range(needed.value/4):
@@ -930,7 +1034,9 @@ class Win32Mixin:
            self.win32threads[ThreadId] = teb
            self.thandles[ThreadId] = event.u.CreateProcessInfo.Thread
 
-           peb, = self.readMemoryFormat(teb + 0x30, "L")
+           tobj = self.getStruct("win32.TEB", teb)
+           peb = tobj.ProcessEnvironmentBlock
+
            self.setMeta("PEB", peb)
            self.setVariable("peb", peb)
 
@@ -960,7 +1066,7 @@ class Win32Mixin:
 
             plist = []
             for i in range(exparam):
-                plist.append(event.u.Exception.ExceptionRecord.ExceptionInformation[i])
+                plist.append(long(event.u.Exception.ExceptionRecord.ExceptionInformation[i]))
 
             eventdict["ExceptionCode"] = excode
             eventdict["ExceptionFlags"] = exflags
@@ -970,6 +1076,7 @@ class Win32Mixin:
             eventdict["ExceptionInformation"] = plist
 
             self.setMeta("PendingException", False)
+
             if firstChance:
 
                 if excode == EXCEPTION_BREAKPOINT:
@@ -985,6 +1092,9 @@ class Win32Mixin:
                         #self.setMeta("PendingException", True)
 
                 elif excode == EXCEPTION_SINGLE_STEP:
+                    # NOTE: on win32, aparently a hardware breakpoints
+                    # come through with an EXCEPTION_SINGLE_STEP code
+                    # rather than EXCEPTION_BREAKPOINT.
                     self.setMeta("PendingException", False)
                     if not self.checkWatchpoints():
                         self.fireNotifiers(vtrace.NOTIFY_STEP)
@@ -1066,7 +1176,9 @@ class Win32Mixin:
     def platformGetMaps(self):
         ret = []
         base = 0
-        mbi = MEMORY_BASIC_INFORMATION32()
+
+        mbi = self._winGetMemStruct()
+
         while kernel32.VirtualQueryEx(self.phandle, base, addressof(mbi), sizeof(mbi)) > 0:
             if mbi.State == MEM_COMMIT:
                 prot = mbi.Protect & 0xff
@@ -1079,6 +1191,7 @@ class Win32Mixin:
                 ret.append( (base, mbi.RegionSize, perm, mname) )
 
             base += mbi.RegionSize
+
         return ret
 
     def platformGetThreads(self):
@@ -1092,9 +1205,107 @@ class Win32Mixin:
         if kernel32.ResumeThread(thrid) == 0xffffffff:
             raiseWin32Error()
 
+    def platformParseBinary(self, filename, baseaddr, normname):
+        if dbghelp != None:
+            self.parseWithDbgHelp(filename, baseaddr, normname)
+        else:
+            self.parseWithPE(filename, baseaddr, normname)
+
+    def parseWithDbgHelp(self, filename, baseaddr, normname):
+        funcflags = (SYMFLAG_FUNCTION | SYMFLAG_EXPORT)
+
+        parser = Win32SymbolParser(self.phandle, filename, baseaddr)
+        parser.parse()
+
+        for name, addr, size, flags in parser.symbols:
+            symclass = e_resolv.Symbol
+            if flags & funcflags:
+                symclass = e_resolv.FunctionSymbol
+            sym = symclass(name, addr, size, normname)
+            self.addSymbol(sym)
+
+    def parseWithPE(self, filename, baseaddr, normname):
+        pe = PE.peFromMemoryObject(self, baseaddr)
+        for rva, ord, name in pe.getExports():
+            self.addSymbol(e_resolv.Symbol(name, baseaddr+rva, 0, normname))
+
+    def platformGetRegCtx(self, threadid):
+        ctx = self.archGetRegCtx()
+        c = self._winGetRegStruct()
+
+        thandle = self.thandles.get(threadid, None)
+        if not thandle:
+            raise Exception("Getting registers for unknown thread")
+
+        if not kernel32.GetThreadContext(thandle, addressof(c)):
+            raiseWin32Error("kernel32.GetThreadContext")
+
+        ctx._rctx_Import(c)
+        return ctx
+
+    def platformSetRegCtx(self, threadid, ctx):
+
+        c = self._winGetRegStruct()
+
+        thandle = self.thandles.get(threadid, None)
+        if not thandle:
+            raise Exception("Getting registers for unknown thread")
+
+        if not kernel32.GetThreadContext(thandle, addressof(c)):
+            raiseWin32Error("kernel32.GetThreadContext")
+
+        ctx._rctx_Export(c)
+
+        if not kernel32.SetThreadContext(thandle, addressof(c)):
+            raiseWin32Error("kernel32.SetThreadContext")
+
+# NOTE: The order of the constructors vs inheritance is very important...
+
+class Windowsi386Trace(
+            vtrace.Trace,
+            WindowsMixin,
+            v_i386.i386Mixin,
+            v_base.TracerBase,
+            ):
+
+    def __init__(self):
+        vtrace.Trace.__init__(self)
+        v_base.TracerBase.__init__(self)
+        v_i386.i386Mixin.__init__(self)
+        WindowsMixin.__init__(self)
+
+    def _winGetRegStruct(self):
+        c = CONTEXTx86()
+        c.ContextFlags = (CONTEXT_i386 | CONTEXT_FULL | CONTEXT_DEBUG_REGISTERS)
+        return c
+
+    def _winGetMemStruct(self):
+        return MEMORY_BASIC_INFORMATION32()
+
+class WindowsAmd64Trace(
+            vtrace.Trace,
+            WindowsMixin,
+            v_amd64.Amd64Mixin,
+            v_base.TracerBase,
+            ):
+
+    def __init__(self):
+        vtrace.Trace.__init__(self)
+        v_base.TracerBase.__init__(self)
+        WindowsMixin.__init__(self)
+        v_amd64.Amd64Mixin.__init__(self)
+
+    def _winGetRegStruct(self):
+        c = CONTEXTx64()
+        c.ContextFlags = (CONTEXT_AMD64 | CONTEXT_FULL | CONTEXT_DEBUG_REGISTERS)
+        return c
+
+    def _winGetMemStruct(self):
+        return MEMORY_BASIC_INFORMATION64()
+
 if sys.platform == "win32":
     SYMCALLBACK = WINFUNCTYPE(c_int, POINTER(SYMBOL_INFO), c_ulong, c_ulong)
-    PDBCALLBACK = WINFUNCTYPE(c_int, c_char_p, c_void_p)
+    PDBCALLBACK = WINFUNCTYPE(c_int, c_char_p, LPVOID)
 
 class Win32SymbolParser:
 
@@ -1123,12 +1334,12 @@ class Win32SymbolParser:
             return True
         #self.printSymbolInfo(sym)
         s = c_ulong(0)
-        self.symGetTypeInfo(sym.TypeIndex, TI_GET_CHILDRENCOUNT, byref(s))
+        self.symGetTypeInfo(sym.TypeIndex, TI_GET_CHILDRENCOUNT, addressof(s))
         print sym.Name
         print "KIDS %s" % s.value
         tif = buildFindChildrenParams(s.value)
         tif.Count = s.value
-        self.symGetTypeInfo(sym.TypeIndex, TI_FINDCHILDREN, byref(tif))
+        self.symGetTypeInfo(sym.TypeIndex, TI_FINDCHILDREN, addressof(tif))
         n = c_ulong(0)
         offset = c_ulong(0)
         size = c_ulonglong(0)
@@ -1136,9 +1347,9 @@ class Win32SymbolParser:
             #print "CHID",tif.Children[i]
             #self.symGetTypeInfo(
             child = tif.Children[i]
-            self.symGetTypeInfo(child, TI_GET_SYMNAME, byref(n))
-            self.symGetTypeInfo(child, TI_GET_OFFSET, byref(offset))
-            self.symGetTypeInfo(child, TI_GET_COUNT, byref(size))
+            self.symGetTypeInfo(child, TI_GET_SYMNAME, addressof(n))
+            self.symGetTypeInfo(child, TI_GET_OFFSET, addressof(offset))
+            self.symGetTypeInfo(child, TI_GET_COUNT, addressof(size))
             print "CHILD %.4x %s %d" % (offset.value, wstring_at(n.value), size.value)
             #FIXME free type info!
         return True
@@ -1148,7 +1359,7 @@ class Win32SymbolParser:
         self.symbols.append((sym.Name, int(sym.Address), int(sym.Size), sym.Flags))
         return True
 
-    def parseWithDbgHelp(self):
+    def parse(self):
         try:
 
             dbghelp.SymInitialize(self.phandle, None, False)
@@ -1183,25 +1394,4 @@ class Win32SymbolParser:
         except Exception, e:
             traceback.print_exc()
             raise
-
-class PEMixin:
-    """
-    A platform mixin to parse PE binaries
-    """
-    def initMixin(self):
-        # Modify the symbol resolver's case sensitivity
-        self.casesens = False
-
-    def platformParseBinary(self, filename, baseaddr, normname):
-        funcflags = (SYMFLAG_FUNCTION | SYMFLAG_EXPORT)
-
-        parser = Win32SymbolParser(self.phandle, filename, baseaddr)
-        parser.parseWithDbgHelp()
-
-        for name, addr, size, flags in parser.symbols:
-            symclass = e_resolv.Symbol
-            if flags & funcflags:
-                symclass = e_resolv.FunctionSymbol
-            sym = symclass(name, addr, size, normname)
-            self.addSymbol(sym)
 

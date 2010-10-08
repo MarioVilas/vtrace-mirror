@@ -7,7 +7,7 @@ import sys
 import traceback
 
 import envi
-import envi.intel as e_intel # FIXME This should NOT have to be here
+import envi.archs.i386 as e_i386 # FIXME This should NOT have to be here
 
 class RegisterException(Exception):
     pass
@@ -21,16 +21,16 @@ def cmpRegs(emu, trace):
     return True
 
 reg_map = [
-    (e_intel.REG_EAX, "eax"),
-    (e_intel.REG_ECX, "ecx"),
-    (e_intel.REG_EDX, "edx"),
-    (e_intel.REG_EBX, "ebx"),
-    (e_intel.REG_ESP, "esp"),
-    (e_intel.REG_EBP, "ebp"),
-    (e_intel.REG_ESI, "esi"),
-    (e_intel.REG_EDI, "edi"),
-    (e_intel.REG_EIP, "eip"),
-    (e_intel.REG_FLAGS, "eflags")
+    (e_i386.REG_EAX, "eax"),
+    (e_i386.REG_ECX, "ecx"),
+    (e_i386.REG_EDX, "edx"),
+    (e_i386.REG_EBX, "ebx"),
+    (e_i386.REG_ESP, "esp"),
+    (e_i386.REG_EBP, "ebp"),
+    (e_i386.REG_ESI, "esi"),
+    (e_i386.REG_EDI, "edi"),
+    (e_i386.REG_EIP, "eip"),
+    (e_i386.REG_EFLAGS, "eflags")
     ]
 
 #FIXME intel specific
@@ -50,7 +50,7 @@ def emulatorFromTrace(trace):
     emu = amod.getEmulator()
 
     if trace.getMeta("Platform") == "Windows":
-        emu.setSegmentInfo(e_intel.SEG_FS, trace.getThreads()[trace.getMeta("ThreadId")], 0xffffffff)
+        emu.setSegmentInfo(e_i386.SEG_FS, trace.getThreads()[trace.getMeta("ThreadId")], 0xffffffff)
 
     emu.setMemoryObject(trace)
     setRegs(emu, trace)
@@ -77,12 +77,13 @@ def lockStepEmulator(emu, trace):
 import vtrace
 import vtrace.platforms.base as v_base
 
-class TraceEmulator(vtrace.Trace, v_base.BasePlatformMixin, v_base.UtilMixin):
+class TraceEmulator(vtrace.Trace, v_base.TracerBase):
     """
     Wrap an arbitrary emulator in a Tracer compatible API.
     """
     def __init__(self, emu):
         vtrace.Trace.__init__(self)
+        v_base.TracerBase.__init__(self)
         self.emu = emu
 
         # Fake out being attached
@@ -121,14 +122,6 @@ class TraceEmulator(vtrace.Trace, v_base.BasePlatformMixin, v_base.UtilMixin):
 
     def platformDetach(self):
         pass
-
-    def getPcName(self):
-        arch = self.emu.arch
-        return arch.getRegisterName(arch.getProgramCounterIndex())
-
-    def getSpName(self):
-        arch = self.emu.arch
-        return arch.getRegisterName(arch.getStackCounterIndex())
 
     # Over-ride register *caching* subsystem to store/retrieve
     # register information in pure dictionaries

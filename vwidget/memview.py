@@ -195,6 +195,18 @@ class MemoryView(vw_views.VTextView, e_canvas.MemoryCanvas):
             self.checkRender(va,size,rend)
             self.__goto(va)
 
+    def godown(self):
+        va,size,rend = self.valist[self.histindex]
+        va = self.endva
+        self.checkRender(va, size, rend)
+        self.__goto(va)
+
+    def goup(self):
+        va,size,rend = self.valist[self.histindex]
+        va = self.beginva - size
+        self.checkRender(va, size, rend)
+        self.__goto(va)
+
     def __goto(self, va):
         # Scroll and highlight.
         mark = self.markmap.get(va)
@@ -268,7 +280,6 @@ class MemoryView(vw_views.VTextView, e_canvas.MemoryCanvas):
             endsearch += 1
 
         if enditer == None:
-            print "NO END"
             enditer = self.textbuf.get_end_iter()
 
         # Delete the old text
@@ -314,14 +325,12 @@ class MemoryView(vw_views.VTextView, e_canvas.MemoryCanvas):
         # for the line.  Update our "position" on clicks
         if event.type == gdk.BUTTON_PRESS:
             self.setVaFromIter(iter)
-        #return True
 
     # A special tag event handler for VA tags.
     def vaTagEvent(self, tag, textview, event, iter):
 
         if event.type == gdk._2BUTTON_PRESS:
             self.goto(tag.va)
-            #return True
 
         elif event.type == gdk.BUTTON_PRESS:
             self.selectva = tag.va
@@ -389,10 +398,22 @@ class MemoryWindow(vw_layout.LayoutWindow):
         self.backbutton.set_image(i)
         self.backbutton.connect("clicked", self.goback)
 
+        self.downbutton = gtk.Button()
+        i = gtk.image_new_from_stock(gtk.STOCK_GO_DOWN, gtk.ICON_SIZE_BUTTON)
+        self.downbutton.set_image(i)
+        self.downbutton.connect("clicked", self.godown)
+
+        self.upbutton = gtk.Button()
+        i = gtk.image_new_from_stock(gtk.STOCK_GO_UP, gtk.ICON_SIZE_BUTTON)
+        self.upbutton.set_image(i)
+        self.upbutton.connect("clicked", self.goup)
+
         hbox = gtk.HBox()
 
         hbox.pack_start(self.backbutton, expand=False)
         hbox.pack_start(self.nextbutton, expand=False)
+        hbox.pack_start(self.upbutton, expand=False)
+        hbox.pack_start(self.downbutton, expand=False)
         hbox.pack_start(elabel, expand=False)
         hbox.pack_start(self.eentry, expand=True)
         hbox.pack_start(slabel, expand=False)
@@ -430,6 +451,14 @@ class MemoryWindow(vw_layout.LayoutWindow):
 
     def goto(self, va, size=None, rend=None):
         self.canvas.goto(va, size=size, rend=rend)
+        self.updateHistoryButtons()
+
+    def godown(self, *args):
+        self.canvas.godown()
+        self.updateHistoryButtons()
+
+    def goup(self, *args):
+        self.canvas.goup()
         self.updateHistoryButtons()
 
     def goforward(self, *args):

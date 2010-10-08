@@ -1,6 +1,11 @@
 import struct
 import envi
 
+"""
+A module containing memory utilities and the definition of the
+memory access API used by all vtoys trace/emulators/workspaces.
+"""
+
 # Memory Map Permission Flags
 MM_READ = 0x4
 MM_WRITE = 0x2
@@ -82,12 +87,32 @@ class IMemory:
         # get chopped up by python's struct package
         if self.imem_psize == 4:
             fmt = fmt.replace("P","L")
-        elif self.imm_psize == 8:
+        elif self.imem_psize == 8:
             fmt = fmt.replace("P","Q")
 
         size = struct.calcsize(fmt)
         bytes = self.readMemory(va, size)
         return struct.unpack(fmt, bytes)
+
+    def getSegmentInfo(self, id):
+        return (0,0xffffffff)
+
+    def readMemValue(self, addr, size):
+        bytes = self.readMemory(addr, size)
+        if bytes == None:
+            return None
+        #FIXME change this (and all uses of it) to passing in format...
+        if len(bytes) != size:
+            raise Exception("Read Gave Wrong Length At 0x%.8x (va: 0x%.8x wanted %d got %d)" % (self.getProgramCounter(),addr, size, len(bytes)))
+        if size == 1:
+            return struct.unpack("B", bytes)[0]
+        elif size == 2:
+            return struct.unpack("<H", bytes)[0]
+        elif size == 4:
+            return struct.unpack("<L", bytes)[0]
+        elif size == 8:
+            return struct.unpack("<Q", bytes)[0]
+
 
     def writeMemoryFormat(self, va, fmt, *args):
         bytes = struct.pack(fmt, *args)
@@ -150,11 +175,11 @@ class MemoryObject(IMemory):
         the search for an architecture.
         """
         IMemory.__init__(self)
-        self.pagesize = pagesize
-        self.mask = (0-pagesize) & 0xffffffff
-        self.maps = []
-        self.maplookup = {}
-        self.bytelookup = {}
+        self._mem_pagesize = pagesize
+        self._mem_mask = (0-pagesize) & 0xffffffff
+        self._mem_maps = []
+        self._mem_maplookup = {}
+        self._mem_bytelookup = {}
         if maps != None:
             for va,perms,fname,bytes in maps:
                 self.addMemoryMap(va, perms, fname, bytes)
@@ -163,27 +188,27 @@ class MemoryObject(IMemory):
         x = [va, perms, fname, bytes] # Asign to a list cause we need to write to it
         maptup = (va, len(bytes), perms, fname)
         bytelist = [va, perms, bytes]
-        base = va & self.mask
+        base = va & self._mem_mask
         maxva = va + len(bytes)
         while base < maxva:
-            self.maplookup[base] = maptup
-            self.bytelookup[base] = bytelist
-            base += self.pagesize
-        self.maps.append((va, len(bytes), perms, fname))
+            self._mem_maplookup[base] = maptup
+            self._mem_bytelookup[base] = bytelist
+            base += self._mem_pagesize
+        self._mem_maps.append((va, len(bytes), perms, fname))
 
     def getMemoryMap(self, va):
         """
         Get the va,perms,bytes list for this map
         """
-        return self.maplookup.get(va & self.mask)
+        return self._mem_maplookup.get(va & self._mem_mask)
 
     def getMemoryMaps(self):
-        return list(self.maps)
+        return list(self._mem_maps)
 
     #FIXME rename this... it's aweful
     #FIXME make extendable maps for things like the stack
     def checkMemory(self, va, perms=0):
-        map = self.maplookup.get(va & self.mask)
+        map = self._mem_maplookup.get(va & self._mem_mask)
         if map == None:
             return False
         if (perms & map[1]) != perms:
@@ -191,21 +216,21 @@ class MemoryObject(IMemory):
         return True
 
     def readMemory(self, va, size):
-        map = self.bytelookup.get(va & self.mask)
+        map = self._mem_bytelookup.get(va & self._mem_mask)
         if map == None:
             raise envi.SegmentationViolation(va)
         mapva, mperm, mapbytes = map
-        if not mperm & 4: #FIXME make permission bits
+        if not mperm & MM_READ:
             raise envi.SegmentationViolation(va)
         offset = va - mapva
         return mapbytes[offset:offset+size]
 
     def writeMemory(self, va, bytes):
-        map = self.bytelookup.get(va & self.mask)
+        map = self._mem_bytelookup.get(va & self._mem_mask)
         if map == None:
             raise envi.SegmentationViolation(va)
         mva, mperm, mbytes = map
-        if not mperm & 2: #FIXME make permission bits
+        if not mperm & MM_WRITE:
             raise envi.SegmentationViolation(va)
         offset = va - mva
         map[2] = mbytes[:offset] + bytes + mbytes[offset+len(bytes):]

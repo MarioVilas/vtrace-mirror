@@ -7,6 +7,31 @@ import envi.bits as e_bits
 import envi.memory as e_mem
 import envi.memcanvas as e_canvas
 
+class OpcodeRenderer(e_canvas.MemoryRenderer):
+
+    def __init__(self, trace):
+        a = trace.getMeta("Architecture")
+        self.arch = envi.getArchModule(a)
+        self.pwidth = self.arch.getPointerSize()
+
+    def render(self, mcanv, va):
+        vastr = self.arch.pointerString(va)
+        # NOTE: we assume the memobj is a trace
+        trace = mcanv.mem
+        sym = trace.getSymByAddr(va)
+        if sym != None:
+            mcanv.addVaText(str(sym), va=va)
+            mcanv.addText(":\n")
+        p = trace.readMemory(va, 16)
+        op = self.arch.makeOpcode(p, va=va)
+        obytes = p[:min(op.size, 8)]
+
+        mcanv.addVaText(vastr, va=va)
+        mcanv.addText(": %s " % obytes.encode('hex').ljust(17))
+        op.render(mcanv)
+        mcanv.addText("\n")
+        return len(op)
+
 class DerefRenderer(e_canvas.MemoryRenderer):
     def __init__(self, trace):
         a = trace.getMeta("Architecture")
@@ -71,7 +96,9 @@ class DerefRenderer(e_canvas.MemoryRenderer):
             try:
                 addr,size,perm,fname = trace.getMemoryMap(p)
                 pname = e_mem.reprPerms(perm)
-                mcanv.addText(" %s " % pname)
+                mcanv.addText(" ")
+                mcanv.addNameText(pname)
+                mcanv.addText(" ")
 
                 bytes = trace.readMemory(p, 32)
                 if self.isAscii(bytes):

@@ -129,7 +129,7 @@ class EnviCli(Cmd):
         except SystemExit:
             raise
         except Exception, msg:
-            traceback.print_exc()
+            self.vprint(traceback.format_exc())
             self.vprint("ERROR: (%s) %s" % (msg.__class__.__name__,msg))
 
         if self.shutdown.isSet():
@@ -378,11 +378,11 @@ class EnviCli(Cmd):
         if va == 0:
             return "NULL"
 
-        mbase,msize,mperm,mfile = self.memobj.getMemoryMap(r)
+        mbase,msize,mperm,mfile = self.memobj.getMemoryMap(va)
         ret = mfile
-        sym = self.symobj.getSymByAddr(r, exact=False)
+        sym = self.symobj.getSymByAddr(va, exact=False)
         if sym != None:
-            ret = "%s + %d" % (repr(sym),r-long(sym))
+            ret = "%s + %d" % (repr(sym),va-long(sym))
         return ret
 
     def do_memdump(self, line):

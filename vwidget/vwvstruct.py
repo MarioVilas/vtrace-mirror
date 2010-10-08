@@ -7,7 +7,6 @@ import gtk
 import inspect
 import vstruct
 import vstruct.primitives as vs_prims
-import vstruct.namespaces as vs_names
 
 import vwidget.main as vw_main
 import vwidget.util as vw_util
@@ -25,9 +24,9 @@ class VStructView(vw_views.VTreeView):
         ("Type", 3, str),
     )
 
-    def __init__(self, vs, editable=False, layout=None):
+    def __init__(self, vs, editable=False):
         self.mystruct = vs
-        vw_views.VTreeView.__init__(self, layout)
+        vw_views.VTreeView.__init__(self)
 
         if editable:
             self.treeview.enable_model_drag_dest(target_entries, gtk.gdk.ACTION_MOVE)
@@ -68,7 +67,6 @@ class VStructView(vw_views.VTreeView):
             for name,field in d: # FIXME unify iter for vstruct w/o name?
                 if isinstance(field, vstruct.VStruct):
                     off = d.vsGetOffset(name)
-                    print "OFF",off
                     i = self.model.append(iter, (d, "%.8x" % (baseoff+off), name, ""))
                     todo.append((field, i, baseoff+off))
 
@@ -77,7 +75,7 @@ class VStructView(vw_views.VTreeView):
 
                 else:
                     off = d.vsGetOffset(name)
-                    self.model.append(iter, (field, "%.8x" % (baseoff+off), field.vsGetAttr("name"), field.__class__.__name__))
+                    self.model.append(iter, (field, "%.8x" % (baseoff+off), name, field.vsGetTypeName()))
 
     def vwActivated(self, tree, path, column):
         print "WOOT"
@@ -116,8 +114,6 @@ class VStructBrowser(vw_views.VTreeView):
 
                 if issubclass(c, vs_prims.v_prim):
                     self.model.append(piter, (c, c.__name__))
-
-        #for name in vs_names.names:
 
 class VStructAttrs(vw_views.VTreeView):
     pass

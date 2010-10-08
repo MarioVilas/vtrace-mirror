@@ -7,6 +7,7 @@ import vtrace.util as v_util
 
 import envi.memory as e_mem
 import envi.cli as e_cli
+import envi.bits as e_bits
 
 import PE
 
@@ -169,8 +170,10 @@ def heaps(vdb, line):
     Usage: heaps [-F <heapaddr>] [-C <address>] [-L <segmentaddr>]
     -F <heapaddr> print the freelist for the heap
     -C <address>  Find and print the heap chunk containing <address>
-    -L <segmentaddr> Print the chunks for the given heap segment
+    -S <segmentaddr> Print the chunks for the given heap segment
+    -L <heapaddr> Print the look aside list for the given heap
     -V Validate the heaps (check next/prev sizes and free list)
+    -l <heapaddr> Leak detection (list probable leaked chunks)
     (no options lists heaps and segments)
     """
     t = vdb.getTrace()
@@ -180,8 +183,10 @@ def heaps(vdb, line):
     freelist_heap = None
     chunkfind_addr = None
     chunklist_seg = None
+    lookaside_heap = None
+    leakfind_heap = None
     try:
-        opts,args = getopt.getopt(argv, "F:C:L:V")
+        opts,args = getopt.getopt(argv, "F:C:S:L:l:V")
     except Exception, e:
         return vdb.do_help('heaps')
 
@@ -191,11 +196,28 @@ def heaps(vdb, line):
         elif opt == "-C":
             chunkfind_addr = t.parseExpression(optarg)
         elif opt == "-L":
+            lookaside_heap = t.parseExpression(optarg)
+        elif opt == "-S":
             chunklist_seg = t.parseExpression(optarg)
         elif opt == "-V":
             return validate_heaps(vdb)
+        elif opt == "-l":
+            leakfind_heap = t.parseExpression(optarg)
 
-    if freelist_heap != None:
+    if lookaside_heap != None:
+        haddrs = [h.address for h in win32heap.getHeaps(t)]
+        if lookaside_heap not in haddrs:
+            vdb.vprint("0x%.8x is NOT a valid heap!" % lookaside_heap)
+            return
+
+        heap = win32heap.Win32Heap(t, lookaside_heap)
+        for i,l in enumerate(heap.getLookAsideLists()):
+            if len(l):
+                vdb.vprint("Lookaside Index: %d" % i)
+                for c in l:
+                    vdb.vprint("    %s" % (repr(c)))
+
+    elif freelist_heap != None:
         haddrs = [h.address for h in win32heap.getHeaps(t)]
         if freelist_heap not in haddrs:
             vdb.vprint("0x%.8x is NOT a valid heap!" % freelist_heap)
@@ -230,12 +252,35 @@ def heaps(vdb, line):
 
         vdb.vprint("Segment 0x%.8x not found!" % chunklist_seg)
 
+    elif leakfind_heap != None:
+        # FIXME do this the slow way for now...
+        haddrs = [h.address for h in win32heap.getHeaps(t)]
+        if leakfind_heap not in haddrs:
+            vdb.vprint("0x%.8x is NOT a valid heap!" % leakfind_heap)
+            return
+
+        h = win32heap.Win32Heap(t, leakfind_heap)
+        for seg in h.getSegments():
+            for chunk in seg.getChunks():
+                if chunk.address == seg.address:
+                    continue
+                # Obviously, only check for leaks if they are in use...
+                # FIXME we will need to check the lookaside also...
+                if not chunk.isBusy():
+                    continue
+                addr = chunk.getDataAddress()
+                # FIXME get size and endian from trace
+                pat = e_bits.buildbytes(addr, 4)
+                l = t.searchMemory(pat)
+                if len(l) == 0:
+                    vdb.vprint("0x%.8x may be leaked!" % addr)
+
     else:
         vdb.vprint("Heap\t\tSegment")
         for heap in win32heap.getHeaps(t):
-            segs = heap.getSegments()
-            for s in segs:
-                vdb.vprint("0x%.8x\t0x%.8x" % (heap.address, s.address))
+            flags = " ".join(heap.getFlagNames())
+            for s in heap.getSegments():
+                vdb.vprint("0x%.8x\t0x%.8x\t%s" % (heap.address, s.address, flags))
 
 IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE = 0x0040
 

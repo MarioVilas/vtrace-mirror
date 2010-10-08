@@ -18,6 +18,9 @@ sign_bits[0] = 0 # powers of 0 are 1, but we need 0
 s_maxes = [ u_maxes[i] ^ sign_bits[i] for i in range(len(u_maxes))]
 s_maxes[0] = 0
 
+# bit width masks 
+b_masks = [ (2**i)-1 for i in range(MAX_WORD*8) ]
+b_masks[0] = 0
 
 def unsigned(value, size):
     """
@@ -139,6 +142,15 @@ def slowparsebytes(bytes, offset, size, sign=False, bigend=False):
         ret = signed(ret, size)
     return ret
 
+def buildbytes(value, size, bigend=False):
+    if bigend:
+        f = be_fmt_chars[size]
+    else:
+        f = le_fmt_chars[size]
+    if f == None:
+        raise Exception("envi.bits.buildbytes needs slowbuildbytes")
+    return struct.pack(f, value)
+
 def byteswap(value, size):
     ret = 0
     for i in range(size):
@@ -146,4 +158,13 @@ def byteswap(value, size):
         ret = ret << 8
     return ret
 
+hex_fmt = {
+    1:"0x%.2x",
+    2:"0x%.4x",
+    4:"0x%.8x",
+    8:"0x%.16x",
+}
+
+def hex(value, size):
+    return hex_fmt.get(size) % value
 

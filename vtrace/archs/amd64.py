@@ -4,10 +4,16 @@ Amd64 Support Module
 # Copyright (C) 2007 Invisigoth - See LICENSE file for details
 import struct
 
-class Amd64Mixin:
+import envi.archs.amd64 as e_amd64
+
+class Amd64Mixin(e_amd64.Amd64Module, e_amd64.Amd64RegisterContext):
     """
     Do what we need to for the lucious amd64
     """
+    def __init__(self):
+        e_amd64.Amd64Module.__init__(self)
+        e_amd64.Amd64RegisterContext.__init__(self)
+
     def getStackTrace(self):
         self.requireAttached()
         current = 0
@@ -19,7 +25,7 @@ class Amd64Mixin:
 
         while rbp != 0 and current < sanity:
             try:
-                rbp,rip = self.readMemoryFormat(rbp, "=LL")
+                rbp,rip = self.readMemoryFormat(rbp, "<QQ")
             except:
                 break
             frames.append((rip,rbp))
@@ -29,10 +35,4 @@ class Amd64Mixin:
 
     def getBreakInstruction(self):
         return "\xcc"
-
-    def archGetPcName(self):
-        return "rip"
-
-    def archGetSpName(self):
-        return "rsp"
 

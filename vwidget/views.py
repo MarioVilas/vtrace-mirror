@@ -74,11 +74,19 @@ class VTreeView(VView):
         VView.__init__(self)
         self.treeview = gtk.TreeView()
         self.treeview.connect("row_activated", self.vwActivated)
-        self.vwInitModel(self.__class__.__cols__, self.__class__.__model_class__)
+        cols = self.vwGetColumns()
+        self.vwInitModel(cols, self.__model_class__)
         self.add(self.treeview)
         self.vwLoad()
 
+    def vwGetColumns(self):
+        return self.__cols__
+
     def vwInitModel(self, cols, modelclass):
+        # Remove any old columns
+        for col in self.treeview.get_columns():
+            self.treeview.remove_column(col)
+
         ftypes = []
         for name,index,ctype in cols:
             ftypes.append(ctype)

@@ -5,14 +5,17 @@ Render intel opcodes...
 import envi
 import envi.memcanvas as e_canvas
 
-class IntelOpcodeRenderer(e_canvas.MemoryRenderer):
+class i386OpcodeRenderer(e_canvas.MemoryRenderer):
 
     def __init__(self):
-        import envi.intel as e_intel
-        self.arch = e_intel.IntelModule()
+        import envi.archs.i386 as e_i386
+        # FIXME just inherit one...
+        self.arch = e_i386.i386Module()
+        self.rctx = e_i386.i386RegisterContext()
 
     def renderRegister(self, mcanv, regid):
-        name = self.arch.getRegisterName(regid)
+        name = self.rctx.getRegisterName(regid)
+        print "ID 0x%.8x %s" % (regid,name)
         mcanv.addNameText(name, typename="registers")
 
     def renderOperand(self, mcanv, va, op, oidx):
@@ -21,7 +24,8 @@ class IntelOpcodeRenderer(e_canvas.MemoryRenderer):
 
         if oper.mode == envi.OM_IMMEDIATE:
             dest = oper.imm
-            if self.arch.isBranch(op) or self.arch.isCall(op):
+            # All branches/calls for immediates on intel are relative
+            if op.iflags & envi.IF_BRANCH:
                 dest = va + oper.imm + len(op)
 
             name = None
@@ -41,6 +45,18 @@ class IntelOpcodeRenderer(e_canvas.MemoryRenderer):
             # We're in deref types
             if oper.tsize == 1:
                 mcanv.addNameText("byte")
+                mcanv.addText(" ")
+
+            elif oper.tsize == 2:
+                mcanv.addNameText("word")
+                mcanv.addText(" ")
+
+            elif oper.tsize == 4:
+                mcanv.addNameText("dword")
+                mcanv.addText(" ")
+
+            elif oper.tsize == 8:
+                mcanv.addNameText("qword")
                 mcanv.addText(" ")
 
             mcanv.addText("[")
@@ -86,16 +102,13 @@ class IntelOpcodeRenderer(e_canvas.MemoryRenderer):
 
             mcanv.addText("]")
 
-    def addrToName(self, mcanv, va):
+    def addrToName(mcanv, va):
         sym = mcanv.syms.getSymByAddr(va)
         if sym != None:
-            name = repr(sym)
-        else:
-            name = self.arch.pointerString(va)
-        return name
+            return repr(sym)
+        return "0x%.8x" % va
 
     def renderOpcode(self, mcanv, va, op):
-        mtag = mcanv.getNameTag(op.mnem, typename="mnemonic")
         if op.prefixes:
             pfx = self.arch.getPrefixName(op.prefixes)
             if pfx:

@@ -2,26 +2,21 @@
 import struct
 from StringIO import StringIO
 
-# A decorator to tag builder functions
-# for enumeration
-def structbuilder(f):
-    f._vs_builder = True
-    return f
-
 import vstruct.primitives as vs_prims
-import vstruct.defs as vs_defs
 
 def isVstructType(x):
     return isinstance(x, vs_prims.v_base)
 
 class VStruct(vs_prims.v_base):
 
-    def __init__(self, sname):
+    def __init__(self):
         # A tiny bit of evil...
         object.__setattr__(self, "_vs_values", {})
         vs_prims.v_base.__init__(self)
-        self._vs_name = sname
+        self._vs_name = self.__class__.__name__
         self._vs_fields = []
+        self._vs_field_align = False # To toggle visual studio style packing
+        self._vs_padnum = 0
 
     def vsParse(self, bytes):
         """
@@ -35,6 +30,16 @@ class VStruct(vs_prims.v_base):
         vals = struct.unpack(fmt, bytes[:size])
         for i in range(len(plist)):
             plist[i].vsSetParsedValue(vals[i])
+
+    def vsEmit(self):
+        """
+        Get back the byte sequence associated with this structure.
+        """
+        fmt = self.vsGetFormat()
+        r = []
+        for p in self.vsGetPrims():
+            r.append(p.vsGetValue())
+        return struct.pack(fmt, *r)
 
     def vsGetFormat(self):
         """
@@ -72,6 +77,26 @@ class VStruct(vs_prims.v_base):
     def vsAddField(self, name, value):
         if not isVstructType(value):
             raise Exception("Added fields MUST be vstruct types!")
+
+        # Do optional field alignment...
+        if self._vs_field_align:
+
+            # If it's a primitive, all is well, if not, pad to size of
+            # the first element of the VStruct/VArray...
+            if value.vsIsPrim():
+                align = len(value)
+            else:
+                fname = value._vs_fields[0]
+                align = len(value._vs_values.get(fname))
+
+            delta = len(self) % align
+            if delta != 0:
+                print "PADDING %s by %d" % (name,align-delta)
+                pname = "_pad%d" % self._vs_padnum
+                self._vs_padnum += 1
+                self._vs_fields.append(pname)
+                self._vs_values[pname] = vs_prims.v_bytes(align-delta)
+
         self._vs_fields.append(name)
         self._vs_values[name] = value
 
@@ -172,7 +197,7 @@ class VStruct(vs_prims.v_base):
 class VArray(VStruct):
 
     def __init__(self, elems=()):
-        VStruct.__init__(self, "array")
+        VStruct.__init__(self)
         for e in elems:
             self.vsAddElement(e)
 
@@ -205,6 +230,8 @@ def resolve(impmod, nameparts):
     return m
 
 added_structs = {}
+# NOTE: Gotta import this *after* VStruct/VSArray defined
+import vstruct.defs as vs_defs
 
 def getStructure(sname):
     """
@@ -266,7 +293,7 @@ def getStructNames(modname):
 
     for n in dir(mod):
         x = getattr(mod, n)
-        if hasattr(x, "_vs_builder"):
+        if issubclass(x, VStruct):
             ret.append(n)
 
     return ret

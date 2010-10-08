@@ -51,6 +51,9 @@ class v_prim(v_base):
         self.vsSetValue(value)
 
     def vsGetValue(self):
+        """
+        Get the type specific value for this field.
+        """
         return self._vs_value
 
     def vsSetValue(self, value):
@@ -201,11 +204,20 @@ class v_int64(v_number):
     _vs_builder = True
     _vs_fmt = "q"
 
-class v_ptr(v_number):
+pointersize = struct.calcsize("P")
+
+class v_size_t(v_number):
     _vs_builder = True
-    _vs_fmt = "L"
+    if pointersize == 4:
+        _vs_fmt = "L"
+    else:
+        _vs_fmt = "Q"
+
     def __repr__(self):
         return "0x%.8x" % self._vs_value
+
+class v_ptr(v_size_t):
+    pass
 
 class v_bytes(v_prim):
 
@@ -241,16 +253,32 @@ class GUID(v_prim):
 
     _vs_builder = True
 
-    def __init__(self):
+    def __init__(self, guidstr=None):
+        """
+        Construct a new GUID primitive.  You may specify a GUID string in the
+        constructor to populate initial values.
+        """
         v_prim.__init__(self)
         self._vs_length = 16
         self._vs_value = "\x00" * 16
         self._vs_fmt = "16s"
-        self._guid_fields = (0,0,0,0)
-        self._guid_text_vals = (0,0,0,0,0)
+        self._guid_fields = (0,0,0,0,0,0,0,0,0,0,0)
+        if guidstr != None:
+            self._parseGuidStr(guidstr)
+
+    def _parseGuidStr(self, gstr):
+        gstr = gstr.replace("{","")
+        gstr = gstr.replace("}","")
+        gstr = gstr.replace("-","")
+        bytes = gstr.decode("hex")
+        # Totally cheating... ;)
+        self._guid_fields = struct.unpack(">LHH8B", bytes)
 
     def vsSetValue(self, bytes):
         self._guid_fields = struct.unpack("<LHH8B", bytes)
+
+    def vsGetValue(self):
+        return struck.pack("<LHH8B", *self._guid_fields)
 
     def __repr__(self):
         base = "{%.8x-%.4x-%.4x-%.2x%.2x-%.2x%.2x%.2x%.2x%.2x%.2x}"
