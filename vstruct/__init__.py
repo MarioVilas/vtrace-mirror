@@ -18,7 +18,7 @@ class VStruct(vs_prims.v_base):
         self._vs_field_align = False # To toggle visual studio style packing
         self._vs_padnum = 0
 
-    def vsParse(self, bytes):
+    def vsParse(self, bytes, offset=0):
         """
         For all the primitives contained within, allow them
         an opportunity to parse the given data and return the
@@ -27,7 +27,7 @@ class VStruct(vs_prims.v_base):
         plist = self.vsGetPrims()
         fmt = self.vsGetFormat()
         size = struct.calcsize(fmt)
-        vals = struct.unpack(fmt, bytes[:size])
+        vals = struct.unpack(fmt, bytes[offset:offset+size])
         for i in range(len(plist)):
             plist[i].vsSetParsedValue(vals[i])
 
@@ -189,7 +189,10 @@ class VStruct(vs_prims.v_base):
         ret = ""
         for off, indent, name, field in self.vsGetPrintInfo():
             rstr = field.vsGetTypeName()
-            if isinstance(field, vs_prims.v_prim):
+            if isinstance(field, vs_prims.v_number):
+                val = field.vsGetValue()
+                rstr = '0x%.8x (%d)' % (val,val)
+            elif isinstance(field, vs_prims.v_prim):
                 rstr = repr(field)
             ret += "%.8x%s %s: %s\n" % (va+off, " "*(indent*2),name,rstr)
         return ret
