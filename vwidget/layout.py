@@ -55,6 +55,16 @@ class LayoutManager:
         self.manageWindow(win)
         return win
 
+    def getOrCreateWindow(self, name):
+        '''
+        Get an existing instance of the given window type.  If one does not
+        exist, make one instead.
+        '''
+        for win in self.getManagedWindows():
+            if win.getWindowName() == name:
+                return win
+        return self.createWindow(name)
+
     def loadLayoutFile(self, fd):
         try:
             for line in fd.readlines():

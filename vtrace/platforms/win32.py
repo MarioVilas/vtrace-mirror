@@ -641,14 +641,15 @@ class IMAGE_DEBUG_DIRECTORY(Structure):
 
 NT_LIST_HANDLES = 16
 
+ACCESS_MASK = DWORD
 class SYSTEM_HANDLE(Structure):
     _fields_ = [
     ('ProcessID'        , c_ulong),
     ('HandleType'       , c_byte),
     ('Flags'            , c_byte),
     ('HandleNumber' , c_ushort),
-    ('KernelAddress'    , c_ulong), #FIXME maybe c_ptr?
-    ('GrantedAccess'    , c_ulong),
+    ('KernelAddress'    , LPVOID),
+    ('GrantedAccess'    , ACCESS_MASK),
     ]
 PSYSTEM_HANDLE = POINTER(SYSTEM_HANDLE)
 
@@ -927,6 +928,7 @@ class WindowsMixin:
         return "Unknown"
 
     def getHandles(self):
+
         hinfo = buildSystemHandleInformation(1)
         hsize = c_ulong(sizeof(hinfo))
 

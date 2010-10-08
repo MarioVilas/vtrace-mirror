@@ -9,7 +9,7 @@ def isVstructType(x):
 
 class VStruct(vs_prims.v_base):
 
-    def __init__(self):
+    def __init__(self, bigend=False):
         # A tiny bit of evil...
         object.__setattr__(self, "_vs_values", {})
         vs_prims.v_base.__init__(self)
@@ -17,6 +17,9 @@ class VStruct(vs_prims.v_base):
         self._vs_fields = []
         self._vs_field_align = False # To toggle visual studio style packing
         self._vs_padnum = 0
+        self._vs_fmtbase = '<'
+        if bigend:
+            self._vs_fmtbase = '>'
 
     def vsParse(self, bytes, offset=0):
         """
@@ -46,7 +49,7 @@ class VStruct(vs_prims.v_base):
         Return the format specifier which would then be used
         """
         # Unpack everything little endian, let vsParseValue deal...
-        ret = "<"
+        ret = self._vs_fmtbase
         for p in self.vsGetPrims():
             ret += p.vsGetFormat()
         return ret

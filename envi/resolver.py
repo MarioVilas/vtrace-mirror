@@ -127,7 +127,7 @@ class SymbolResolver:
 
     def getSymByAddr(self, va, exact=True):
         """
-        Return a symbol tuple for the given virtual address.
+        Return a symbol object for the given virtual address.
         """
         va = va & self.widthmask
         sym = self.symaddrs.get(va)

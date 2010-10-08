@@ -22,7 +22,7 @@ class SignatureTree:
     """
 
     def __init__(self):
-        self.basenode = (0, [], [None for i in range(256)])
+        self.basenode = (0, [], [None] * 256)
         self.sigs = {} # track duplicates
 
     def _addChoice(self, siginfo, node):
@@ -59,7 +59,7 @@ class SignatureTree:
         # Chose, (and or initialize) a sub node
         nnode = choices[choice]
         if nnode == None:
-            nnode = (depth+1, [], [None for i in range(256)])
+            nnode = (depth+1, [], [None] * 256)
             choices[choice] = nnode
         return nnode
 

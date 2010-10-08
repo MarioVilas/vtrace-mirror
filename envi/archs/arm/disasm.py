@@ -729,7 +729,7 @@ def p_load_mult(opval, va):
     mnem = ldm_mnem[(puswl&1)]
     flags = ((puswl<<10) & 0x3000) + IF_DA
     Rn = (opval>>16) & 0xf
-    reg_list = opval & 0xff
+    reg_list = opval & 0xffff
     
     olist = (
         ArmRegOper(Rn),
@@ -1253,7 +1253,7 @@ class ArmImmOper(envi.Operand):
 
 class ArmScaledOffsetOper(envi.Operand):
     def __init__(self, base_reg, offset_reg, shtype, shval, va, pubwl=0):
-        self.base_reg = base_reg # depending on mode, this is reg/imm
+        self.base_reg = base_reg
         self.offset_reg = offset_reg
         self.shtype = shtype
         self.shval = shval
@@ -1317,7 +1317,7 @@ class ArmScaledOffsetOper(envi.Operand):
 
 class ArmRegOffsetOper(envi.Operand):
     def __init__(self, base_reg, offset_reg, va, pubwl=0):
-        self.base_reg = base_reg # depending on mode, this is reg/imm
+        self.base_reg = base_reg
         self.offset_reg = offset_reg
         self.pubwl = pubwl
 

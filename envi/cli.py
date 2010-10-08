@@ -101,7 +101,7 @@ class EnviCli(Cmd):
     def __getattr__(self, name):
         func = self.extcmds.get(name, None)
         if func == None:
-            raise AttributeError
+            raise AttributeError(name)
         return func
 
     def doAlias(self, line):

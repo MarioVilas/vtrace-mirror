@@ -82,15 +82,18 @@ class TraceEmulator(vtrace.Trace, v_base.TracerBase):
     Wrap an arbitrary emulator in a Tracer compatible API.
     """
     def __init__(self, emu):
+        self.emu = emu
         vtrace.Trace.__init__(self)
         v_base.TracerBase.__init__(self)
-        self.emu = emu
 
         # Fake out being attached
         self.attached = True
         self.pid = 0x56
 
         self.setRegisterInfo(emu.getRegisterInfo())
+
+    def getPointerSize(self):
+        return self.emu.getPointerSize()
 
     def platformStepi(self):
         self.emu.stepi()

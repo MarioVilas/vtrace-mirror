@@ -97,19 +97,11 @@ class VdbGui(vw_layout.LayoutManager, Notifier):
 
         mainwin = None
         if self.db.vdbhome:
-            lfile = os.path.join(self.db.vdbhome, "vdb.lyt")
+            lfile = os.path.join(self.db.vdbhome, "vdb.lyt2")
             if os.path.exists(lfile):
-                layout = self.loadLayoutFile(file(lfile,"rb"))
-                for win in self.getManagedWindows():
-                    if isinstance(win, VdbMainWindow):
-                        mainwin = win
-                        break
+                self.loadLayoutFile(file(lfile,"rb"))
 
-        if mainwin == None:
-            mainwin = VdbMainWindow(db, self)
-            self.manageWindow(mainwin)
-
-        self.mainwin = mainwin
+        self.mainwin = self.getOrCreateWindow('VdbMainWindow')
 
         t = self.db.trace
         if t.isAttached() and not t.isRunning():
@@ -128,7 +120,7 @@ class VdbGui(vw_layout.LayoutManager, Notifier):
 
     def saveVdbLayout(self, *args):
         if self.db.vdbhome:
-            lfile = os.path.join(self.db.vdbhome, "vdb.lyt")
+            lfile = os.path.join(self.db.vdbhome, "vdb.lyt2")
             self.saveLayoutFile(file(lfile, "wb"))
 
     def createWindow(self, clsname):

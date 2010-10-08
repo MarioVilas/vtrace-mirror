@@ -113,6 +113,13 @@ class DerefRenderer(e_canvas.MemoryRenderer):
 
             except Exception, e:
                 mcanv.addText("ERROR: %s" % e)
+        else:
+            try:
+                for fd,ftype,fname in trace.getFds():
+                    if fd == p:
+                        mcanv.addText('HANDLE/FD?: %s' % fname)
+            except Exception, e:
+                pass
         mcanv.addText("\n")
 
         return self.arch.getPointerSize()

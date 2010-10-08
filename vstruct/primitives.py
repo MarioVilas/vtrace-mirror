@@ -86,9 +86,9 @@ class v_prim(v_base):
 
 class v_number(v_prim):
 
-    def __init__(self, value=0, bigend=False):
+    def __init__(self, value=0, swapend=False):
         v_prim.__init__(self)
-        self._vs_bigend = bigend
+        self._vs_swapend = swapend
         self._vs_length = struct.calcsize(self.vsGetFormat())
         self.vsSetValue(value)
 
@@ -99,8 +99,8 @@ class v_number(v_prim):
         self._vs_value = long(value)
 
     def vsSetParsedValue(self, value):
-        # We were parsed little endian.  Switch if needed.
-        if self._vs_bigend:
+        # We were parsed N endian.  Switch if needed.
+        if self._vs_swapend:
             oval = value
             value = 0
             for i in range(self._vs_length):
