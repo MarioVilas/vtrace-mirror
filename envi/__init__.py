@@ -376,6 +376,7 @@ class Emulator(e_mem.IMemory):
     def __init__(self, archmod, regarray=None, segs=None, memobj=None):
         e_mem.IMemory.__init__(self)
         self.arch = archmod
+        self.psize   = archmod.getPointerSize()
         self.pcindex = archmod.getProgramCounterIndex()
         self.spindex = archmod.getStackCounterIndex()
         self.rcount  = archmod.getRegisterCount()
@@ -465,8 +466,7 @@ class Emulator(e_mem.IMemory):
         # We assume a default "pointer length" width.  If you are
         # dealing with registers other than that, you will need
         # to over-ride this method to use them (see IntelModule for example)
-        width = self.arch.getPointerSize()
-        value = e_bits.unsigned(value, width)
+        value = e_bits.unsigned(value, self.psize)
         self.regs[regindex] = value
 
     def makeOpcode(self, pc):
