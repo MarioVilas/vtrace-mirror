@@ -48,6 +48,8 @@ class TracerBase(vtrace.Notifier):
         self.signal_ignores = []
         self.localvars = {}
 
+        self.psize = self.getPointerSize() # From the envi arch mod...
+
         # Track which libraries are parsed, and their
         # normame to full path mappings
         self.libloaded = {} # True if the library has been loaded already
@@ -516,7 +518,7 @@ class TracerBase(vtrace.Notifier):
 
             self.libpaths[normname] = libname
 
-        self.fireNotifiers(vtrace.NOTIFY_LOAD_LIBRARY)
+            self.fireNotifiers(vtrace.NOTIFY_LOAD_LIBRARY)
 
     def normFileName(self, libname):
         basename = os.path.basename(libname)

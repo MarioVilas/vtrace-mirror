@@ -75,9 +75,21 @@ class PosixMixin:
         pid, status = os.waitpid(self.pid,0)
         return status
 
+    def posixCreateThreadHack(self):
+        '''
+        For systems which don't use their debug APIs to
+        generate thread creation events on startup, 
+        '''
+        initid = self.getMeta('ThreadId')
+        for tid in self.platformGetThreads().keys():
+            self.setMeta('ThreadId', tid)
+            self.fireNotifiers(vtrace.NOTIFY_CREATE_THREAD)
+        self.setMeta('ThreadId', initid)
+
     def handleAttach(self):
         self.fireNotifiers(vtrace.NOTIFY_ATTACH)
         self.posixLibraryLoadHack()
+        self.posixCreateThreadHack()
         # We'll emulate windows here and send an additional
         # break after our library load events to make things easy
         self.runAgain(False) # Clear this, if they want BREAK to run, it will
@@ -159,29 +171,24 @@ class ElfMixin:
             Elf.STT_SECTION:e_resolv.SectionSymbol,
         }
 
-        elf = Elf.Elf(filename)
-
-        # Quick pass to see if we need to assume prelink
-        for sec in elf.sections:
-            if sec.name != ".text":
-                continue
-            # Try to detect prelinked
-            if sec.sh_addr != sec.sh_offset:
-                baseaddr = 0
-            break
+        fd = file(filename,'rb')
+        elf = Elf.Elf(fd)
+        addbase = 0
+        if not elf.isPreLinked() and elf.isSharedObject():
+            addbase = baseaddr
 
         for sec in elf.sections:
-            sym = e_resolv.SectionSymbol(sec.name, sec.sh_addr+baseaddr, sec.sh_size, normname)
+            sym = e_resolv.SectionSymbol(sec.name, sec.sh_addr+addbase, sec.sh_size, normname)
             self.addSymbol(sym)
 
         for sym in elf.symbols:
             symclass = typemap.get((sym.st_info & 0xf), e_resolv.Symbol)
-            sym = symclass(sym.name, sym.st_value+baseaddr, sym.st_size, normname)
+            sym = symclass(sym.name, sym.st_value+addbase, sym.st_size, normname)
             self.addSymbol(sym)
 
         for sym in elf.dynamic_symbols:
             symclass = typemap.get((sym.st_info & 0xf), e_resolv.Symbol)
-            sym = symclass(sym.name, sym.st_value+baseaddr, sym.st_size, normname)
+            sym = symclass(sym.name, sym.st_value+addbase, sym.st_size, normname)
             self.addSymbol(sym)
 
 # As much as I would *love* if all the ptrace defines were the same all the time,
@@ -198,17 +205,6 @@ PT_CONTINUE     = 7   # continue the child */
 PT_KILL         = 8   # kill the child process */
 PT_STEP         = 9   # single step the child */
 
-platform = platform.system()
-if platform == "Darwin":
-    PT_ATTACH       = 10  # trace some running process */
-    PT_DETACH       = 11  # stop tracing a process */
-    PT_SIGEXC       = 12  # signals as exceptions for current_proc */
-    PT_THUPDATE     = 13  # signal for thread# */
-    PT_ATTACHEXC    = 14  # attach to running process with signal exception */
-    PT_FORCEQUOTA   = 30  # Enforce quota for root */
-    PT_DENY_ATTACH  = 31
-    PT_FIRSTMACH    = 32  # for machine-specific requests */
-
 def ptrace(code, pid, addr, data):
     """
     The contents of this call are basically cleanly
@@ -220,17 +216,9 @@ def ptrace(code, pid, addr, data):
         if not cloc:
             raise Exception("ERROR: can't find C library on posix system!")
         libc = CDLL(cloc)
-        libc.ptrace.argtypes = [c_int, c_uint32, c_char_p, c_int]
-    return libc.ptrace(code, pid, c_char_p(addr), data)
-
-#def waitpid(pid, status, options):
-    #global libc
-    #if not libc:
-        #cloc = cutil.find_library("c")
-        #if not cloc:
-            #raise Exception("ERROR: can't find C library on posix system!")
-        #libc = CDLL(cloc)
-    #return libc.waitpid(pid, status, options)
+        libc.ptrace.restype = c_size_t
+        libc.ptrace.argtypes = [c_int, c_uint32, c_size_t, c_size_t]
+    return libc.ptrace(code, pid, c_size_t(addr), c_size_t(data))
 
 class PtraceMixin:
     """

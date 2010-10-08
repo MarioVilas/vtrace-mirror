@@ -108,19 +108,6 @@ sizenames[4] = "dword"
 sizenames[8] = "qword"
 sizenames[16] = "oword"
 
-# Printable prefix names
-prefix_names = [
-    (PREFIX_LOCK, "lock"),
-    (PREFIX_REPNZ, "repnz"),
-    (PREFIX_REP, "rep"),
-    (PREFIX_CS, "cs"),
-    (PREFIX_SS, "ss"),
-    (PREFIX_DS, "ds"),
-    (PREFIX_ES, "es"),
-    (PREFIX_FS, "fs"),
-    (PREFIX_GS, "gs"),
-]
-
 def addrToName(mcanv, va):
     sym = mcanv.syms.getSymByAddr(va)
     if sym != None:
@@ -488,6 +475,20 @@ class i386SibOper(envi.Operand):
 
 class i386Opcode(envi.Opcode):
 
+    # Printable prefix names
+    prefix_names = [
+        (PREFIX_LOCK, "lock"),
+        (PREFIX_REPNZ, "repnz"),
+        (PREFIX_REP, "rep"),
+        (PREFIX_CS, "cs"),
+        (PREFIX_SS, "ss"),
+        (PREFIX_DS, "ds"),
+        (PREFIX_ES, "es"),
+        (PREFIX_FS, "fs"),
+        (PREFIX_GS, "gs"),
+    ]
+
+
     def getBranches(self, emu=None):
         ret = []
 
@@ -558,7 +559,7 @@ class i386Opcode(envi.Opcode):
         Render this opcode to the specified memory canvas
         """
         if self.prefixes:
-            pfx = self._getPrefixName(self.prefixes)
+            pfx = self.getPrefixName()
             if pfx:
                 mcanv.addNameText("%s: " % pfx, pfx)
 
@@ -574,15 +575,6 @@ class i386Opcode(envi.Opcode):
             if i != lasti:
                 mcanv.addText(",")
 
-    def _getPrefixName(self, prefix):
-        """
-        """
-        ret = []
-        for byte,name in prefix_names:
-            if prefix & byte:
-                ret.append(name)
-        return "".join(ret)
-            
 operand_range = (2,3,4)
 
 MODE_16 = 0

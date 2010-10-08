@@ -15,11 +15,19 @@ import vtrace
 import vtrace.platforms.base as v_base
 import vtrace.platforms.posix as v_posix
 import vtrace.archs.i386 as v_i386
+import vtrace.archs.amd64 as v_amd64
 
 from ctypes import *
 import ctypes.util as cutil
 
 libc = CDLL(cutil.find_library("c"))
+
+libc.lseek64.restype = c_ulonglong
+libc.lseek64.argtypes = [c_uint, c_ulonglong, c_uint]
+libc.read.restype = c_long
+libc.read.argtypes = [c_uint, c_void_p, c_long]
+libc.write.restype = c_long
+libc.write.argtypes = [c_uint, c_void_p, c_long]
 
 O_RDWR = 2
 O_LARGEFILE = 0x8000
@@ -91,6 +99,7 @@ class user_regs_i386(Structure):
         ("__ss", c_ushort),
     )
 
+
 class USER_i386(Structure):
     _fields_ = (
         # NOTE: Expand out the user regs struct so
@@ -118,6 +127,40 @@ class USER_i386(Structure):
         ("debug7",     c_ulong),
     )
 
+class user_regs_amd64(Structure):
+    _fields_ = [
+        ('r15',      c_uint64),
+        ('r14',      c_uint64),
+        ('r13',      c_uint64),
+        ('r12',      c_uint64),
+        ('rbp',      c_uint64),
+        ('rbx',      c_uint64),
+        ('r11',      c_uint64),
+        ('r10',      c_uint64),
+        ('r9',       c_uint64),
+        ('r8',       c_uint64),
+        ('rax',      c_uint64),
+        ('rcx',      c_uint64),
+        ('rdx',      c_uint64),
+        ('rsi',      c_uint64),
+        ('rdi',      c_uint64),
+        ('orig_rax', c_uint64),
+        ('rip',      c_uint64),
+        ('cs',       c_uint64),
+        ('eflags',   c_uint64),
+        ('rsp',      c_uint64),
+        ('ss',       c_uint64),
+        ('fs_base',  c_uint64),
+        ('gs_base',  c_uint64),
+        ('ds',       c_uint64),
+        ('es',       c_uint64),
+        ('fs',       c_uint64),
+        ('gs',       c_uint64),
+    ]
+
+# Modern linux only lets us write to these...
+dbgregs = (0,1,2,3,6,7)
+
 class LinuxMixin(v_posix.PtraceMixin, v_posix.PosixMixin):
     """
     The mixin to take care of linux specific platform traits.
@@ -132,9 +175,9 @@ class LinuxMixin(v_posix.PtraceMixin, v_posix.PosixMixin):
         self.threadWrap("platformAllocateMemory", self.platformAllocateMemory)
         self.threadWrap("getPtraceEvent", self.getPtraceEvent)
         self.threadWrap("platformReadMemory", self.platformReadMemory)
+        self.threadWrap("platformWriteMemory", self.platformWriteMemory)
         if platform.release().startswith("2.4"):
             self.threadWrap("platformWait", self.platformWait)
-        #self.threadWrap("platformWriteMemory", self.platformWriteMemory)
         self.threadWrap("doAttachThread", self.doAttachThread)
         self.nptlinit = False
         self.memfd = None
@@ -154,8 +197,7 @@ class LinuxMixin(v_posix.PtraceMixin, v_posix.PosixMixin):
         if self.memfd == None:
             self.memfd = libc.open("/proc/%d/mem" % self.pid, O_RDWR | O_LARGEFILE, 0755)
 
-        addr = c_ulonglong(offset)
-        x = libc.llseek(self.memfd, addr, 0)
+	x = libc.lseek64(self.memfd, offset, 0)
 
     #FIXME this is intel specific and should probably go in with the regs
     def platformAllocateMemory(self, size, perms=e_mem.MM_RWX, suggestaddr=0):
@@ -203,12 +245,12 @@ class LinuxMixin(v_posix.PtraceMixin, v_posix.PosixMixin):
             self.writeMemory(pc, ipsave)
             self.setRegisters(regsave)
 
-    def handleAttach(self):
+    def posixCreateThreadHack(self):
         for tid in self.threadsForPid(self.pid):
             if tid == self.pid:
                 continue
             self.attachThread(tid)
-        v_posix.PosixMixin.handleAttach(self)
+        v_posix.PosixMixin.posixCreateThreadHack(self)
 
     def platformReadMemory(self, address, size):
         """
@@ -217,12 +259,13 @@ class LinuxMixin(v_posix.PtraceMixin, v_posix.PosixMixin):
         """
         self.setupMemFile(address)
         # Use ctypes cause python implementation is teh ghey
-        buf = create_string_buffer("\x00" * size)
+        buf = create_string_buffer(size)
         x = libc.read(self.memfd, addressof(buf), size)
         if x != size:
+            #libc.perror('libc.read %d (size: %d)' % (x,size))
             raise Exception("reading from invalid memory %s (%d returned)" % (hex(address), x))
         # We have to slice cause ctypes "helps" us by adding a null byte...
-        return buf.raw[:size]
+        return buf.raw
 
     def whynot_platformWriteMemory(self, address, data):
         """
@@ -234,6 +277,7 @@ class LinuxMixin(v_posix.PtraceMixin, v_posix.PosixMixin):
         size = len(data)
         x = libc.write(self.memfd, addressof(buf), size)
         if x != size:
+            libc.perror('write mem failed: 0x%.8x (%d)' % (address, size))
             raise Exception("write memory failed: %d" % x)
         return x
 
@@ -341,7 +385,8 @@ class LinuxMixin(v_posix.PtraceMixin, v_posix.PosixMixin):
             opts |= PT_O_TRACECLONE
         x = v_posix.ptrace(PT_SETOPTIONS, tid, 0, opts)
         if x != 0:
-            print "WARNING ptrace SETOPTIONS failed for thread %d (%d)" % (tid,x)
+            libc.perror('ptrace PT_SETOPTION failed for thread %d' % tid)
+            #print "WARNING ptrace SETOPTIONS failed for thread %d (%d)" % (tid,x)
 
     def threadsForPid(self, pid):
         ret = []
@@ -383,13 +428,6 @@ class LinuxMixin(v_posix.PtraceMixin, v_posix.PosixMixin):
             raise Exception("ptrace PT_GETEVENTMSG failed! %d" % x)
         return p.value
 
-    def platformGetRegs(self):
-        x = (c_char * 512)()
-        tid = self.getMeta("ThreadId", self.getPid())
-        if v_posix.ptrace(PT_GETREGS, tid, 0, addressof(x)) != 0:
-            raise Exception("ERROR ptrace PT_GETREGS failed for TID %d" % tid)
-        return x.raw
-
     def platformGetThreads(self):
         ret = {}
         for tid in self.pthreads:
@@ -397,7 +435,6 @@ class LinuxMixin(v_posix.PtraceMixin, v_posix.PosixMixin):
         return ret
 
     def platformGetMaps(self):
-        self.requireAttached()
         maps = []
         mapfile = file("/proc/%d/maps" % self.pid)
         for line in mapfile:
@@ -444,12 +481,54 @@ class LinuxMixin(v_posix.PtraceMixin, v_posix.PosixMixin):
 
         return fds
 
+############################################################################
+#
+# NOTE: Both of these use class locals set by the i386/amd64 variants
+#
+    def platformGetRegCtx(self, tid):
+        ctx = self.archGetRegCtx()
+        u = self.user_reg_struct()
+        if v_posix.ptrace(PT_GETREGS, tid, 0, addressof(u)) == -1:
+            raise Exception("Error: ptrace(PT_GETREGS...) failed!")
+
+        ctx._rctx_Import(u)
+
+        for i in dbgregs:
+            offset = self.user_dbg_offset + (self.psize * i)
+            r = v_posix.ptrace(v_posix.PT_READ_U, tid, offset, 0)
+            ctx.setRegister(self.dbgidx+i, r & self.reg_val_mask)
+
+        return ctx
+
+    def platformSetRegCtx(self, tid, ctx):
+        u = self.user_reg_struct()
+        # Populate the reg struct with the current values (to allow for
+        # any regs in that struct that we don't track... *fs_base*ahem*
+        if v_posix.ptrace(PT_GETREGS, tid, 0, addressof(u)) == -1:
+            raise Exception("Error: ptrace(PT_GETREGS...) failed!")
+
+        ctx._rctx_Export(u)
+        if v_posix.ptrace(PT_SETREGS, tid, 0, addressof(u)) == -1:
+            raise Exception("Error: ptrace(PT_SETREGS...) failed!")
+
+        for i in dbgregs:
+            val = ctx.getRegister(self.dbgidx + i)
+            offset = self.user_dbg_offset + (self.psize * i)
+            if v_posix.ptrace(v_posix.PT_WRITE_U, tid, offset, val) != 0:
+                libc.perror('PT_WRITE_U failed for debug%d' % i)
+                #raise Exception("PT_WRITE_U for debug%d failed!" % i)
+
 class Linuxi386Trace(
         vtrace.Trace,
         LinuxMixin,
         v_i386.i386Mixin,
         v_posix.ElfMixin,
         v_base.TracerBase):
+
+
+    user_reg_struct = user_regs_i386
+    user_dbg_offset = 252
+    reg_val_mask = 0xffffffff
 
     def __init__(self):
         vtrace.Trace.__init__(self)
@@ -458,63 +537,26 @@ class Linuxi386Trace(
         v_i386.i386Mixin.__init__(self)
         LinuxMixin.__init__(self)
 
-        u = USER_i386()
-        # Pre-calc the offset to the debug regs...
-        self.dbgoff = sizeof(u) - (4*8)
+        # Pre-calc the index of the debug regs
         self.dbgidx = self.archGetRegCtx().getRegisterIndex("debug0")
 
-    def platformGetRegCtx(self, tid):
-        """
-        """
-        ctx = self.archGetRegCtx()
-        u = user_regs_i386()
-        if v_posix.ptrace(PT_GETREGS, tid, 0, addressof(u)) == -1:
-            raise Exception("Error: ptrace(PT_GETREGS...) failed!")
+class LinuxAmd64Trace(
+        vtrace.Trace,
+        LinuxMixin,
+        v_amd64.Amd64Mixin,
+        v_posix.ElfMixin,
+        v_base.TracerBase):
 
-        ctx._rctx_Import(u)
+    user_reg_struct = user_regs_amd64
+    user_dbg_offset = 848
+    reg_val_mask = 0xffffffffffffffff
 
-        for i in range(8):
-            r = v_posix.ptrace(v_posix.PT_READ_U, tid, self.dbgoff+(4*i), 0)
-            ctx.setRegister(self.dbgidx+i, r & 0xffffffff)
+    def __init__(self):
+        vtrace.Trace.__init__(self)
+        v_base.TracerBase.__init__(self)
+        v_posix.ElfMixin.__init__(self)
+        v_amd64.Amd64Mixin.__init__(self)
+        LinuxMixin.__init__(self)
 
-        return ctx
-
-    def platformSetRegCtx(self, tid, ctx):
-        u = user_regs_i386()
-        ctx._rctx_Export(u)
-        if v_posix.ptrace(PT_SETREGS, tid, 0, addressof(u)) == -1:
-            raise Exception("Error: ptrace(PT_SETREGS...) failed!")
-
-        for i in range(8):
-            val = ctx.getRegister(self.dbgidx + i)
-            if v_posix.ptrace(v_posix.PT_WRITE_U, tid, self.dbgoff+(4*i), val) != 0:
-                raise Exception("PT_WRITE_U for debug%d failed!" % i)
-
-class NOTHING:
-    def platformGetRegs(self, tid):
-        """
-        Start with what's given by PT_GETREGS and pre-pend
-        the debug registers
-        """
-        buf = LinuxMixin.platformGetRegs(self)
-        dbgs = []
-        off = self.usize - 32
-        for i in range(8):
-            r = v_posix.ptrace(v_posix.PT_READ_U, tid, off+(4*i), 0)
-            dbgs.append(r & 0xffffffff)
-
-        return struct.pack("8L", *dbgs) + buf
-
-    def platformSetRegs(self, buf, tid):
-        """
-        Reverse of above...
-        """
-        x = create_string_buffer(buf[32:])
-        if v_posix.ptrace(PT_SETREGS, tid, 0, addressof(x)) != 0:
-            raise Exception("ERROR ptrace PT_SETREGS failed!")
-
-        dbgs = struct.unpack("8L", buf[:32])
-        off = self.usize - 32
-        for i in range(8):
-            v_posix.ptrace(v_posix.PT_WRITE_U, tid, off+(4*i), dbgs[i])
+        self.dbgidx = self.archGetRegCtx().getRegisterIndex("debug0")
 

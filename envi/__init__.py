@@ -63,13 +63,6 @@ class ArchitectureModule:
         """
         raise ArchNotImplemented("getEmulator")
 
-    def getPrefixName(self, prefixes):
-        """
-        Get the name of the prefixes associated with the specified
-        architecture specific prefix bitmask.
-        """
-        raise ArchNotImplemented("getPrefixName")
-
     def getPointerSize(self):
         """
         Get the size of a pointer in memory on this architecture.
@@ -204,7 +197,8 @@ class Operand:
         NOTE: This API may be passed a None emu and should return what it can
               (or None if it can't be resolved)
         """
-        raise Exception("%s needs to implement getOperValue!" % self.__class__.__name__)
+        print "%s needs to implement getOperValue!" % self.__class__.__name__
+        return None
 
     def setOperValue(self, op, emu, val):
         """
@@ -212,7 +206,7 @@ class Operand:
         the given emulator/workspace/trace to assign things like
         memory and registers.
         """
-        raise Exception("%s needs to implement setOperValue! (0x%.8x: %s) " % (self.__class__.__name__, op.va, repr(op)))
+        print("%s needs to implement setOperValue! (0x%.8x: %s) " % (self.__class__.__name__, op.va, repr(op)))
 
     def isDeref(self):
         """
@@ -228,8 +222,8 @@ class Operand:
         NOTE: This API may be passed a None emu and should return what it can
               (or None if it can't be resolved)
         """
-        raise Exception("%s needs to implement getOperAddr!" % self.__class__.__name__)
-
+        print("%s needs to implement getOperAddr!" % self.__class__.__name__)
+        return None
     
     def repr(self, op):
         """
@@ -256,6 +250,8 @@ class Opcode:
     """
     A universal representation for an opcode
     """
+    prefix_names = [] # flag->humon tuples
+
     def __init__(self, va, opcode, mnem, prefixes, size, operands, iflags=0):
         """
         constructor for the basic Envi Opcode object.  Arguments as follows:
@@ -332,7 +328,19 @@ class Opcode:
         Render this opcode to the memory canvas passed in.  This is used for both
         simple printing AND more complex representations.
         """
-        mcanv.addText("%s HAS NO RENDER METHOD" % self.__class__.__name__)
+        mcanv.addText(repr(self))
+
+    def getPrefixName(self):
+        """
+        Get the name of the prefixes associated with the specified
+        architecture specific prefix bitmask.
+        """
+        ret = []
+        for byte,name in self.prefix_names:
+            if self.prefixes & byte:
+                ret.append(name)
+        return "".join(ret)
+            
 
 class Emulator(e_reg.RegisterContext, e_mem.IMemory):
     """
@@ -597,6 +605,10 @@ def getArchModule(name=None):
     elif name == "amd64":
         import envi.archs.amd64 as e_amd64
         return e_amd64.Amd64Module()
+
+    elif name == 'arm':
+        import envi.archs.arm as e_arm
+        return e_arm.ArmModule()
 
     else:
         raise ArchNotImplemented(name)

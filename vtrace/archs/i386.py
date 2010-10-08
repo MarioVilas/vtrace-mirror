@@ -27,21 +27,11 @@ dbg_types = {
     "rw":dbg_read_write,
 }
 
-dbg_single_step = 1 << 14
-
-class i386Mixin(e_i386.i386Module, e_i386.i386RegisterContext):
-
+class i386WatchMixin:
     def __init__(self):
         # Which ones are in use / enabled.
         self.hwdebug = [0, 0, 0, 0]
-        # Mixin our i386 envi architecture module and register context
-        e_i386.i386Module.__init__(self)
-        e_i386.i386RegisterContext.__init__(self)
-
-        self.setMeta('Architecture', 'i386')
-
-    def getBreakInstruction(self):
-        return "\xcc"
+        # FIXME change this to storing debug0 index and using setRegister()
 
     def archAddWatchpoint(self, address, size=4, perms="rw"):
 
@@ -109,19 +99,6 @@ class i386Mixin(e_i386.i386Module, e_i386.i386RegisterContext):
         regs[dbg_ctrl] = ctrl
         self.setRegisters(regs)
 
-    def wasSingleStep(self):
-        """
-        This can be used by platform's whose debug APIs don't
-        seperate this out for you.
-        """
-        regs = self.getRegisters()
-        status = regs.get(dbg_status)
-        if status == None:
-            return False
-        if status & dbg_single_step:
-            return True
-        return False
-
     def archCheckWatchpoints(self):
         regs = self.getRegisters()
         status = regs.get(dbg_status)
@@ -137,17 +114,16 @@ class i386Mixin(e_i386.i386Module, e_i386.i386RegisterContext):
                 return self.hwdebug[i]
         return None
 
-    def setEflagsTf(self, enabled=True):
-        """
-        A convenience function to flip the TF flag in the eflags
-        register
-        """
-        eflags = self.getRegisterByName("eflags")
-        if enabled:
-            eflags |= 0x100 # TF flag
-        else:
-            eflags &= ~0x100 # TF flag
-        self.setRegisterByName("eflags",eflags)
+
+class i386Mixin(e_i386.i386Module, e_i386.i386RegisterContext, i386WatchMixin):
+
+    def __init__(self):
+        # Mixin our i386 envi architecture module and register context
+        e_i386.i386Module.__init__(self)
+        e_i386.i386RegisterContext.__init__(self)
+        i386WatchMixin.__init__(self)
+
+        self.setMeta('Architecture', 'i386')
 
     def archGetStackTrace(self):
         self.requireAttached()

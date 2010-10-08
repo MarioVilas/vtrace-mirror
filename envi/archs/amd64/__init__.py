@@ -58,16 +58,15 @@ amd64regs = [
     # The amd64 extended SIMD regs...
     ("xmm8",128),("xmm9",128),("xmm10",128),("xmm11",128),("xmm12",128),("xmm13",128),("xmm14",128),("xmm15",128),
 
-    #FIXME I thinnk debug/ctrl became 64 bits...
     # Debug registers
-    ("debug0",32),("debug1",32),("debug2",32),("debug3",32),("debug4",32),("debug5",32),("debug6",32),("debug7",32),
+    ("debug0",64),("debug1",64),("debug2",64),("debug3",64),("debug4",64),("debug5",64),("debug6",64),("debug7",64),
     # Extended Debug registers (REX.R)
-    ("debug8",32),("debug9",32),("debug10",32),("debug11",32),("debug12",32),("debug13",32),("debug14",32),("debug15",32),
+    ("debug8",64),("debug9",64),("debug10",64),("debug11",64),("debug12",64),("debug13",64),("debug14",64),("debug15",64),
 
     # Control registers
-    ("ctrl0",32),("ctrl1",32),("ctrl2",32),("ctrl3",32),("ctrl4",32),("ctrl5",32),("ctrl6",32),("ctrl7",32),
+    ("ctrl0",64),("ctrl1",64),("ctrl2",64),("ctrl3",64),("ctrl4",64),("ctrl5",64),("ctrl6",64),("ctrl7",64),
     # Extended Control registers (REX.R)
-    ("ctrl8",32),("ctrl9",32),("ctrl10",32),("ctrl11",32),("ctrl12",32),("ctrl13",32),("ctrl14",32),("ctrl15",32),
+    ("ctrl8",64),("ctrl9",64),("ctrl10",64),("ctrl11",64),("ctrl12",64),("ctrl13",64),("ctrl14",64),("ctrl15",64),
 
     # Test registers
     ("test0", 32),("test1", 32),("test2", 32),("test3", 32),("test4", 32),("test5", 32),("test6", 32),("test7", 32),
@@ -176,7 +175,7 @@ class Amd64RipRelOper(envi.Operand):
     def setOperValue(self, op, emu, val):
         emu.writeMemValue(self.getOperAddr(op, emu), val, self.tsize)
 
-    def getOperAddr(self, op, emu):
+    def getOperAddr(self, op, emu=None):
         return op.va + op.size + self.imm
 
     def isDeref(self):

@@ -469,8 +469,8 @@ class STARTUPINFO(Structure):
 
 class PROCESS_INFORMATION(Structure):
     _fields_ = [
-            ("Process", c_ulong),
-            ("Thread", c_ulong),
+            ("Process", HANDLE),
+            ("Thread", HANDLE),
             ("ProcessId", c_ulong),
             ("ThreadId", c_ulong),
             ]
@@ -1085,7 +1085,8 @@ class WindowsMixin:
         self.faultaddr = None
 
         if event.ProcessId != self.pid:
-            raise Exception("ERROR - Win32 Edge Condition One")
+            raise Exception("event.ProcessId != self.pid (%d != %d)" %
+                             (event.ProcessId,self.pid))
 
         ThreadId = event.ThreadId
         eventdict = {} # Each handler fills this in

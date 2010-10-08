@@ -1162,26 +1162,25 @@ def getTrace():
             #ilist.append(v_solaris.Solarisi386Mixin)
 
     elif os_name == "Darwin":
-        raise Exception("Darwin needs porting!")
-        #print "DARWIN SUPPORT ISNT DONE"
+
         #if 9 not in os.getgroups():
-            #raise Exception("You must be in the procmod group!")
-        #import vtrace.platforms.darwin as v_darwin
-        #import vtrace.platforms.posix as v_posix
-        #ilist.append(v_posix.PosixMixin)
-        #ilist.append(v_posix.PtraceMixin)
-        #ilist.append(v_darwin.DarwinMixin)
-        #ilist.append(v_darwin.MachoMixin)
-        #if arch == "i386":
-            #import vtrace.archs.i386 as v_i386
-            #ilist.append(v_i386.i386Mixin)
-            #ilist.append(v_darwin.DarwinIntel32Registers)
-        #elif arch == "powerpc":
-            #import vtrace.archs.ppc as v_ppc
-            #ilist.append(v_ppc.PpcMixin)
-            #ilist.append(v_darwin.DarwinPpc32Registers)
-        #else:
-            #raise Exception("WTF?!?!  You got Darwin running on %s?!?>!?" % arch)
+            #print 'You MUST be in the procmod group....'
+            #print 'Use: sudo dscl . append /Groups/procmod GroupMembership invisigoth'
+            #print '(put your username in there unless you want to put me in too... ;)'
+            #raise Exception('procmod group membership required')
+        if os.getuid() != 0:
+            print 'For NOW you *must* be root.  There are some crazy MACH perms...'
+            raise Exception('You must be root for now....')
+
+        print 'Also... the darwin port is not even REMOTELY working yet.  Solid progress though...'
+
+        #'sudo dscl . append /Groups/procmod GroupMembership invisigoth'
+        #'sudo dscl . read /Groups/procmod GroupMembership'
+        import vtrace.platforms.darwin as v_darwin
+        if arch == 'i386':
+            return v_darwin.Darwini386Trace()
+        else:
+            raise Exception('Darwin not supported on %s (only i386...)' % arch)
 
     elif os_name == "Windows":
 

@@ -170,3 +170,12 @@ hex_fmt = {
 def hex(value, size):
     return hex_fmt.get(size) % value
 
+def binary(binstr):
+    '''
+    Decode a binary string of 1/0's into a python number
+    '''
+    x = 0
+    for c in binstr:
+        x = (x << 1) + int(c)
+    return x
+

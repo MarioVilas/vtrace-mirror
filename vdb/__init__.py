@@ -836,7 +836,7 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
         Usage: attach <pid>
         """
         pid = int(args)
-        self.vprint("Attaching to ",pid)
+        self.vprint("Attaching to %d" % pid)
         self.newTrace().attach(pid)
 
     def do_autocont(self, line):

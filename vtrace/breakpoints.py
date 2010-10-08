@@ -64,7 +64,7 @@ class Breakpoint:
         trace.requireAttached()
         if not self.active:
             if self.address != None:
-                breakinst = trace.getBreakInstruction()
+                breakinst = trace.archGetBreakInstr()
                 self.saved = trace.readMemory(self.address, len(breakinst))
                 trace.writeMemory(self.address, breakinst)
                 self.active = True
