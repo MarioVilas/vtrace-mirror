@@ -181,6 +181,11 @@ class TracerBase(vtrace.Notifier):
         self.setMeta('ExitCode', ecode)
         self.fireNotifiers(vtrace.NOTIFY_EXIT)
 
+    def _fireExitThread(self, threadid, ecode):
+        self.setMeta('ExitThread', threadid)
+        self.setMeta('ExitCode', ecode)
+        self.fireNotifiers(vtrace.NOTIFY_EXIT_THREAD)
+
     def _activateBreak(self, bp):
         # NOTE: This is special cased by hardware debuggers etc...
         if bp.isEnabled():
@@ -313,6 +318,7 @@ class TracerBase(vtrace.Notifier):
     def _tellThreadExit(self):
         if self.thread != None:
             self.thread.queue.put(None)
+            self.thread.join(timeout=2)
             self.thread = None
 
     def __del__(self):

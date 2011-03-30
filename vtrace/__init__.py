@@ -8,7 +8,7 @@ tools.
 I'm not known for writting great docs...  but the code should
 be pretty straight forward...
 
-This has been in use for over 2 years privately, but is nowhere
+This has been in use for many years privately, but is nowhere
 *near* free of bugs...  idiosyncracies abound.
 
 ==== Werd =====================================================

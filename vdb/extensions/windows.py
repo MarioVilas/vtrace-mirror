@@ -897,6 +897,23 @@ def injectso(vdb, line):
     t = vdb.trace
     t.injectso(line)
 
+token_elevation_types = {
+    0: 'UAC Not Present',
+    1: 'Default Elevation',
+    2: 'Elevated',
+    3: 'Low',
+}
+def uac(db, line):
+    '''
+    Display the current UAC status of the target process.
+    (User Account Control)
+
+    Usage: uac
+    '''
+    t = db.trace
+    u = t._getUacStatus()
+    db.vprint('UAC Status: %s' % token_elevation_types.get(u))
+
 # The necissary module extension function
 def vdbExtension(db, trace):
     db.registerCmdExtension(pe)
@@ -918,3 +935,4 @@ def vdbExtension(db, trace):
     db.registerCmdExtension(svclist)
     #db.registerCmdExtension(stepb)
     db.registerCmdExtension(injectso)
+    db.registerCmdExtension(uac)

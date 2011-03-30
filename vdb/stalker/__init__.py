@@ -20,6 +20,11 @@ class StalkerBreak(vtrace.Breakpoint):
     def __init__(self, address, expression=None):
         vtrace.Breakpoint.__init__(self, address, expression=expression)
         self.fastbreak = True
+        self.mymap = None
+
+    def resolvedaddr(self, trace, address):
+        vtrace.Breakpoint.resolvedaddr(self, trace, address)
+        self.mymap = trace.getMemoryMap(address)
 
     def notify(self, event, trace):
         self.trace = trace
@@ -77,6 +82,10 @@ class StalkerBreak(vtrace.Breakpoint):
 
             if bflags & envi.BR_DEREF and br != None:
                 br = self.trace.readMemoryFormat(br, '<P')[0]
+
+            # For now, we skip all branches to another module
+            if br != None and self.trace.getMemoryMap(br) != self.mymap:
+                continue
 
             # Procedural branches to regs etc must be marked
             # Otherwise, add another breakpoint like us

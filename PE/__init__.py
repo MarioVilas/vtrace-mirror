@@ -419,11 +419,11 @@ class PE(object):
 
     def parseResources(self):
 
+        self.ResourceRoot = ResourceDirectory()
+
         sec = self.getSectionByName(".rsrc")
         if sec == None:
             return 
-
-        self.ResourceRoot = ResourceDirectory()
 
         rsrc_todo = [ (sec.VirtualAddress, self.ResourceRoot), ]
 
@@ -580,6 +580,18 @@ class PE(object):
                 roff  = r & 0xfff
                 self.relocations.append((pageva+roff, rtype))
             relbytes = relbytes[chunksize:]
+
+    def getExportName(self):
+        '''
+        Return the name of this file acording to it's export entry.
+        (if there are no exports, return None)
+
+        '''
+        e = self.IMAGE_EXPORT_DIRECTORY
+        if e == None:
+            return None
+
+        return self.readAtRva(e.Name, 128).split('\x00')[0]
 
     def parseExports(self):
 

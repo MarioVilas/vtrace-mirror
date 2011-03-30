@@ -225,17 +225,52 @@ class MSR(Structure):
     ]
 
 # The enum of NtSystemDebugControl operations
-SysDbgReadMsr  = 16
+SysDbgQueryModuleInformation = 0
+SysDbgQueryTraceInformation = 1
+SysDbgSetTracepoint = 2
+SysDbgSetSpecialCall = 3
+SysDbgClearSpecialCalls = 4
+SysDbgQuerySpecialCalls = 5
+SysDbgBreakPoint = 6
+SysDbgQueryVersion = 7
+SysDbgReadVirtual = 8
+SysDbgWriteVirtual = 9
+SysDbgReadPhysical = 10
+SysDbgWritePhysical = 11
+SysDbgReadControlSpace = 12
+SysDbgWriteControlSpace = 13
+SysDbgReadIoSpace = 14
+SysDbgWriteIoSpace = 15
+SysDbgReadMsr = 16
 SysDbgWriteMsr = 17
+SysDbgReadBusData = 18
+SysDbgWriteBusData = 19
+SysDbgCheckLowMemory = 20
+SysDbgEnableKernelDebugger = 21
+SysDbgDisableKernelDebugger = 22
+SysDbgGetAutoKdEnable = 23
+SysDbgSetAutoKdEnable = 24
+SysDbgGetPrintBufferSize = 25
+SysDbgSetPrintBufferSize = 26
+SysDbgGetKdUmExceptionEnable = 27
+SysDbgSetKdUmExceptionEnable = 28
+SysDbgGetTriageDump = 29
+SysDbgGetKdBlockEnable = 30
+SysDbgSetKdBlockEnable = 31
+SysDbgRegisterForUmBreakInfo = 32
+SysDbgGetUmBreakPid = 33
+SysDbgClearUmBreakPid = 34
+SysDbgGetUmAttachPid = 35
+SysDbgClearUmAttachPid = 36
 
 def wrmsr(msrid, value):
     m = MSR()
     m.msr = msrid
     m.value = value
     mptr = addressof(m)
-    x = ntdll.NtDebugSystemControl(SysDbgWriteMsr, mptr, sizeof(m), 0, 0, 0)
+    x = ntdll.NtSystemDebugControl(SysDbgWriteMsr, mptr, sizeof(m), 0, 0, 0)
     if x != 0:
-        raise vtrace.PlatformException('NtDebugSystemControl Failed: 0x%.8x' % kernel32.GetLastError())
+        raise vtrace.PlatformException('NtSystemDebugControl Failed: 0x%.8x' % kernel32.GetLastError())
     return 0
 
 def rdmsr(msrid):
@@ -246,9 +281,9 @@ def rdmsr(msrid):
     mptr = addressof(m)
     msize = sizeof(m)
 
-    x = ntdll.NtDebugSystemControl(SysDbgReadMsr, mptr, msize, mptr, msize, 0)
+    x = ntdll.NtSystemDebugControl(SysDbgReadMsr, mptr, msize, mptr, msize, 0)
     if x != 0:
-        raise vtrace.PlatformException('NtDebugSystemControl Failed: 0x%.8x' % kernel32.GetLastError())
+        raise vtrace.PlatformException('NtSystemDebugControl Failed: 0x%.8x' % kernel32.GetLastError())
     return m.value
 
 SC_MANAGER_ALL_ACCESS           = 0xF003F
@@ -927,6 +962,9 @@ if sys.platform == "win32":
     advapi32.EnumServicesStatusExW.restype = BOOL
     advapi32.CloseServiceHandle.argtypes = [ HANDLE, ]
     advapi32.CloseServiceHandle.restype = BOOL
+    advapi32.GetTokenInformation.argtypes = [HANDLE, DWORD, LPVOID, DWORD, LPVOID]
+    advapi32.GetTokenInformation.restype = BOOL
+
 
 def getServicesList():
     '''
@@ -999,7 +1037,59 @@ BOOL WINAPI EnumServicesStatusEx(
 
 SE_PRIVILEGE_ENABLED    = 0x00000002
 TOKEN_ADJUST_PRIVILEGES = 0x00000020
+TOKEN_QUERY             = 0x00000008
 dbgprivdone = False
+
+# TOKEN_INFORMATION_CLASS
+TokenUser                   = 1
+TokenGroups                 = 2
+TokenPrivileges             = 3
+TokenOwner                  = 4
+TokenPrimaryGroup           = 5
+TokenDefaultDacl            = 6
+TokenSource                 = 7
+TokenType                   = 8
+TokenImpersonationLevel     = 9
+TokenStatistics             = 10
+TokenRestrictedSids         = 11
+TokenSessionId              = 12
+TokenGroupsAndPrivileges    = 13
+TokenSessionReference       = 14
+TokenSandBoxInert           = 15
+TokenAuditPolicy            = 16
+TokenOrigin                 = 17
+TokenElevationType          = 18
+TokenLinkedToken            = 19
+TokenElevation              = 20
+TokenHasRestrictions        = 21
+TokenAccessInformation      = 22
+TokenVirtualizationAllowed  = 23
+TokenVirtualizationEnabled  = 24
+TokenIntegrityLevel         = 25
+TokenUIAccess               = 26
+TokenMandatoryPolicy        = 27
+TokenLogonSid               = 28
+MaxTokenInfoClass           = 29
+
+# TOKEN_ELEVATION_TYPE
+TokenElevationTypeDefault   = 1
+TokenElevationTypeFull      = 2
+TokenElevationTypeLimited   = 3
+
+def getTokenElevationType(handle=-1):
+
+    token = HANDLE(0)
+    etype = DWORD(0)
+    outsize = DWORD(0)
+    if not advapi32.OpenProcessToken(handle, TOKEN_QUERY, addressof(token)):
+        raise Exception('Invalid Process Handle: %d' % handle)
+
+    advapi32.GetTokenInformation(token, TokenElevationType, addressof(etype), 4, addressof(outsize))
+
+    return etype.value
+
+if __name__ == '__main__':
+    print getTokenElevationType()
 
 def getDebugPrivileges():
     tokprivs = TOKEN_PRIVILEGES()
@@ -1433,17 +1523,14 @@ class WindowsMixin:
         elif event.DebugEventCode == EXIT_PROCESS_DEBUG_EVENT:
             ecode = event.u.ExitProcess.ExitCode
             eventdict["ExitCode"] = ecode
-            self.setMeta("ExitCode", ecode)
-            self.fireNotifiers(vtrace.NOTIFY_EXIT)
+            self._fireExit(ecode)
             self.platformDetach()
 
         elif event.DebugEventCode == EXIT_THREAD_DEBUG_EVENT:
             self.win32threads.pop(ThreadId, None)
             ecode = event.u.ExitThread.ExitCode
             eventdict["ExitCode"] = ecode
-            self.setMeta("ExitCode", ecode)
-            self.setMeta("ExitThread", ThreadId)
-            self.fireNotifiers(vtrace.NOTIFY_EXIT_THREAD)
+            self._fireExitThread(ThreadId, ecode)
 
         elif event.DebugEventCode == LOAD_DLL_DEBUG_EVENT:
             baseaddr = event.u.LoadDll.BaseOfDll
@@ -1581,6 +1668,9 @@ class WindowsMixin:
         Expose the getServicesList via the trace for remote...
         '''
         return getServicesList()
+
+    def _getUacStatus(self):
+        return getTokenElevationType(self.phandle)
 
 # NOTE: The order of the constructors vs inheritance is very important...
 

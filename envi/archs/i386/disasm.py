@@ -155,7 +155,7 @@ class i386RegOper(envi.RegisterOper):
         return True
 
 # For opcodes which need their immediate extended on print
-sextend = [opcode86.INS_ADD, opcode86.INS_SUB, opcode86.INS_AND]
+sextend = [opcode86.INS_ADD, opcode86.INS_SUB, opcode86.INS_AND, opcode86.INS_OR]
 
 class i386ImmOper(envi.ImmedOper):
     """
@@ -985,4 +985,19 @@ class i386Disasm:
     def ameth_y(self, bytes, offset, tsize, prefixes):
         #FIXME this needs the ES over-ride, but is only for insb which we don't support
         return (0, i386RegMemOper(REG_ESI, tsize))
+
+
+if __name__ == '__main__':
+
+    # A little helper to make testing easier
+
+    import sys
+    d = i386Disasm()
+    b = file(sys.argv[1], 'rb').read()
+    offset = 0
+    va = 0x41414141
+    while offset < len(b):
+        op = d.disasm(b, offset, va+offset)
+        print '0x%.8x %s %s' % (va+offset, b[offset:offset+len(op)].encode('hex').ljust(16), repr(op))
+        offset += len(op)
 

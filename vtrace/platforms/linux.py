@@ -171,7 +171,6 @@ class LinuxMixin(v_posix.PtraceMixin, v_posix.PosixMixin):
         # Wrap reads from proc in our worker thread
         v_posix.PtraceMixin.__init__(self)
         v_posix.PosixMixin.__init__(self)
-        self.pthreads = [] # FIXME perhaps make this posix-wide not just linux eventually...
         self.nptlinit = False
         self.memfd = None
 
@@ -435,7 +434,7 @@ class LinuxMixin(v_posix.PtraceMixin, v_posix.PosixMixin):
         """
         p = c_ulong(0)
         tid = self.getMeta("ThreadId", -1)
-        if v_posix.ptrace(PT_GETEVENTMSG, tid, 0, byref(p)) != 0:
+        if v_posix.ptrace(PT_GETEVENTMSG, tid, 0, addressof(p)) != 0:
             raise Exception("ptrace PT_GETEVENTMSG failed! %d" % x)
         return p.value
 

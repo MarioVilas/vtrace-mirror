@@ -291,14 +291,20 @@ class EnviCli(Cmd):
         The script file is arbitrary python code which is run with the
         full compliment of expression extensions mapped in as locals.
 
-        Usage: script <scriptfile>
+        NOTE: additional command line arguments may be passed in and will
+              appear as the list "argv" in the script namespace!  (They will
+              all be strings)
+
+        Usage: script <scriptfile> [<argv[0]>, ...]
         """
         if len(line) == 0:
             return self.do_help("script")
 
+        argv = splitargs(line)
         locals = self.getExpressionLocals()
-        script = file(line).read()
-        cobj = compile(script, line, "exec")
+        locals['argv'] = argv
+        script = file(argv[0]).read()
+        cobj = compile(script, argv[0], "exec")
         exec(cobj, locals)
 
     def do_maps(self, line):

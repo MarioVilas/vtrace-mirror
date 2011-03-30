@@ -38,7 +38,7 @@ class PosixMixin:
         """
         self.stepping = False # Set this on stepi to diff the TRAP
         self.execing  = False # Set this on exec to diff the TRAP
-        self.pthreads = None  # Some platforms make a pthread list
+        self.pthreads = [] # Some platforms make a pthread list
 
         self.fireTracerThread()
 
@@ -102,18 +102,16 @@ class PosixMixin:
     def platformProcessEvent(self, status):
 
         if os.WIFEXITED(status):
-            self.setMeta("ExitCode", os.WEXITSTATUS(status))
             tid = self.getMeta("ThreadId", -1)
             if tid != self.getPid():
                 # Set the selected thread ID to the pid cause
                 # the old one's invalid
-                if self.pthreads != None:
+                if tid in self.pthreads:
                     self.pthreads.remove(tid)
                 self.setMeta("ThreadId", self.getPid())
-                self.setMeta("ExitThread", tid)
-                self.fireNotifiers(vtrace.NOTIFY_EXIT_THREAD)
+                self._fireExitThread(tid, os.WEXITSTATUS(status))
             else:
-                self.fireNotifiers(vtrace.NOTIFY_EXIT)
+                self._fireExit(os.WEXITSTATUS(status))
 
         elif os.WIFSIGNALED(status):
             self.setMeta("ExitCode", os.WTERMSIG(status))
