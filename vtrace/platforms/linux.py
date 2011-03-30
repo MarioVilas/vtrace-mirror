@@ -12,10 +12,10 @@ import envi.memory as e_mem
 import envi.registers as e_reg
 
 import vtrace
-import vtrace.platforms.base as v_base
-import vtrace.platforms.posix as v_posix
 import vtrace.archs.i386 as v_i386
 import vtrace.archs.amd64 as v_amd64
+import vtrace.platforms.base as v_base
+import vtrace.platforms.posix as v_posix
 
 from ctypes import *
 import ctypes.util as cutil
@@ -172,18 +172,14 @@ class LinuxMixin(v_posix.PtraceMixin, v_posix.PosixMixin):
         v_posix.PtraceMixin.__init__(self)
         v_posix.PosixMixin.__init__(self)
         self.pthreads = [] # FIXME perhaps make this posix-wide not just linux eventually...
-        self.threadWrap("platformAllocateMemory", self.platformAllocateMemory)
-        self.threadWrap("getPtraceEvent", self.getPtraceEvent)
-        self.threadWrap("platformReadMemory", self.platformReadMemory)
-        self.threadWrap("platformWriteMemory", self.platformWriteMemory)
-        if platform.release().startswith("2.4"):
-            self.threadWrap("platformWait", self.platformWait)
-        self.threadWrap("doAttachThread", self.doAttachThread)
         self.nptlinit = False
         self.memfd = None
 
+        self.fireTracerThread()
+
         self.initMode("Syscall", False, "Break On Syscalls")
 
+    @v_base.threadwrap
     def platformExec(self, cmdline):
         pid = v_posix.PtraceMixin.platformExec(self, cmdline)
         self.pthreads = [pid,]
@@ -199,8 +195,9 @@ class LinuxMixin(v_posix.PtraceMixin, v_posix.PosixMixin):
 
 	x = libc.lseek64(self.memfd, offset, 0)
 
-    #FIXME this is intel specific and should probably go in with the regs
+    @v_base.threadwrap
     def platformAllocateMemory(self, size, perms=e_mem.MM_RWX, suggestaddr=0):
+        #FIXME this is intel specific and should probably go in with the regs
         sp = self.getStackCounter()
         pc = self.getProgramCounter()
 
@@ -252,6 +249,7 @@ class LinuxMixin(v_posix.PtraceMixin, v_posix.PosixMixin):
             self.attachThread(tid)
         v_posix.PosixMixin.posixCreateThreadHack(self)
 
+    @v_base.threadwrap
     def platformReadMemory(self, address, size):
         """
         A *much* faster way of reading memory that the 4 bytes
@@ -267,6 +265,7 @@ class LinuxMixin(v_posix.PtraceMixin, v_posix.PosixMixin):
         # We have to slice cause ctypes "helps" us by adding a null byte...
         return buf.raw
 
+    @v_base.threadwrap
     def whynot_platformWriteMemory(self, address, data):
         """
         A *much* faster way of writting memory that the 4 bytes
@@ -292,6 +291,7 @@ class LinuxMixin(v_posix.PtraceMixin, v_posix.PosixMixin):
                 exe = exe.split("(deleted)")[0].strip()
         return exe
 
+    @v_base.threadwrap
     def platformAttach(self, pid):
         self.pthreads = [pid,]
         self.setMeta("ThreadId", pid)
@@ -336,12 +336,19 @@ class LinuxMixin(v_posix.PtraceMixin, v_posix.PosixMixin):
                     print "WARNING TID is invalid %d %s" % (tid,e)
         return status
 
+    # If it's linux 2.4 we must threadwrap wait...
+    if platform.release().startswith("2.4"):
+        platformWait = v_base.threadwrap(platformWait)
+
+    @v_base.threadwrap
     def platformContinue(self):
         cmd = v_posix.PT_CONTINUE
         if self.getMode("Syscall", False):
             cmd = PT_SYSCALL
         pid = self.getPid()
-        sig = self.getMeta("PendingSignal", 0)
+        sig = self.getCurrentSignal()
+        if sig == None:
+            sig = 0
         # Only deliver signals to the main thread
         if v_posix.ptrace(cmd, pid, 0, sig) != 0:
             raise Exception("ERROR ptrace failed for tid %d" % pid)
@@ -352,17 +359,20 @@ class LinuxMixin(v_posix.PtraceMixin, v_posix.PosixMixin):
             if v_posix.ptrace(cmd, tid, 0, 0) != 0:
                 pass
 
+    @v_base.threadwrap
     def platformStepi(self):
         self.stepping = True
         tid = self.getMeta("ThreadId", 0)
         if v_posix.ptrace(v_posix.PT_STEP, tid, 0, 0) != 0:
             raise Exception("ERROR ptrace failed!")
 
+    @v_base.threadwrap
     def platformDetach(self):
         libc.close(self.memfd)
         for tid in self.pthreads:
             tid,v_posix.ptrace(PT_DETACH, tid, 0, 0)
 
+    @v_base.threadwrap
     def doAttachThread(self, tid, attached=False):
         """
         Do the work for attaching a thread.  This must be *under*
@@ -417,6 +427,7 @@ class LinuxMixin(v_posix.PtraceMixin, v_posix.PosixMixin):
 
         v_posix.PosixMixin.platformProcessEvent(self, status)
 
+    @v_base.threadwrap
     def getPtraceEvent(self):
         """
         This *thread wrapped* function will get any pending GETEVENTMSG
@@ -481,16 +492,11 @@ class LinuxMixin(v_posix.PtraceMixin, v_posix.PosixMixin):
 
         return fds
 
-    def platformGetSignal(self):
-        sig = self.getMeta('PendingSignal', 0)
-        if sig == 0:
-            sig = None
-        return sig
-
 ############################################################################
 #
 # NOTE: Both of these use class locals set by the i386/amd64 variants
 #
+    @v_base.threadwrap
     def platformGetRegCtx(self, tid):
         ctx = self.archGetRegCtx()
         u = self.user_reg_struct()
@@ -506,6 +512,7 @@ class LinuxMixin(v_posix.PtraceMixin, v_posix.PosixMixin):
 
         return ctx
 
+    @v_base.threadwrap
     def platformSetRegCtx(self, tid, ctx):
         u = self.user_reg_struct()
         # Populate the reg struct with the current values (to allow for

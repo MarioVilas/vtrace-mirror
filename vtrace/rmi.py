@@ -38,12 +38,26 @@ class TraceProxyFactory:
         and wants the server to clean him up, hand
         the proxy object to this.
         """
-        vtrace.cobra_daemon.unshareObject(proxy.__dict__.get("__cobra_name", None))
+        t = vtrace.cobra_daemon.unshareObject(proxy.__dict__.get("__cobra_name", None))
+        if t != None:
+            t.release()
 
 class RemoteTrace(cobra.CobraProxy):
 
     def __init__(self, *args, **kwargs):
         cobra.CobraProxy.__init__(self, *args, **kwargs)
+        self.__dict__['_remote_released'] = False
+
+    def buildNewTrace(self):
+        return getRemoteTrace()
+
+    def release(self):
+        self.__dict__['_remote_released'] = True
+        getTracerFactory().releaseTrace(self)
+
+    def __del__(self):
+        if not self.__dict__['_remote_released']:
+            print 'RemoteTrace del w/o release()!'
 
 def getCallbackProxy(trace, notifier):
     """
@@ -55,8 +69,10 @@ def getCallbackProxy(trace, notifier):
     global callback_daemon
     port = getCallbackPort()
     host, nothing = cobra.getCobraSocket(trace).getSockName()
-    unique = md5.md5(os.urandom(20)).hexdigest()
-    callback_daemon.shareObject(notifier, unique)
+    unique = callback_daemon.getSharedName(notifier)
+    if unique == None:
+        unique = md5.md5(os.urandom(20)).hexdigest()
+        callback_daemon.shareObject(notifier, unique)
     return cobra.CobraProxy("cobra://%s:%d/%s" % (host, port, unique))
 
 def getCallbackPort():
@@ -79,6 +95,9 @@ def getRemoteTrace():
     factory = getTracerFactory()
     unique = factory.getTrace()
     return RemoteTrace("cobra://%s:%d/%s" % (vtrace.remote, vtrace.port, unique))
+
+def releaseRemoteTrace(proxy):
+    getTracerFactory().releaseTrace(proxy)
 
 def startVtraceServer():
     """

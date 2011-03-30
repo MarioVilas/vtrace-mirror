@@ -35,7 +35,7 @@ class RegisterContext:
               RegisterContext has been initialized the same way
               (like context switches in tracers, or emulaction snaps)
         """
-        self._rctx_vals = snap
+        self._rctx_vals = list(snap)
 
     def isDirty(self):
         """
@@ -44,11 +44,14 @@ class RegisterContext:
         """
         return self._rctx_dirty
 
+    def setIsDirty(self, bool):
+        self._rctx_dirty = bool
+
     def setRegisterIndexes(self, pcindex, spindex):
         self._rctx_pcindex = pcindex
         self._rctx_spindex = spindex
 
-    def loadRegDef(self, regdef):
+    def loadRegDef(self, regdef, defval=0):
         """
         Load a register definition.  A register definition consists
         of a list of tuples with the following format:
@@ -56,7 +59,7 @@ class RegisterContext:
 
         NOTE: All widths in envi RegisterContexts are in bits.
         """
-        self._rctx_regdef = regdef # Save this for 
+        self._rctx_regdef = regdef # Save this for snaps etc..
         self._rctx_names = {}
         self._rctx_ids = {}
         self._rctx_widths = []
@@ -68,7 +71,10 @@ class RegisterContext:
             self._rctx_ids[i] = name
             self._rctx_widths.append(width)
             self._rctx_masks.append((2**width)-1)
-            self._rctx_vals.append(0)
+            self._rctx_vals.append(defval)
+
+    def getRegDef(self):
+        return self._rctx_regdef
 
     def loadRegMetas(self, metas):
         """
@@ -208,6 +214,14 @@ class RegisterContext:
         """
         return self._rctx_names.keys()
 
+    def getRegisterNameIndexes(self):
+        '''
+        Return a list of all the "real" (non meta) registers and their indexes.
+
+        Example: for regname, regidx in x.getRegisterNameIndexes():
+        '''
+        return self._rctx_names.items()
+
     def getRegisters(self):
         """
         Get all the *real* registers from this context as a dictionary of name
@@ -258,7 +272,12 @@ class RegisterContext:
         width  = (index >> 16) & 0xff
 
         mask = (2**width)-1
-        return (self._rctx_vals[ridx] >> offset) & mask
+
+        rval = self._rctx_vals[ridx]
+        if offset != 0:
+            rval >>= offset
+
+        return rval & mask
 
     def getMetaRegInfo(self, index):
         '''
@@ -308,7 +327,10 @@ class RegisterContext:
 
         curval = self._rctx_vals[ridx]
 
-        self._rctx_vals[ridx] = (curval & finalmask) | (value << offset)
+        if offset:
+            value <<= offset
+
+        self._rctx_vals[ridx] = (curval & finalmask) | value
 
 def addLocalEnums(l, regdef):
     """

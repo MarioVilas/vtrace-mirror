@@ -448,3 +448,7 @@ class VdbMemoryWindow(vw_memview.MemoryWindow):
 
         return vw_memview.MemoryWindow.updateMemoryView(self, *args)
 
+def main(db):
+    vw_main.mainthread()
+    vg = VdbGui(db)
+    vw_main.main()

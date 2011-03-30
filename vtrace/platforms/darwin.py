@@ -12,10 +12,12 @@ import envi.memory as e_mem
 
 import vtrace
 import vtrace.archs.i386 as v_i386
+import vtrace.archs.amd64 as v_amd64
 import vtrace.platforms.base as v_base
 import vtrace.platforms.posix as v_posix
 
-addrof = ctypes.addressof
+#addrof = ctypes.addressof
+addrof = ctypes.pointer
 
 # The OSX ptrace defines...
 PT_TRACE_ME     = 0    # child declares it's being traced
@@ -191,8 +193,15 @@ x86_DEBUG_STATE64     = 11
 x86_DEBUG_STATE       = 12
 THREAD_STATE_NONE     = 13
 
+class X86_STATE_HDR(ctypes.Structure):
+    _fields_ = [
+        ('flavor', ctypes.c_uint32),
+        ('count',  ctypes.c_uint32),
+    ]
+
 class STRUCT_X86_THREAD_STATE32(ctypes.Structure):
     _fields_ = [
+        #('tsh', X86_STATE_HDR),
         ('eax', ctypes.c_uint32),
         ('ebx', ctypes.c_uint32),
         ('ecx', ctypes.c_uint32),
@@ -221,6 +230,42 @@ class STRUCT_X86_EXCEPTION_STATE32(ctypes.Structure):
 class STRUCT_X86_DEBUG_STATE32(ctypes.Structure):
     _fields_ = [ ('debug%d', ctypes.c_uint32) for i in range(8) ]
 
+class STRUCT_X86_THREAD_STATE64(ctypes.Structure):
+    _fields_ = [
+        #('tsh', X86_STATE_HDR),
+        ('rax', ctypes.c_uint64),
+        ('rbx', ctypes.c_uint64),
+        ('rcx', ctypes.c_uint64),
+        ('rdx', ctypes.c_uint64),
+        ('rdi', ctypes.c_uint64),
+        ('rsi', ctypes.c_uint64),
+        ('rbp', ctypes.c_uint64),
+        ('rsp', ctypes.c_uint64),
+        ('r8',  ctypes.c_uint64),
+        ('r9',  ctypes.c_uint64),
+        ('r10', ctypes.c_uint64),
+        ('r11', ctypes.c_uint64),
+        ('r12', ctypes.c_uint64),
+        ('r13', ctypes.c_uint64),
+        ('r14', ctypes.c_uint64),
+        ('r15', ctypes.c_uint64),
+        ('rip', ctypes.c_uint64),
+        ('rflags', ctypes.c_uint64),
+        ('cs',  ctypes.c_uint64),
+        ('fs',  ctypes.c_uint64),
+        ('gs',  ctypes.c_uint64),
+    ]
+
+
+class STRUCT_X86_EXCEPTION_STATE64(ctypes.Structure):
+    _fields_ = [
+        ('trapno',     ctypes.c_uint32),
+        ('err',        ctypes.c_uint32),
+        ('faultvaddr', ctypes.c_uint64),
+    ]
+
+class STRUCT_X86_DEBUG_STATE64(ctypes.Structure):
+    _fields_ = [ ('debug%d', ctypes.c_uint64) for i in range(8) ]
 
 ###########################################################################
 #
@@ -280,10 +325,16 @@ MACH_MSG_TYPE_MAKE_SEND      = 20    # Must hold receive rights
 MACH_MSG_TYPE_MAKE_SEND_ONCE = 21    # Must hold receive rights
 MACH_MSG_TYPE_COPY_RECEIVE   = 22    # Must hold receive rights
 
-mach_port_t     = ctypes.c_uint32
-mach_msg_size_t = ctypes.c_uint32
-mach_msg_bits_t = ctypes.c_uint32
-mach_msg_id_t   = ctypes.c_uint32
+mach_port_t       = ctypes.c_uint32
+mach_port_name_t  = ctypes.c_uint32
+mach_port_right_t = ctypes.c_uint32
+mach_msg_size_t   = ctypes.c_uint32
+mach_msg_bits_t   = ctypes.c_uint32
+mach_msg_id_t     = ctypes.c_uint32
+
+ipc_space_t       = ctypes.c_uint32
+
+kern_return_t     = ctypes.c_uint32
 
 class mach_msg_header_t(ctypes.Structure):
     _fields_ = [
@@ -327,6 +378,8 @@ exception_data_t        = ctypes.POINTER(ctypes.c_uint32)
 class exc_msg(ctypes.Structure):
     _fields_ = [
         ('Head',    mach_msg_header_t),
+        #('data',    ctypes.c_uint8 * 1024),
+
         ('body',    mach_msg_body_t),
         ('thread',  mach_msg_port_descriptor_t),
         ('task',    mach_msg_port_descriptor_t),
@@ -334,8 +387,10 @@ class exc_msg(ctypes.Structure):
         ('exception', exception_type_t),
         ('codeCnt',   mach_msg_type_number_t),
         ('codes',     ctypes.c_uint32 * 128),
-        #('codes',     exception_data_t),
-        #('pad',       ctypes.c_uint8 * 512)
+
+
+        ##('codes',     exception_data_t),
+        ##('pad',       ctypes.c_uint8 * 512)
 
     ]
 
@@ -343,8 +398,9 @@ class exc_msg(ctypes.Structure):
 class exc_rep_msg(ctypes.Structure):
     _fields_ = [
         ('Head',    mach_msg_header_t),
-        ('NDR',     NDR_record_t),
-        ('RetCode', ctypes.c_uint32)
+        ('data',    ctypes.c_uint8 * 1024),
+        #('NDR',     NDR_record_t),
+        #('RetCode', ctypes.c_uint32)
     ]
 
 ##########################################################################
@@ -393,158 +449,15 @@ EXCEPTION_STATE          = 2 # Send a catch_exception_raise_state message includ
 EXCEPTION_STATE_IDENTITY = 3 # Send a catch_exception_raise_state_identity message including the thread identity and state.
 MACH_EXCEPTION_CODES     = 0x80000000 # Send 64-bit code and subcode in the exception header
 
-
-class SysctlType(ctypes.Structure):
-    _fields_ = [
-        ('one',  ctypes.c_uint32),
-        ('two', ctypes.c_uint32),
-        ('three', ctypes.c_uint32),
-    ]
-
-class pcred(ctypes.Structure):
-    _fields_ = [
-        ('pc_lock', ctypes.c_byte * 72),       # /* opaque content
-        ('pc_ucred', ctypes.c_void_p),  # struct ucred *
-        ('p_ruid', ctypes.c_ulong),     # /* Real user id.
-        ('p_svuid', ctypes.c_ulong),    # /* Saved effective user id.
-        ('p_rgid',ctypes.c_ulong),      # /* Real group id.
-        ('p_svgid', ctypes.c_ulong),    # /* Saved effective group id.
-        ('p_refcnt', ctypes.c_ulong),   # /* Number of references.
-    ]
-
-print 'pcred',ctypes.sizeof(pcred())
-
-class ucred(ctypes.Structure):
-    _fields_ = [
-        ('cr_ref', ctypes.c_ulong),         # /* reference count
-        ('cr_uid', ctypes.c_ulong),         # /* effective user id
-        ('cr_ngroups', ctypes.c_ushort),    # /* number of groups
-        ('cr_groups', ctypes.c_ulong * 16),  # Actually c_ulong * ngroups...
-    ]
-
-print 'ucred',ctypes.sizeof(ucred())
-
-class vmspace(ctypes.Structure):
-    _fields_ = [
-        ('dummy',  ctypes.c_uint32),
-        ('dummy2', ctypes.c_uint32),      # FIXME caddr_t
-        ('dummy3', ctypes.c_uint32 * 5),
-        ('dummy4', ctypes.c_uint32 * 3),  # FIXME caddr_t
-    ]
-
-print 'vmspace',ctypes.sizeof(vmspace())
-
-WMESGLEN            = 7
-MAXCOMLEN           = 16
-COMAPT_MAXLOGNAME   = 12
-
-class eproc(ctypes.Structure):
-    _fields_ = [
-        ('e_paddr',     ctypes.c_void_p), # struct proc *
-        ('e_sess',      ctypes.c_void_p), # struct session
-        ('e_pcred',     pcred),
-        ('e_ucred',     ucred),
-        ('e_vm',        vmspace),
-        ('e_ppid',      ctypes.c_uint32), #/* parent process id (pid_t)
-        ('e_pgid',      ctypes.c_uint32), #/* process group id (pid_t)
-        ('e_jobc',      ctypes.c_short),  #/* job control counter
-        ('e_tdev',      ctypes.c_uint32), #/* controlling tty dev (dev_t)
-        ('e_tpgid',     ctypes.c_uint32), #/* tty process group id
-        ('e_tsess',     ctypes.c_void_p), #/* tty session pointer (struct session *)
-        ('e_wmesg',     ctypes.c_byte * (WMESGLEN+1)), #/* wchan message
-        ('e_xsize',     ctypes.c_uint32), #/* text size (segsz_t)
-        ('e_xrssize',   ctypes.c_short),  #/* text rss
-        ('e_xccount',   ctypes.c_short),  #/* text references
-        ('e_xswrss',    ctypes.c_short),
-        ('e_flag',      ctypes.c_uint32),
-        ('e_login',     ctypes.c_byte * COMAPT_MAXLOGNAME), #/* short setlogin() name
-        ('e_spare',     ctypes.c_uint32 * 4),
-   ]
-
-print 'eproc',ctypes.sizeof(eproc())
-
-class  timeval(ctypes.Structure):
-    _fields_ = [
-        ('tv_sec', ctypes.c_uint32),
-        ('tv_usec',ctypes.c_uint32),
-    ]
-
-class itimerval(ctypes.Structure):
-    _fields_ = [
-        ('it_interval', timeval),
-        ('it_value',    timeval),
-    ]
-
-class pst1(ctypes.Structure):
-    _fields_ = [
-        ('tv_sec', ctypes.c_void_p),
-        ('tv_usec',ctypes.c_void_p),
-    ]
-
 boolean_t = ctypes.c_uint32
 pid_t     = ctypes.c_uint32
-u_int     = ctypes.c_uint32
-pvoid     = ctypes.c_void_p
-fixpt_t   = ctypes.c_uint32
-u_quad_t  = ctypes.c_ulonglong
-sigset_t  = ctypes.c_uint32
+#u_int     = ctypes.c_uint32
+#pvoid     = ctypes.c_void_p
+#fixpt_t   = ctypes.c_uint32
+#u_quad_t  = ctypes.c_ulonglong
+#sigset_t  = ctypes.c_uint32
 thread_t  = ctypes.c_uint32
 
-class extern_proc(ctypes.Structure):
-    _fields_ = [
-        ('p_un', pst1),
-        ('p_vmspace',   pvoid),
-        ('p_sigacts',   pvoid),
-        ('p_flag',      u_int),
-        ('p_stat',      ctypes.c_ubyte),
-        ('p_pid',       u_int),
-        ('p_oppid',     u_int),
-        ('p_dupfd',     u_int),
-        ('user_stack',  pvoid),
-        ('exit_thread', pvoid),
-        ('p_debugger',  u_int),
-        ('sigwait',     boolean_t),
-        ('p_estcpu',    u_int),
-        ('p_cpticks',   u_int),
-        ('p_pctcpu',    fixpt_t),
-        ('p_wchan',     pvoid),
-        ('p_wmesg',     pvoid),
-        ('p_swtime',    u_int),
-        ('p_slptime',   u_int),
-        ('p_realtimer', itimerval),
-        ('p_rtime',     timeval),
-        ('p_uticks',    u_quad_t),
-        ('p_sticks',    u_quad_t),
-        ('p_iticks',    u_quad_t),
-        ('p_traceflag', u_int),
-        ('p_tracep',    pvoid),
-        ('p_siglist',   u_int),
-        ('p_textvp',    pvoid),
-        ('p_holdcnt',   u_int),
-        ('p_sigmask',   sigset_t),
-        ('p_sigignore', sigset_t),
-        ('p_sigcatch',  sigset_t),
-        ('p_priority',  ctypes.c_ubyte),
-        ('p_usrpri',    ctypes.c_ubyte),
-        ('p_nice',      ctypes.c_char),
-        ('p_comm',      ctypes.c_char * (MAXCOMLEN+1)),
-        ('p_pgrp',      pvoid),
-        ('p_addr',      pvoid),
-        ('p_xstat',     ctypes.c_ushort),
-        ('p_acflag',    ctypes.c_ushort),
-        ('p_ru',        pvoid),
-    ]
-
-print 'extern_proc',ctypes.sizeof(extern_proc())
-
-
-class kinfo_proc(ctypes.Structure):
-    _fields_ = [
-        ('kp_proc', extern_proc),
-        ('kp_eproc', eproc),
-    ]
-
-print 'kinfo_proc',ctypes.sizeof(kinfo_proc)
 
 ####################################################################
 #
@@ -572,6 +485,16 @@ class vm_region_basic_info_64(ctypes.Structure):
 print 'vm_region_basic_info_64',ctypes.sizeof(vm_region_basic_info_64)
 VM_REGION_BASIC_INFO_COUNT_64 = ctypes.sizeof(vm_region_basic_info_64) / 4
 
+mach_helper = ctypes.CDLL('./darwin_mach.dylib')
+
+class ProcessListEntry(ctypes.Structure):
+    _fields_ = [
+        ('pid', ctypes.c_uint),
+        ('name', ctypes.c_char * 17),
+    ]
+mach_helper.platformPs.restype = ctypes.POINTER(ProcessListEntry)
+
+
 ####################################################################
     
 class DarwinMixin(v_posix.PosixMixin, v_posix.PtraceMixin):
@@ -581,13 +504,16 @@ class DarwinMixin(v_posix.PosixMixin, v_posix.PtraceMixin):
         v_posix.PtraceMixin.__init__(self)
         self.libc = ctypes.CDLL(c_util.find_library('c'))
         self.myport = self.libc.mach_task_self()
+
+        self.libc.mach_port_allocate.argtypes = [ipc_space_t, mach_port_right_t, ctypes.POINTER(mach_port_name_t)]
+        self.libc.mach_port_allocate.restype = kern_return_t
+
         self.portset = self.newMachPort(MACH_PORT_RIGHT_PORT_SET)
+        print 'CONSTRUCTED'
         self.excport = self.newMachRWPort()
         self.addPortToSet(self.excport)
-        # We get most of the threadWrap we need from posix... but...
-        #self.threadWrap("platformGetMaps", self.platformGetMaps)
 
-    def platformPs(self):
+    def NOTplatformPs(self):
         ctl = SysctlType()
         ctl.one = CTL_KERN
         ctl.two = KERN_PROC
@@ -607,6 +533,19 @@ class DarwinMixin(v_posix.PosixMixin, v_posix.PtraceMixin):
             ret.append((pid,name))
         ret.reverse()
         return ret
+
+    def platformPs(self):
+
+        ret = []
+        y = mach_helper.platformPs()
+        i = 0
+        while y[i].pid != 0xffffffff:
+            ret.append((y[i].pid, y[i].name))
+            i += 1
+
+        # FIXME free!
+        return ret
+
 
     def platformParseBinary(self, filename, baseaddr, normname):
         pass
@@ -645,20 +584,28 @@ class DarwinMixin(v_posix.PosixMixin, v_posix.PtraceMixin):
         return ret
 
     def platformGetMaps(self):
+
+        #mach_helper.platformGetMaps(self.task)
+
         maps = []
-        address = ctypes.c_uint32(0) # FIXME 64bit
-        mapsize = ctypes.c_uint32(0) # FIXME 64bit
-        name    = ctypes.c_uint32(0) # FIXME 64bit
+        address = ctypes.c_ulong(0)
+        mapsize = ctypes.c_ulong(0)
+        name    = ctypes.c_uint32(0)
         count   = ctypes.c_uint32(VM_REGION_BASIC_INFO_COUNT_64)
         info    = vm_region_basic_info_64()
 
         while True:
-            r = self.libc.vm_region(self.task, addrof(address),
+            r = self.libc.mach_vm_region(self.task, addrof(address),
                                    addrof(mapsize), VM_REGION_BASIC_INFO_64,
                                    addrof(info), addrof(count),
                                    addrof(name))
 
+            # If we get told "invalid address", we have crossed into kernel land...
+            if r == 1:
+                break
+
             if r != 0:
+                self.libc.mach_error("mach_vm_region", r)
                 raise Exception('vm_region Failed for 0x%.8x: 0x%.8x' % (address.value,r))
 
             perms = 0
@@ -676,9 +623,6 @@ class DarwinMixin(v_posix.PosixMixin, v_posix.PtraceMixin):
                 maps.append((address.value, mapsize.value, perms, ''))
 
             address.value += mapsize.value
-            # FIXME 64bit... only got to 0xc0000000 for now...
-            if address.value >= 0xc0000000:
-                break
 
         return maps
                                    
@@ -715,15 +659,13 @@ class DarwinMixin(v_posix.PosixMixin, v_posix.PtraceMixin):
                     self.handleAttach()
 
                 else:
-                    self.setMeta("PendingSignal", sig)
-                    self.fireNotifiers(vtrace.NOTIFY_SIGNAL)
+                    self._fireSignal(sig)
 
             elif sig == signal.SIGSTOP:
                 self.handleAttach()
 
             else:
-                self.setMeta("PendingSignal", sig)
-                self.fireNotifiers(vtrace.NOTIFY_SIGNAL)
+                self._fireSignal(sig)
 
         elif excode == EXC_BAD_ACCESS:
             print 'Bad Access:',repr([hex(x) for x in [exc.codes[i] for i in range(exc.codeCnt)]])
@@ -757,7 +699,7 @@ class DarwinMixin(v_posix.PosixMixin, v_posix.PtraceMixin):
         return task.value
 
     def newMachPort(self, right):
-        port = ctypes.c_uint32()
+        port = mach_port_name_t()
         ret = self.libc.mach_port_allocate(self.myport, right, addrof(port))
         if ret != 0:
             raise Exception('mach_port_allocate (right: %d) failed: 0x%.8x' % (right, ret))
@@ -785,7 +727,8 @@ class DarwinMixin(v_posix.PosixMixin, v_posix.PtraceMixin):
     def _getNextExc(self, timeout=MACH_MSG_TIMEOUT_NONE):
         exc = exc_msg()
         r = self.libc.mach_msg(addrof(exc),
-                           MACH_RCV_MSG|MACH_RCV_LARGE|MACH_RCV_TIMEOUT,
+                           #MACH_RCV_MSG|MACH_RCV_LARGE|MACH_RCV_TIMEOUT,
+                           MACH_RCV_MSG|MACH_RCV_INTERRUPT,
                            0,                   # Send size...
                            ctypes.sizeof(exc),  # Recv msg size
                            self.excport,
@@ -807,7 +750,9 @@ class DarwinMixin(v_posix.PosixMixin, v_posix.PtraceMixin):
 
     def platformWait(self):
         # Wait for a mach message on the exception port
-        exc = self._getNextExc()
+        exc = None
+        while exc == None:
+            exc = self._getNextExc()
         #e2 = self._getNextExc(timeout=0)
         #if e2 != None:
         #print "ALSO GOT",e2
@@ -829,18 +774,26 @@ class DarwinMixin(v_posix.PosixMixin, v_posix.PtraceMixin):
 
     def buildExcResp(self, exc):
         # This is from straight reversing exc_server from libc...
-        res = exc_rep_msg()
-        res.Head.msgh_bits = exc.Head.msgh_bits & 0xff
-        res.Head.msgh_size = 0x24
-        res.Head.msgh_remote_port = exc.Head.msgh_remote_port
-        res.Head.msgh_local_port = 0
-        res.Head.msgh_id = exc.Head.msgh_id + 0x64
-        res.RetCode = 0
-        return res
+
+        #res = exc_rep_msg()
+
+        #res.Head.msgh_bits = exc.Head.msgh_bits & 0xff
+        #res.Head.msgh_size = 0x24
+        #res.Head.msgh_remote_port = exc.Head.msgh_remote_port
+        #res.Head.msgh_local_port = 0
+        #res.Head.msgh_id = exc.Head.msgh_id + 0x64
+        #res.NDR.int_rep = 1
+        #res.RetCode = 0
+
+        #print 'exc_server',self.libc.exc_server(ctypes.pointer(exc), ctypes.pointer(res))
+        #return res
+
+        print 'exc_server',self.libc.exc_server(ctypes.pointer(exc), ctypes.pointer(exc))
+        return exc
 
 
     def platformContinue(self):
-        sig = self.getMeta("PendingSignal", 0)
+        sig = self.getCurrentSignal()
         self.libc.task_resume(self.task)
 
     def platformDetach(self):
@@ -852,11 +805,12 @@ class DarwinMixin(v_posix.PosixMixin, v_posix.PtraceMixin):
     def platformReadMemory(self, address, size):
         pval = ctypes.c_void_p(0)
         sval = ctypes.c_uint32(0)
-        r = self.libc.vm_read(self.task, address, size, addrof(pval), addrof(sval));
+        r = self.libc.mach_vm_read(self.task, address, size, addrof(pval), addrof(sval));
+        #r = self.libc.vm_read(self.task, address, size, addrof(pval), addrof(sval));
         if r != 0:
-            raise Exception('vm_read failed at 0x%.8x: 0x%.8x' % (address,r))
+            raise Exception('mach_vm_read failed at 0x%.8x: 0x%.8x' % (address,r))
         buf = ctypes.string_at(pval.value, sval.value)
-        self.libc.vm_deallocate(self.task, pval, sval)
+        self.libc.vm_deallocate(self.myport, pval, sval)
         return buf
 
     def platformWriteMemory(self, address, data):
@@ -933,83 +887,70 @@ class Darwini386Trace(
         if r != 0:
             raise Exception('thread_set_state (DEBUG_STATE32) failed: 0x%.8x' % r)
 
-class DarwinMixinOLD:
+class DarwinAmd64Trace(
+            vtrace.Trace,
+            DarwinMixin,
+            v_amd64.Amd64Mixin,
+            v_base.TracerBase):
 
-    def initMixin(self):
-        self.tdict = {}
+    def __init__(self):
+        vtrace.Trace.__init__(self)
+        v_base.TracerBase.__init__(self)
+        v_amd64.Amd64Mixin.__init__(self)
+        DarwinMixin.__init__(self)
 
-    def platformGetMaps(self):
-        return self.task.get_mmaps()
+    def getThreadException(self, tid):
+        # Each arch trace must implement this...
+        state = STRUCT_X86_EXCEPTION_STATE64()
+        scount = ctypes.c_uint32(ctypes.sizeof(state) / 8)
+        ret = self.libc.thread_get_state(tid, x86_EXCEPTION_STATE64, addrof(state), addrof(scount));
+        if ret != 0:
+            raise Exception('thread_get_state failed: 0x%.8x' % ret)
+        return state.trapno, state.err, state.faultvaddr
 
-    def platformReadMemory(self, address, length):
-        return self.task.vm_read(address, length)
+    def platformGetRegCtx(self, tid):
+        ctx = self.archGetRegCtx()
+        # NOTE: the tid *is* the port...
 
-    def platformWriteMemory(self, address, buffer):
-        return self.task.vm_write(address, buffer)
+        state = STRUCT_X86_THREAD_STATE64()
+        scount = ctypes.c_uint32(ctypes.sizeof(state) / 4)
+        ret = self.libc.thread_get_state(tid, x86_THREAD_STATE64, addrof(state), addrof(scount));
+        if ret != 0:
+            self.libc.mach_error("thread_get_state x86_THREAD_STATE64 failed:", ret)
+            raise Exception('thread_get_state (THREAD_STATE64) failed: 0x%.8x' % ret)
+        ctx._rctx_Import(state)
 
-    def currentMachThread(self):
-        self.getThreads()
-        return self.tdict[self.getMeta("ThreadId")]
+        state = STRUCT_X86_DEBUG_STATE64()
+        scount = ctypes.c_uint32(ctypes.sizeof(state) / 4)
+        ret = self.libc.thread_get_state(tid, x86_DEBUG_STATE64, addrof(state), addrof(scount));
+        if ret != 0:
+            self.libc.mach_error("thread_get_state x86_DEBUG_STATE64 failed:", ret)
+            raise Exception('thread_get_state (DEBUG_STATE64) failed: 0x%.8x' % ret)
+        ctx._rctx_Import(state)
 
-    def platformGetRegs(self):
-        """
-        """
-        thr = self.currentMachThread()
-        regs = thr.get_state(self.thread_state)
-        return regs + thr.get_state(self.debug_state)
+        return ctx
 
-    def platformSetRegs(self, regbuf):
-        thr = self.currentMachThread()
-        # XXX these 32 boundaries are wrong
-        thr.set_state(self.thread_state, regbuf[:-32])
-        thr.set_state(self.debug_state,  regbuf[-32:])
+    def platformSetRegCtx(self, tid, ctx):
 
-    def platformGetThreads(self):
-        ret = {}
-        self.tdict = {}
-        spname = self.archGetSpName()
-        for thread in self.task.threads():
-            # We can't call platformGetRegs here... (loop, loop...)
-            regbuf = thread.get_state(self.thread_state) + thread.get_state(self.debug_state)
-            regdict = self.unpackRegisters(regbuf)
-            sp = regdict.get(spname, 0)
-            mapbase,maplen,mperm,mfile = self.getMemoryMap(sp)
-            tid = mapbase + maplen # The TOP of the stack, so it doesn't grow down and change
-            ret[tid] = tid
-            self.tdict[tid] = thread
-        self.setMeta("ThreadId", tid) #FIXME how can we know what thread caused an event?
-        return ret
+        state = STRUCT_X86_THREAD_STATE64()
 
-class DarwinIntel32Registers:
-    """
-    Mixin for the register format of Darwin on Intel 32
-    """
-    thread_state = 1
-    debug_state = 10
+        # Sync up a struct first...
+        scount = ctypes.c_uint32(ctypes.sizeof(state) / 8)
+        ret = self.libc.thread_get_state(tid, x86_THREAD_STATE64, addrof(state), addrof(scount));
+        if ret != 0:
+            raise Exception('thread_get_state (THREAD_STATE64) failed: 0x%.8x' % ret)
 
-    def getRegisterFormat(self):
-        return "24L"
+        # Export our shit into it...
+        ctx._rctx_Export(state)
 
-    def getRegisterNames(self):
-        return ("eax","ebx","ecx","edx","edi",
-                "esi","ebp","esp","ss","eflags",
-                "eip","cs","ds","es","fs","gs",
-                "debug0","debug1","debug2","debug3",
-                "debug4","debug5","debug6","debug7")
+        scount = ctypes.sizeof(state) / 8
+        r = self.libc.thread_set_state(tid, x86_THREAD_STATE64, addrof(state), scount)
+        if r != 0:
+            raise Exception('thread_set_state (THREAD_STATE64) failed: 0x%.8x' % r)
 
-class DarwinPpc32Registers:
-    """
-    Mixin for the register format of Darwin on PPC 32
-    """
-    thread_state = 4
-    debug_state = 11
-
-    def getRegisterFormat(self):
-        return "40L"
-
-    def getRegisterNames(self):
-        mylist = []
-        for i in range(40):
-            mylist.append("r%d" % i)
-        return mylist
-
+        state = STRUCT_X86_DEBUG_STATE64()
+        ctx._rctx_Export(state)
+        scount = ctypes.sizeof(state) / 8
+        r = self.libc.thread_set_state(tid, x86_DEBUG_STATE64, addrof(state), scount)
+        if r != 0:
+            raise Exception('thread_set_state (DEBUG_STATE64) failed: 0x%.8x' % r)

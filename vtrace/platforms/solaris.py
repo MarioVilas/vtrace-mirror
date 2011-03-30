@@ -89,7 +89,6 @@ class SolarisMixin:
 
     def initMixin(self):
         #import sunprocfs
-        self.threadWrap("platformContinue", self.platformContinue)
         self.ctl = None
 
     def platformGetRegs(self):

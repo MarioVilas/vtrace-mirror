@@ -11,6 +11,12 @@ brskip = (envi.BR_PROC | envi.BR_DEREF)
 
 class StalkerBreak(vtrace.Breakpoint):
 
+    '''
+    Stalker breakpoints are added to function entry points
+    to trigger code-flow analysis and subsequent block breakpoint
+    addition.
+    '''
+
     def __init__(self, address, expression=None):
         vtrace.Breakpoint.__init__(self, address, expression=expression)
         self.fastbreak = True
@@ -97,6 +103,10 @@ class StalkerBreak(vtrace.Breakpoint):
                 continue
 
 class StalkerBlockBreak(vtrace.Breakpoint):
+    '''
+    A breakpoint object which is put on codeblock boundaries
+    to track hits.
+    '''
 
     def __init__(self, address, expression=None):
         vtrace.Breakpoint.__init__(self, address, expression=expression)
@@ -110,6 +120,11 @@ class StalkerBlockBreak(vtrace.Breakpoint):
         trace.runAgain()
 
 class StalkerDynBreak(vtrace.Breakpoint):
+
+    '''
+    A breakpoint which is placed on dynamic branches to track
+    code flow across them.
+    '''
 
     def __init__(self, address, expression=None):
         vtrace.Breakpoint.__init__(self, address, expression=expression)

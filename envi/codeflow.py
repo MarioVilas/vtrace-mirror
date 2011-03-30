@@ -71,10 +71,10 @@ class CodeFlowContext(object):
             branches = op.getBranches()
 
             while len(branches):
-            #for bva,bflags in branches:
-                # Don't worry about unresolved branches now...
+
                 bva, bflags = branches.pop()
 
+                # Don't worry about unresolved branches now...
                 if bva == None:
                     continue
 
@@ -110,7 +110,9 @@ class CodeFlowContext(object):
 
                     # Record that the current code flow has a call from it
                     # to the branch target...
-                    calls_from[bva] = True
+                    # FIXME intel hack, call 0, pop reg for geteip...
+                    if bva != va + len(op):
+                        calls_from[bva] = True
 
                 else:
                     if not opdone.get(bva):

@@ -189,6 +189,37 @@ class IMAGE_RESOURCE_DIRECTORY(vstruct.VStruct):
         self.NumberOfNamedEntries = v_uint16()
         self.NumberOfIdEntries    = v_uint16()
 
+class IMAGE_RESOURCE_DIRECTORY_ENTRY(vstruct.VStruct):
+    def __init__(self):
+        vstruct.VStruct.__init__(self)
+        self.Name           = v_uint32()
+        self.OffsetToData   = v_uint32()
+
+class IMAGE_RESOURCE_DATA_ENTRY(vstruct.VStruct):
+    def __init__(self):
+        vstruct.VStruct.__init__(self)
+        self.OffsetToData   = v_uint32()
+        self.Size           = v_uint32()
+        self.CodePage       = v_uint32()
+        self.Reserved       = v_uint32()
+
+class VS_FIXEDFILEINFO(vstruct.VStruct):
+    def __init__(self):
+        vstruct.VStruct.__init__(self)
+        self.Signature          = v_uint32()
+        self.StrucVersion       = v_uint32()
+        self.FileVersionMS      = v_uint32()
+        self.FileVersionLS      = v_uint32()
+        self.ProductVersionMS   = v_uint32()
+        self.ProductVersionLS   = v_uint32()
+        self.FileFlagsMask      = v_uint32()
+        self.FileFlags          = v_uint32()
+        self.FileOS             = v_uint32()
+        self.FileType           = v_uint32()
+        self.FileSubtype        = v_uint32()
+        self.FileDateMS         = v_uint32()
+        self.FileDateLS         = v_uint32()
+
 class IMAGE_SECTION_HEADER(vstruct.VStruct):
 
     def __init__(self):

@@ -5,6 +5,7 @@ the use of the ArchitectureModule, Opcode, Operand, and
 Emulator objects.
 """
 
+import types
 import struct
 import platform
 
@@ -90,6 +91,16 @@ class ArchitectureModule:
     def getCallingConventions(self):
         return self._arch_call_convs.items()
 
+def stealArchMethods(obj, archname):
+    '''
+    Used by objects which are expected to inherit from an
+    architecture module but don't know which one until runtime!
+    '''
+    arch = getArchModule(archname)
+    for name in dir(arch):
+        o = getattr(arch, name, None)
+        if type(o) == types.MethodType:
+            setattr(obj, name, o)
 
 ################################################################
 #
@@ -598,12 +609,14 @@ arch_xlate_32 = {
     'x86':'i386',
     'i86pc':'i386', # Solaris
     '':'i386', # Stupid windows...
+    'AMD64':'i386', # ActiveState python can say AMD64 in 32 bit install?
 }
 
 arch_xlate_64 = {
     'x86_64':'amd64',
     'AMD64':'amd64',
     'amd64':'amd64',
+    'i386':'amd64', # MAC ports builds are 64bit and say i386
     '':'amd64', # And again....
 }
 

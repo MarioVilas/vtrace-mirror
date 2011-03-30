@@ -124,6 +124,8 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
         self.difftracks = {}
         self.waitlib = None
 
+        self.windows_jit_event = None
+
         # We hangn on to an opcode renderer instance
         self.opcoderend = None
 
@@ -176,6 +178,8 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
         self.canvas.addRenderer("disasm", self.opcoderend)
         drend = v_rend.DerefRenderer(self.trace)
         self.canvas.addRenderer("Deref View", drend)
+        srend = v_rend.SymbolRenderer(self.trace)
+        self.canvas.addRenderer('Symbols View', srend)
 
     def verror(self, msg, addnl=True):
         if addnl:
@@ -204,7 +208,9 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
         if oldtrace.isAttached():
             oldtrace.detach()
 
-        self.trace = vtrace.getTrace()
+        self.trace = oldtrace.buildNewTrace()
+        oldtrace.release()
+
         self.manageTrace(self.trace)
         return self.trace
 
@@ -283,11 +289,16 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
     def notify(self, event, trace):
 
         pid = trace.getPid()
+        tid = trace.getCurrentThread()
 
         if event == vtrace.NOTIFY_ATTACH:
             self.vprint("Attached to : %d" % pid)
             self.waitlib = None
             self.difftracks = {}
+
+            if self.windows_jit_event:
+                trace._winJitEvent(self.windows_jit_event)
+                self.windows_jit_event = None
 
         elif event == vtrace.NOTIFY_CONTINUE:
             pass
@@ -297,16 +308,12 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
             self.vprint("Detached from %d" % pid)
 
         elif event == vtrace.NOTIFY_SIGNAL:
-            win32 = trace.getMeta("Win32Event", None)
-            if win32:
-                code = win32.get("ExceptionCode", 0)
-                addr = win32.get("ExceptionAddress")
-                chance = 2
-                if win32.get("FirstChance", False):
-                    chance = 1
-                self.vprint("Win32 Exception: 0x%.8x at 0x%.8x (%d chance)" % (code, addr, chance))
-            else:
-                self.vprint("Process Recieved Signal %d" % trace.getMeta("PendingSignal"))
+
+            # FIXME move all this code into a bolt on notifier!
+            thr = trace.getCurrentThread()
+            signo = trace.getCurrentSignal()
+
+            self.vprint("Process Recieved Signal %d (0x%.8x) (Thread: %d (0x%.8x))" % (signo, signo, thr, thr))
 
             faddr,fperm = trace.getMemoryFault()
             if faddr != None:
@@ -314,12 +321,13 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
                 self.vprint('Memory Fault: addr: 0x%.8x perm: %s' % (faddr, accstr))
 
         elif event == vtrace.NOTIFY_BREAK:
-            tid = trace.getMeta("ThreadId")
+
+            trace.setMeta('PendingBreak', False)
             bp = trace.getCurrentBreakpoint()
             if bp:
-                self.vprint("Thread: %.8x Hit Break: %s" % (tid, repr(bp)))
+                self.vprint("Thread: %d Hit Break: %s" % (tid, repr(bp)))
             else:
-                self.vprint("Thread: %.8x NOTIFY_BREAK" % tid)
+                self.vprint("Thread: %d NOTIFY_BREAK" % tid)
 
         elif event == vtrace.NOTIFY_EXIT:
             ecode = trace.getMeta('ExitCode')
@@ -337,11 +345,11 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
             self.vprint("Unloading Binary: %s" % trace.getMeta("LatestLibrary",None))
 
         elif event == vtrace.NOTIFY_CREATE_THREAD:
-            self.vprint("New Thread: %d" % trace.getMeta("ThreadId"))
+            self.vprint("New Thread: %d" % tid)
 
         elif event == vtrace.NOTIFY_EXIT_THREAD:
             ecode = trace.getMeta("ExitCode", 0)
-            self.vprint("Exit Thread: %d (ecode: 0x%.8x (%d))" % (trace.getMeta("ThreadId"),ecode,ecode))
+            self.vprint("Exit Thread: %d (ecode: 0x%.8x (%d))" % (tid,ecode,ecode))
 
         elif event == vtrace.NOTIFY_DEBUG_PRINT:
             s = "<unknown>"
@@ -365,14 +373,14 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
         Usage: vstruct [modname]
         """
         if len(line) == 0:
-            self.vprint("\nVStruct Modules:")
-            plist = vstruct.getModuleNames()
+            self.vprint("\nVStruct Namespaces:")
+            plist = self.trace.getStructNames()
         else:
-            self.vprint("\nKnown Structures:")
-            plist = vstruct.getStructNames(line)
+            self.vprint("\nKnown Structures (from %s):" % line)
+            plist = self.trace.getStructNames(namespace=line)
 
         for n in plist:
-            self.vprint(n)
+            self.vprint(str(n))
         self.vprint("\n")
 
     def do_dis(self, line):
@@ -460,6 +468,27 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
             traceback.print_exc()
             self.vprint("Allocation Error: %s" % e)
 
+    def do_memload(self, line):
+        '''
+        Load a file into memory. (straight mapping, no parsing)
+
+        Usage: memload <filename>
+        '''
+        argv = e_cli.splitargs(line)
+        if len(argv) != 1:
+            return self.do_help('memload')
+
+        fname = argv[0]
+        if not os.path.isfile(fname):
+            self.vprint('Invalid File: %s' % fname)
+            return
+
+        fbytes = file(fname, 'rb').read()
+        memva = self.trace.allocateMemory(len(fbytes))
+        self.trace.writeMemory(memva, fbytes)
+
+        self.vprint('Loaded At: 0x%.8x (%d bytes)' % (memva, len(fbytes)))
+
     def do_struct(self, args):
         """
         Break out a strcuture from memory.  You may use the command
@@ -491,7 +520,7 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
         if cursig == None:
             self.vprint('No Pending Signals/Exceptions!')
         else:
-            self.vprint("Current signal: 0x%.8x (%d)" % (cursig, cursig))
+            self.vprint("Current signal: %d (0x%.8x)" % (cursig, cursig))
 
     def do_snapshot(self, line):
         """
@@ -513,6 +542,7 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
         self.vprint("Saving To File")
         snap.saveToFile(alist[0])
         self.vprint("Done")
+        snap.release()
 
     def do_ignore(self, args):
         """
@@ -541,6 +571,9 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
         for opt,optarg in opts:
             if opt == '-c':
                 sig = self.trace.getCurrentSignal()
+                if sig == None:
+                    self.vprint('No current signal to ignore!')
+                    return
                 sigs.append(sig)
             elif opt == '-C':
                 self.vprint('Clearing ignore list...')
@@ -564,14 +597,14 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
         for x in ilist:
             self.vprint("0x%.8x (%d)" % (x, x))
 
-    def do_exec(self, string):
+    def do_exec(self, cmd):
         """
         Execute a program with the given command line and
         attach to it.
         Usage: exec </some/where and some args>
         """
         t = self.newTrace()
-        t.execute(string)
+        t.execute(cmd)
 
     def do_threads(self, line):
         """
@@ -707,7 +740,7 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
         Usage: stepi [ options ]
 
         -A <addr>  - Step to <addr>
-        -B         - Step to the next branch instruction
+        -B         - Step past the next branch instruction
         -C <count> - Step <count> instructions
         -R         - Step to return from this function
 
@@ -760,16 +793,6 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
                 # FIXME unified parseOpcode!
                 op = t.arch.makeOpcode(obytes, va=pc)
 
-                # If we have reached our conditional branch...
-                if tobrn == True and hits != 0:
-                    getout = False
-                    for bva, bflags in op.getBranches():
-                        if bflags & envi.BR_COND:
-                            getout = True
-                            break
-                    if getout:
-                        break
-
                 sym = t.getSymByAddr(pc)
 
                 if sym != None:
@@ -805,16 +828,30 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
 
                 hits += 1
 
+                # If we have passed a conditional branch...
+                if tobrn == True and hits != 0:
+
+                    if op.iflags & envi.IF_CALL:
+                        break
+
+                    if op.iflags & envi.IF_RET:
+                        break
+
+                    getout = False
+                    for bva, bflags in op.getBranches():
+                        if bflags & envi.BR_COND:
+                            getout = True
+                            break
+                    if getout:
+                        break
+
+
                 if count != None and hits >= count:
                     break
 
                 if t.getCurrentSignal() != None:
                     break
                 
-                # FIXME test this before remove!
-                if t.getMeta('PendingException'):
-                    break
-
                 if t.getMeta('PendingSignal'):
                     break
 
@@ -867,6 +904,16 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
             self.vprint("Running Tracer (use 'break' to stop it)")
 
         self.trace.run(until=until)
+
+    def do_gui(self, line):
+        '''
+        Attempt to spawn the VDB gui.  Assuming GTK etc are all installed.
+        '''
+        if self.gui != None:
+            self.vprint('Gui already running!')
+            return
+        import vdb.gui
+        vdb.gui.main(self)
 
     def do_waitlib(self, line):
         '''
@@ -1018,16 +1065,22 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
             print 'Quitting by force!'
             os._exit(0)
 
-        if self.trace.isRunning():
-            self.trace.setMode("RunForever", False)
-            self.trace.sendBreak()
+        try:
+            if self.trace.isRunning():
+                self.trace.setMode("RunForever", False)
+                self.trace.sendBreak()
 
-        if self.trace.isAttached():
-            self.vprint("Detaching...")
-            self.trace.detach()
+            if self.trace.isAttached():
+                self.vprint("Detaching...")
+                self.trace.detach()
 
-        self.vprint("Exiting...")
-        e_cli.EnviMutableCli.do_quit(self, args)
+            self.vprint("Exiting...")
+            e_cli.EnviMutableCli.do_quit(self, args)
+
+            self.trace.release()
+
+        except Exception, e:
+            self.vprint('Exception during quit (may need: quite force): %s' % e)
 
     def do_detach(self, args):
         """
@@ -1354,8 +1407,11 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
 
         Usage: break
         """
+        if self.trace.getMeta('PendingBreak'):
+            self.vprint('Break already sent...')
+            return
+        self.trace.setMeta('PendingBreak', True)
         self.trace.setMode("RunForever", False)
-        self.trace.runagain = False
         self.trace.sendBreak()
 
     def do_meta(self, string):
@@ -1448,6 +1504,48 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
                 i += 1
         
         return ret
+
+    def do_dope(self, line):
+        '''
+        Cli interface to the "stack doping" api inside recon.  *BETA*
+
+        (Basically, set all un-initialized stack memory to V's to tease
+        out uninitialized stack bugs)
+
+        Usage: dope [ options ]
+        -E  Enable automagic thread stack doping on all continue events
+        -D  Disable automagic thread stack doping on all continue events
+        -A  Dope all current thread stacks
+        '''
+        import vdb.recon.dopestack as vr_dopestack
+
+        argv = e_cli.splitargs(line)
+
+        if len(argv) == 0:
+            return self.do_help('dope')
+
+        opts,args = getopt(argv, 'ADE')
+
+        if len(opts) == 0:
+            return self.do_help('dope')
+
+        for opt, optarg in opts:
+
+            if opt == '-A':
+                self.vprint('Doping all thread stacks...')
+                vr_dopestack.dopeAllThreadStacks(self.trace)
+                self.vprint('...complete!')
+
+            elif opt == '-D':
+                self.vprint('Disabling thread doping...')
+                vr_dopestack.disableEventDoping(self.trace)
+                self.vprint('...complete!')
+
+            elif opt == '-E':
+                self.vprint('Enabling thread doping on CONTINUE events...')
+                vr_dopestack.enableEventDoping(self.trace)
+                self.vprint('...complete!')
+
 
     def do_recon(self, line):
         '''
@@ -1564,6 +1662,21 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
                 self.vprint('Resetting all breaks and hit info')
                 v_stalker.clearStalkerHits(trace)
                 v_stalker.resetStalkerBreaks(trace)
+
+    def do_status(self, line):
+        '''
+        Print out the status of the debugger / trace...
+        '''
+        t = self.getTrace()
+        if not t.isAttached():
+            self.vprint('Trace Not Attached...')
+
+        running = t.isRunning()
+        runmsg = 'stopped'
+        if running:
+            runmsg = 'running'
+        pid = t.getPid()
+        self.vprint('Attached to pid: %d (%s)' % (pid, runmsg))
 
     def FIXME_do_remote(self, line):
         """

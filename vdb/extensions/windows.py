@@ -1,4 +1,5 @@
 import os
+import sys
 import getopt
 
 import vtrace
@@ -29,8 +30,8 @@ def teb(vdb, line):
     if taddr == None:
         vdb.vprint("Invalid Thread ID: %d" % tid)
         return
-    teb = t.getStruct("win32.TEB", taddr)
-    vdb.vprint(teb.tree(va=taddr))
+    teb = t.getStruct("ntdll.TEB", taddr)
+    vdb.vprint(teb.tree(va=taddr, reprmax=32))
 
 def peb(vdb, line):
     """
@@ -41,8 +42,8 @@ def peb(vdb, line):
     t = vdb.getTrace()
     t.requireAttached()
     pebaddr = t.getMeta("PEB")
-    peb = t.getStruct("win32.PEB", pebaddr)
-    vdb.vprint(peb.tree(pebaddr))
+    peb = t.getStruct("ntdll.PEB", pebaddr)
+    vdb.vprint(peb.tree(pebaddr, reprmax=32))
 
 def regkeys(vdb, line):
     """
@@ -62,7 +63,7 @@ def einfo(vdb, line):
     """
     Show all the current exception information.
 
-    -P    Toggle the "PendingException" meta key which controls
+    -P    Toggle the "PendingSignal" meta key which controls
           delivery (or handling) of the current exception.
 
     Usage: einfo [options]
@@ -77,8 +78,13 @@ def einfo(vdb, line):
 
     for opt,optarg in opts:
         if opt == '-P':
-            p = t.getMeta('PendingException')
-            t.setMeta('PendingException', not p)
+            p = t.getMeta('PendingSignal')
+            if p != None:
+                t.setMeta('OrigSignal', p)
+                t.setMeta('PendingSignal', None)
+            else:
+                newp = t.getMeta('OrigSignal', None)
+                t.setMeta('PendingSignal', newp)
 
     exc = t.getMeta("Win32Event", None)
     if exc == None:
@@ -94,7 +100,10 @@ def einfo(vdb, line):
     #FIXME unify with cli thing
     vdb.vprint("Win32 Exception 0x%.8x at 0x%.8x (%d chance)" % (ecode, eaddr, chance))
     vdb.vprint("Exception Information: %s" % " ".join([hex(i) for i in einfo]))
-    vdb.vprint('Deliver Exception: %s' % t.getMeta('PendingException'))
+    dbool = True
+    if t.getCurrentSignal() == None:
+        dbool = False
+    vdb.vprint('Deliver Exception: %s' % dbool)
 
 def seh(vdb, line):
     """
@@ -111,14 +120,14 @@ def seh(vdb, line):
     if tinfo == None:
         vdb.vprint("Unknown Thread Id: %d" % tid)
         return
-    teb = t.getStruct("win32.TEB", tinfo)
-    addr = long(teb.TIB.ExceptionList)
+    teb = t.getStruct("ntdll.TEB", tinfo)
+    addr = long(teb.NtTib.ExceptionList)
     vdb.vprint("REG        HANDLER")
     while addr != 0xffffffff:
         #FIXME print out which frame these are in
-        er = t.getStruct("win32.EXCEPTION_REGISTRATION", addr)
-        vdb.vprint("0x%.8x 0x%.8x" % (addr, er.handler))
-        addr = long(er.prev)
+        er = t.getStruct("ntdll.EXCEPTION_REGISTRATION_RECORD", addr)
+        vdb.vprint("0x%.8x 0x%.8x" % (addr, er.Handler))
+        addr = long(er.Next)
 
 def safeseh(vdb, line):
     """
@@ -186,6 +195,8 @@ def validate_heaps(db):
         try:
             f = heap.getFreeLists()
         except Exception, e:
+            #import traceback
+            #traceback.print_exc()
             db.vprint("%s: %s" % (e.__class__.__name__,e))
 
         for seg in heap.getSegments():
@@ -206,6 +217,7 @@ def heaps(vdb, line):
     -L <heapaddr> Print the look aside list for the given heap
     -V Validate the heaps (check next/prev sizes and free list)
     -l <heapaddr> Leak detection (list probable leaked chunks)
+    -U <heapaddr> Show un-commited ranges for the specified heap
     (no options lists heaps and segments)
     """
     t = vdb.getTrace()
@@ -217,8 +229,9 @@ def heaps(vdb, line):
     chunklist_seg = None
     lookaside_heap = None
     leakfind_heap = None
+    uncommit_heap = None
     try:
-        opts,args = getopt.getopt(argv, "F:C:S:L:l:V")
+        opts,args = getopt.getopt(argv, "F:C:S:L:l:U:V")
     except Exception, e:
         return vdb.do_help('heaps')
 
@@ -235,6 +248,8 @@ def heaps(vdb, line):
             return validate_heaps(vdb)
         elif opt == "-l":
             leakfind_heap = t.parseExpression(optarg)
+        elif opt == '-U':
+            uncommit_heap = t.parseExpression(optarg)
 
     if lookaside_heap != None:
         haddrs = [h.address for h in win32heap.getHeaps(t)]
@@ -243,11 +258,33 @@ def heaps(vdb, line):
             return
 
         heap = win32heap.Win32Heap(t, lookaside_heap)
+        vdb.vprint('[Index] [Chunks]')
         for i,l in enumerate(heap.getLookAsideLists()):
-            if len(l):
-                vdb.vprint("Lookaside Index: %d" % i)
-                for c in l:
-                    vdb.vprint("    %s" % (repr(c)))
+            vdb.vprint("[%d]" % i)
+            for c in l:
+                vdb.vprint("    %s" % (repr(c)))
+
+    elif uncommit_heap != None:
+
+        haddrs = [h.address for h in win32heap.getHeaps(t)]
+        if uncommit_heap not in haddrs:
+            vdb.vprint("0x%.8x is NOT a valid heap!" % uncommit_heap)
+            return
+
+        heap = win32heap.Win32Heap(t, uncommit_heap)
+        ucrdict = heap.getUCRDict()
+        addrs = ucrdict.keys()
+        addrs.sort()
+        if len(addrs) == 0:
+            vdb.vprint('Heap 0x%.8x has 0 uncommited-ranges!' % uncommit_heap)
+            return
+
+        vdb.vprint('Uncommited ranges for heap: 0x%.8x' % uncommit_heap)
+        for ucraddr in addrs:
+            size = ucrdict.get(ucraddr)
+            vdb.vprint('0x%.8x (%d)' % (ucraddr, size))
+
+        return
 
     elif freelist_heap != None:
         haddrs = [h.address for h in win32heap.getHeaps(t)]
@@ -490,6 +527,7 @@ def stealth(vdb, line):
 
 gflag_stuff = [
     ('loader_snaps', 'ntdll.ShowSnaps', '<B', 0, 1),
+    ('loader_debug', 'ntdll.LdrpDebugFlags', '<I', 0, 0xffffffff),
 ]
 
 def gflags(vdb, line):
@@ -551,11 +589,13 @@ def pe(vdb, line):
     -t      Show PE timestamp information
     -E      Show PE exports
     -S      Show PE sections
+    -v      Show FileVersion from VS_VERSIONINFO
+    -V      Show all keys from VS_VERSIONINFO
     """
     #-v      Show PE version information
     argv = e_cli.splitargs(line)
     try:
-        opts,args = getopt.getopt(argv, "EImNStv")
+        opts,args = getopt.getopt(argv, "EImNStvV")
     except Exception, e:
         return vdb.do_help('pe')
 
@@ -567,6 +607,7 @@ def pe(vdb, line):
     showimps = False
     shownthd = False
     showexps = False
+    showvsin = False
     for opt,optarg in opts:
         if opt == '-I':
             showimps = True
@@ -574,6 +615,8 @@ def pe(vdb, line):
             showtime = True
         elif opt == '-v':
             showvers = True
+        elif opt == '-V':
+            showvsin = True
         elif opt == '-N':
             shownthd = True
         elif opt == '-m':
@@ -607,26 +650,45 @@ def pe(vdb, line):
 
         if showimps:
             ldeps = {}
-            for rva,lname,fname in pobj.getImports():
-                ldeps[lname.lower()] = True
-            lnames = ldeps.keys()
-            lnames.sort()
-            vdb.vprint('0x%.8x - %.30s %s' % (base, libname, ' '.join(lnames)))
+            try:
+                for rva,lname,fname in pobj.getImports():
+                    ldeps[lname.lower()] = True
+                lnames = ldeps.keys()
+                lnames.sort()
+                vdb.vprint('0x%.8x - %.30s %s' % (base, libname, ' '.join(lnames)))
+            except Exception, e:
+                vdb.vprint('Import Parser Error On %s: %s' % (libname, e))
 
         elif showvers:
-            vdb.vprint('0x%.8x - %.30s %s' % (base, libname, path))
+            version = 'Unknown!'
+            vs = pobj.getVS_VERSIONINFO()
+            if vs != None:
+                version = vs.getVersionValue('FileVersion')
+            vdb.vprint('%s: %s' % (libname.rjust(30),version))
+
+        elif showvsin:
+            vs = pobj.getVS_VERSIONINFO()
+            vdb.vprint('==== %s' % libname)
+            if vs == None:
+                vdb.vprint('no VS_VERSIONINFO...')
+            else:
+                vskeys = vs.getVersionKeys()
+                vskeys.sort()
+                for vskey in vskeys:
+                    vsval = vs.getVersionValue(vskey)
+                    vdb.vprint('%s: %s' % (vskey.rjust(20), vsval[:50]))
 
         elif showtime:
             tstamp = pobj.IMAGE_NT_HEADERS.FileHeader.TimeDateStamp
             vdb.vprint('0x%.8x - %.30s 0x%.8x' % (base, libname, tstamp))
 
         elif shownthd:
-            t = pobj.IMAGE_NT_HEADERS.tree()
+            t = pobj.IMAGE_NT_HEADERS.tree(reprmax=32)
             vdb.vprint(t)
 
         elif showsecs:
             for sec in pobj.getSections():
-                vdb.vprint(sec.tree())
+                vdb.vprint(sec.tree(reprmax=32))
 
         elif showexps:
             vdb.vprint('[Ord] [Address] [Name]')
@@ -756,21 +818,103 @@ def hooks(vdb, line):
 
     if not found: vdb.canvas.addText('No Hooks Found!\n')
 
+def jit(vdb, line):
+    '''
+    Enable/Disable the current VDB location as the current Just-In-Time
+    debugger for windows applications.
+
+    Usage: jitenable [-D]
+    -E  Enable VDB JIT debugging
+    -D  Disable JIT debugging
+    '''
+    argv = e_cli.splitargs(line)
+    try:
+        opts,args = getopt.getopt(argv, "ED")
+    except Exception, e:
+        return vdb.do_help('jit')
+
+    try:
+        import _winreg
+    except Exception, e:
+        vdb.vprint('Error Importing _winreg: %s' % e)
+        return
+
+    HKLM = _winreg.HKEY_LOCAL_MACHINE
+    HKCU = _winreg.HKEY_CURRENT_USER
+    REG_SZ = _winreg.REG_SZ
+
+    regpath = r'SOFTWARE\Microsoft\Windows NT\CurrentVersion\AeDebug'
+    #wow64path = r'SOFTWARE\Wow6432Node\Microsoft\Windows NT\CurrentVersion\AeDebug'
+
+    #regkey = _winreg.CreateKey(HKLM, regpath)
+    regkey = _winreg.CreateKey(HKLM, regpath)
+
+    vdb.vprint('JIT Currently: %s' % _winreg.QueryValueEx(regkey, 'Debugger')[0])
+
+    setval = None
+    for opt,optarg in opts:
+
+        if opt == '-D':
+            setval = ''
+
+        elif opt == '-E':
+            vdbpath = os.path.abspath(sys.argv[0])
+            setval = '%s %s -r -p %%ld -e %%Id' % (sys.executable, vdbpath)
+            #_winreg.SetValue(HKLM
+
+    if setval != None:
+        vdb.vprint('Setting JIT: %s' % (setval,))
+        _winreg.SetValueEx(regkey, 'Debugger', None, REG_SZ, setval)
+
+def svclist(vdb, line):
+    '''
+    List the running service names and pids.
+
+    Usage: svclist
+    '''
+    cols = []
+    pids = []
+    names = []
+    descrs = []
+    for pid, name, descr in vdb.trace._getSvcList():
+        pids.append('%d' %  pid)
+        names.append(name)
+        descrs.append(descr)
+
+    names = e_cli.columnstr(names)
+
+    for i in xrange(len(pids)):
+        vdb.vprint('%8s %s %s' % (pids[i], names[i], descrs[i]))
+
+def injectso(vdb, line):
+    '''
+    Inject a shared object (DLL) into the target process.
+
+    Usage: injectso <dllname>
+    '''
+    if not line:
+        return vdb.do_help('injectso')
+    t = vdb.trace
+    t.injectso(line)
+
 # The necissary module extension function
-def vdbExtension(vdb, trace):
-    vdb.registerCmdExtension(pe)
-    vdb.registerCmdExtension(peb)
-    vdb.registerCmdExtension(einfo)
-    vdb.registerCmdExtension(heaps)
-    vdb.registerCmdExtension(regkeys)
-    vdb.registerCmdExtension(seh)
-    vdb.registerCmdExtension(safeseh)
-    vdb.registerCmdExtension(teb)
-    vdb.registerCmdExtension(pagewatch)
-    vdb.registerCmdExtension(stealth)
-    vdb.registerCmdExtension(aslr)
-    vdb.registerCmdExtension(hooks)
-    vdb.registerCmdExtension(gflags)
-    vdb.registerCmdExtension(deaslr)
-    vdb.registerCmdExtension(sympath)
-    #vdb.registerCmdExtension(stepb)
+def vdbExtension(db, trace):
+    db.registerCmdExtension(pe)
+    db.registerCmdExtension(peb)
+    db.registerCmdExtension(einfo)
+    db.registerCmdExtension(heaps)
+    db.registerCmdExtension(regkeys)
+    db.registerCmdExtension(seh)
+    db.registerCmdExtension(safeseh)
+    db.registerCmdExtension(teb)
+    db.registerCmdExtension(pagewatch)
+    db.registerCmdExtension(stealth)
+    db.registerCmdExtension(aslr)
+    db.registerCmdExtension(hooks)
+    db.registerCmdExtension(gflags)
+    #db.registerCmdExtension(deaslr)
+    db.registerCmdExtension(sympath)
+    db.registerCmdExtension(jit)
+    db.registerCmdExtension(svclist)
+    #db.registerCmdExtension(stepb)
+    db.registerCmdExtension(injectso)

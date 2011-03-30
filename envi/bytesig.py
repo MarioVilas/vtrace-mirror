@@ -116,6 +116,7 @@ class SignatureTree:
                 sbytes, smasks, sobj = sig
                 masked = ord(bytes[offset+depth]) & smasks[depth]
                 if sbytes[depth] == masked: # We have a winner!
+                    # FIXME find the *best* winner! (because of masking)
                     node = choices[masked]
                     break
 

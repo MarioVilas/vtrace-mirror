@@ -892,13 +892,16 @@ class IntelEmulator(i386Module, i386RegisterContext, envi.Emulator):
         if self.decCounter() != 0:
             return self.getOperValue(op, 0)
 
-    def i_loope(self, op):
+    def i_loopz(self, op):
         if self.decCounter() != 0 and self.cond_e():
             return self.getOperValue(op, 0)
 
-    def i_loopne(self, op):
+    def i_loopnz(self, op):
         if self.decCounter() != 0 and self.cond_ne():
             return self.getOperValue(op, 0)
+
+    i_loope = i_loopz
+    i_loopne = i_loopnz
 
     def i_leave(self, op):
         ebp = self.getRegister(REG_EBP)
@@ -1442,7 +1445,7 @@ class IntelEmulator(i386Module, i386RegisterContext, envi.Emulator):
         self.setRegister(REG_EDI, edi)
 
     def i_stosd(self, op):
-        al = self.getRegister(REG_AL)
+        eax = self.getRegister(REG_EAX)
         edi = self.getRegister(REG_EDI)
         base,size = self.segments[SEG_ES]
         self.writeMemory(base+edi, struct.pack("<L", eax))

@@ -158,9 +158,7 @@ class VTextView(VView):
         if tagtable == None:
             tagtable = gtk.TextTagTable()
 
-        self.tagtable = tagtable
-        self.textbuf = gtk.TextBuffer(self.tagtable)
-        self.textview.set_buffer(self.textbuf)
+        self.vwSetTagTable(tagtable)
 
         style = gtk.Style()
 
@@ -175,11 +173,19 @@ class VTextView(VView):
         self.tagcfg = ConfigParser()
 
         self.curtag = None # Is a current tag selected?
-        self.deftag = VTextTag("default")
-        self.vwInitTag(self.deftag)
+        #self.deftag = 
+        self.vwInitTag(VTextTag("default"))
 
         start,end = self.textbuf.get_bounds()
         self.textbuf.create_mark("insertend", end)
+
+    def vwSetTagTable(self, tagtable):
+        self.tagtable = tagtable
+        self.textbuf = gtk.TextBuffer(self.tagtable)
+        self.textview.set_buffer(self.textbuf)
+
+    def vwGetTagTable(self):
+        return self.tagtable
 
     def vwInitTag(self, tag, typename="default", handler=None, *handleargs):
         """
@@ -237,7 +243,7 @@ class VTextView(VView):
         #print "OVERRIDE ME FOR TAG EVENT PROCESSING!"
         pass
 
-    def vwGetPopup(self, textview, menu):
+    def vwGetPopup(self, textview, menu, vwfaddr=None):
         """
         Over-ride this to add elements to the right click menu on click.
         """

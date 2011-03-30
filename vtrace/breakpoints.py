@@ -230,7 +230,7 @@ class CallBreak(Breakpoint):
         self.endregs = trace.getRegisters()
         trace.removeBreakpoint(self.id)
         trace.setRegisters(self.saved_regs)
-        trace.setMeta("PendingSignal", 0)
+        trace.setMeta("PendingSignal", None)
 
 class SnapshotBreak(Breakpoint):
     """

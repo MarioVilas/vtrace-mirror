@@ -12,8 +12,11 @@ from Queue import Queue
 from threading import Thread,currentThread,Lock
 
 import envi
-import envi.resolver as e_resolv
 import envi.memory as e_mem
+import envi.threads as e_threads
+import envi.resolver as e_resolv
+
+import vstruct.builder as vs_builder
 
 class TracerBase(vtrace.Notifier):
     """
@@ -44,10 +47,16 @@ class TracerBase(vtrace.Notifier):
         self.attached = False
         # A cache for memory maps and fd listings
         self.mapcache = None
+        self.thread = None # our proxy thread...
         self.threadcache = None
         self.fds = None
         self.signal_ignores = []
         self.localvars = {}
+
+        # Set if we are RunForever until a thread exit...
+        self._join_thread = None
+
+        self.vsbuilder = vs_builder.VStructBuilder()
 
         self.psize = self.getPointerSize() # From the envi arch mod...
 
@@ -56,20 +65,15 @@ class TracerBase(vtrace.Notifier):
         self.libloaded = {} # True if the library has been loaded already
         self.libpaths = {}  # normname->filename and filename->normname lookup
 
-        # For all transient data (if notifiers want
-        # to track stuff per-trace
-        self.metadata = {}
-
         # Set up some globally expected metadata
-        self.setMeta("PendingSignal", 0)
+        self.setMeta('PendingSignal', None)
+        self.setMeta('SignalInfo', None)
         self.setMeta("IgnoredSignals",[])
         self.setMeta("LibraryBases", {}) # name -> base address mappings for binaries
         self.setMeta("LibraryPaths", {}) # base -> path mappings for binaries
-        self.setMeta("ThreadId", -1) # If you *can* have a thread id put it here
-        arch = envi.getCurrentArch()
+        self.setMeta("ThreadId", 0) # If you *can* have a thread id put it here
         plat = platform.system()
         rel  = platform.release()
-        self.setMeta("Architecture", arch)
         self.setMeta("Platform", plat)
         self.setMeta("Release", rel)
 
@@ -96,8 +100,7 @@ class TracerBase(vtrace.Notifier):
         self.attached = True
         self.breakpoints = {}
         self.bpbyid = {}
-        self.setMeta("PendingSignal", 0)
-        self.setMeta("PendingException", None)
+        self.setMeta("PendingSignal", None)
         self.setMeta("ExitCode", 0)
         self.exited = False
 
@@ -114,9 +117,7 @@ class TracerBase(vtrace.Notifier):
         returns false (like RunForever mode or something)
         """
         if self.getMode("NonBlocking", False):
-            thr = Thread(target=self.doStepLoop)
-            thr.setDaemon(True)
-            thr.start()
+            e_threads.firethread(self.doStepLoop)()
         else:
             self.doStepLoop()
 
@@ -144,7 +145,7 @@ class TracerBase(vtrace.Notifier):
         # and checkForBreak.
         self._syncRegs()
         self.platformContinue()
-        self.setMeta("PendingSignal", 0)
+        self.setMeta("PendingSignal", None)
 
     def wait(self):
         """
@@ -154,9 +155,7 @@ class TracerBase(vtrace.Notifier):
         to wait for you and return control immediately.
         """
         if self.getMode("NonBlocking"):
-            thr = Thread(target=self._doWait)
-            thr.setDaemon(True)
-            thr.start()
+            e_threads.firethread(self._doWait)()
         else:
             self._doWait()
 
@@ -164,6 +163,8 @@ class TracerBase(vtrace.Notifier):
         doit = True
         while doit:
         # A wrapper method for  wait() and the wait thread to use
+            self.setMeta('SignalInfo', None)
+            self.setMeta('PendingSignal', None)
             event = self.platformWait()
             self.running = False
             self.platformProcessEvent(event)
@@ -171,7 +172,17 @@ class TracerBase(vtrace.Notifier):
             if doit:
                 self._doRun()
 
+    def _fireSignal(self, signo, siginfo=None):
+        self.setMeta('PendingSignal', signo)
+        self.setMeta('SignalInfo', siginfo)
+        self.fireNotifiers(vtrace.NOTIFY_SIGNAL)
+
+    def _fireExit(self, ecode):
+        self.setMeta('ExitCode', ecode)
+        self.fireNotifiers(vtrace.NOTIFY_EXIT)
+
     def _activateBreak(self, bp):
+        # NOTE: This is special cased by hardware debuggers etc...
         if bp.isEnabled():
             try:
                 bp.activate(self)
@@ -223,6 +234,7 @@ class TracerBase(vtrace.Notifier):
         ret = self.regcache.get(threadid)
         if ret == None:
             ret = self.platformGetRegCtx(threadid)
+            ret.setIsDirty(False)
             self.regcache[threadid] = ret
         return ret
 
@@ -295,24 +307,28 @@ class TracerBase(vtrace.Notifier):
         if self.thread:
             self.thread.go = False
 
+    def _cleanupResources(self):
+        self._tellThreadExit()
+
+    def _tellThreadExit(self):
+        if self.thread != None:
+            self.thread.queue.put(None)
+            self.thread = None
+
     def __del__(self):
-        if self.attached:
-            self.detach()
-
-        if self.thread:
-            self.thread.go = False
-
+        if not self._released:
+            print 'Warning! tracer del w/o release()!'
 
     def fireTracerThread(self):
-        self.thread = TracerThread()
+        # Fire the threadwrap proxy thread for this tracer
+        # (if it hasnt been fired...)
+        if self.thread == None:
+            self.thread = TracerThread()
 
     def fireNotifiers(self, event):
         """
         Fire the registered notifiers for the NOTIFY_* event.
         """
-        if currentThread().__class__ == TracerThread:
-            raise Exception("ERROR: you can't fireNotifiers from *inside* the TracerThread")
-
         # Skip out on notifiers for NOTIFY_BREAK when in
         # FastBreak mode
         if self.getMode("FastBreak", False) and event == vtrace.NOTIFY_BREAK:
@@ -322,14 +338,9 @@ class TracerBase(vtrace.Notifier):
             return
 
         if event == vtrace.NOTIFY_SIGNAL:
-            win32 = self.getMeta("Win32Event", None)
-            if win32:
-                code = win32["ExceptionCode"]
-            else:
-                code = self.getMeta("PendingSignal", 0)
-
-            if code in self.getMeta("IgnoredSignals", []):
-                if vtrace.verbose: print "Ignoring",code
+            signo = self.getCurrentSignal()
+            if signo in self.getMeta("IgnoredSignals", []):
+                if vtrace.verbose: print "Ignoring",signo
                 self.runAgain()
                 return
 
@@ -342,23 +353,20 @@ class TracerBase(vtrace.Notifier):
         if self.proxy:
             trace = self.proxy
 
+        # First we notify ourself....
+        self.handleEvent(event, self)
+
         # The "NOTIFY_ALL" guys get priority
         for notifier in alllist:
             try:
-                if notifier == self:
-                    notifier.handleEvent(event,self)
-                else:
-                    notifier.handleEvent(event,trace)
+                notifier.handleEvent(event,trace)
             except:
                 print "WARNING: Notifier exception for",repr(notifier)
                 traceback.print_exc()
 
         for notifier in nlist:
             try:
-                if notifier == self:
-                    notifier.handleEvent(event,self)
-                else:
-                    notifier.handleEvent(event,trace)
+                notifier.handleEvent(event,trace)
             except:
                 print "WARNING: Notifier exception for",repr(notifier)
                 traceback.print_exc()
@@ -458,6 +466,13 @@ class TracerBase(vtrace.Notifier):
         if event == vtrace.NOTIFY_EXIT_THREAD:
             tid = self.getMeta("ThreadId")
             self.sus_threads.pop(tid, None)
+            # Check if this is a thread we were waiting on.
+            if tid == self._join_thread:
+                self._join_thread = None
+                # Turn off the RunForever in joinThread()
+                self.setMode('RunForever', False)
+                # Either way, we don't want to run again...
+                self.runAgain(False)
 
         # Do the stuff we do for detach/exit or
         # cleanup breaks etc...
@@ -500,7 +515,7 @@ class TracerBase(vtrace.Notifier):
         if sym != None:
             self.delSymbol(sym)
 
-    def addLibraryBase(self, libname, address):
+    def addLibraryBase(self, libname, address, always=False):
         """
         This should be used *at load time* to setup the library
         event metadata.
@@ -518,8 +533,8 @@ class TracerBase(vtrace.Notifier):
         if self.getSymByName(normname) != None:
             normname = "%s_%.8x" % (normname,address)
 
-        # Only actually do library work
-        if os.path.exists(libname):
+        # Only actually do library work with a file or force
+        if os.path.exists(libname) or always:
 
             self.getMeta("LibraryPaths")[address] = libname
             self.getMeta("LibraryBases")[normname] = address
@@ -560,16 +575,6 @@ class TracerBase(vtrace.Notifier):
                 self.libloaded[normname] = True
                 return True
         return False
-
-    def threadWrap(self, name, meth):
-        """
-        Cause the method (given in value) to be wrapped
-        by a single thread for carying out.
-        (which allows us to only synchronize what *needs* to
-        synchronized...)
-        """
-        wrapmeth = TracerMethodProxy(meth, self.thread)
-        setattr(self, name, wrapmeth)
 
 #######################################################################
 #
@@ -623,7 +628,8 @@ class TracerBase(vtrace.Notifier):
         '''
         Return the currently posted exception/signal....
         '''
-        raise Exception('Platform must implement platformGetSignal')
+        # Default to the thing they all should do...
+        return self.getMeta('PendingSignal', None)
 
     def platformGetMaps(self):
         """
@@ -757,7 +763,7 @@ class TracerBase(vtrace.Notifier):
         This will then be passed to the platformProcessEvent()
         method which will be responsible for doing things like
         firing notifiers.  Because the platformWait() method needs
-        to be commonly ThreadWrapped and you can't fire notifiers
+        to be commonly @threadwrap and you can't fire notifiers
         from within a threadwrapped function...
         """
         raise Exception("Platform must implement platformWait!")
@@ -779,22 +785,21 @@ class TracerBase(vtrace.Notifier):
         """
         raise Exception("Platform must implement platformParseBinary")
 
-class TracerMethodProxy:
-    def __init__(self, proxymeth, thread):
-        self.thread = thread
-        self.proxymeth = proxymeth
-
-    def __call__(self, *args, **kwargs):
-        if currentThread().__class__ == TracerThread:
-            return self.proxymeth(*args, **kwargs)
-
-        queue = Queue()
-        self.thread.queue.put((self.proxymeth, args, kwargs, queue))
-        ret = queue.get()
-
+import threading
+def threadwrap(func):
+    def trfunc(self, *args, **kwargs):
+        if threading.currentThread().__class__ == TracerThread:
+            return func(self, *args, **kwargs)
+        # Proxy the call through a single thread
+        q = Queue()
+        # FIXME change calling convention!
+        args = (self, ) + args
+        self.thread.queue.put((func, args, kwargs, q))
+        ret = q.get()
         if issubclass(ret.__class__, Exception):
             raise ret
         return ret
+    return trfunc
 
 class TracerThread(Thread):
     """
@@ -812,7 +817,6 @@ class TracerThread(Thread):
         Thread.__init__(self)
         self.queue = Queue()
         self.setDaemon(True)
-        self.go = True
         self.start()
 
     def run(self):
@@ -820,9 +824,12 @@ class TracerThread(Thread):
         Run in a circle getting requests from our queue and
         executing them based on the thread.
         """
-        while self.go:
+        while True:
             try:
-                meth, args, kwargs, queue = self.queue.get()
+                qobj = self.queue.get()
+                if qobj == None:
+                    break
+                meth, args, kwargs, queue = qobj
                 try:
                     queue.put(meth(*args, **kwargs))
                 except Exception,e:
@@ -833,5 +840,3 @@ class TracerThread(Thread):
             except:
                 if vtrace.verbose:
                     traceback.print_exc()
-
-

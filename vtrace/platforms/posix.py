@@ -11,6 +11,8 @@ import platform
 
 import vtrace
 import vtrace.util as v_util
+import vtrace.platforms.base as v_base
+
 import Elf
 from ctypes import *
 import ctypes.util as cutil
@@ -38,14 +40,10 @@ class PosixMixin:
         self.execing  = False # Set this on exec to diff the TRAP
         self.pthreads = None  # Some platforms make a pthread list
 
+        self.fireTracerThread()
+
     def platformKill(self):
         self.sendSignal(signal.SIGKILL)
-
-    def platformGetSignal(self):
-        sig = self.getMeta('PendingSignal', 0)
-        if sig == 0:
-            sig = None
-        return sig
 
     def sendSignal(self, signo):
         self.requireAttached()
@@ -153,15 +151,14 @@ class PosixMixin:
                 self.handleAttach()
 
             else:
-                self.setMeta("PendingSignal", sig)
-                self.fireNotifiers(vtrace.NOTIFY_SIGNAL)
+                self._fireSignal(sig)
 
         elif sig == signal.SIGSTOP:
+            #FIXME only on attaching..
             self.handleAttach()
 
         else:
-            self.setMeta("PendingSignal", sig)
-            self.fireNotifiers(vtrace.NOTIFY_SIGNAL)
+            self._fireSignal(sig)
 
 
 class ElfMixin:
@@ -247,16 +244,9 @@ class PtraceMixin:
         if sys.platform == "darwin":
             self.conthack = 1
 
-        # Make a worker thread do these for us...
-        self.threadWrap("platformGetRegCtx", self.platformGetRegCtx)
-        self.threadWrap("platformSetRegCtx", self.platformSetRegCtx)
-        self.threadWrap("platformAttach", self.platformAttach)
-        self.threadWrap("platformDetach", self.platformDetach)
-        self.threadWrap("platformStepi", self.platformStepi)
-        self.threadWrap("platformContinue", self.platformContinue)
-        self.threadWrap("platformWriteMemory", self.platformWriteMemory)
-        self.threadWrap("platformExec", self.platformExec)
+        self.fireTracerThread()
 
+    @v_base.threadwrap
     def platformExec(self, cmdline):
         self.execing = True
         cmdlist = e_cli.splitargs(cmdline)
@@ -268,6 +258,7 @@ class PtraceMixin:
             sys.exit(-1)
         return pid
 
+    @v_base.threadwrap
     def platformWriteMemory(self, address, bytes):
         wordsize = len(struct.pack("P",0))
         remainder = len(bytes) % wordsize

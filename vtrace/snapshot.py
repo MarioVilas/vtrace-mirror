@@ -48,7 +48,7 @@ class TraceSnapshot(
 
         # In the ghetto!
         archname = self.metadata.get('Architecture')
-        self._inheritArchitecture(archname)
+        envi.stealArchMethods(self, archname)
 
         vtrace.Trace.__init__(self)
         v_base.TracerBase.__init__(self)
@@ -73,24 +73,6 @@ class TraceSnapshot(
         # So that we pickle
         self.bplock = None
         self.thread = None
-
-
-        #FIXME maybe self.arch is NOT the same as real platform...
-
-    def _inheritArchitecture(self, archname):
-        '''
-        Steal the bound methods of a named arch module
-        and make ourself *look* like an arch module ;)
-        '''
-        bmethod = type(self._inheritArchitecture)
-        arch = envi.getArchModule(archname)
-        for name in dir(arch):
-            o = getattr(arch, name, None)
-            if type(o) == bmethod:
-                setattr(self, name, o)
-
-        ctx = arch.archGetRegCtx()
-
 
     def saveToFd(self, fd):
         '''

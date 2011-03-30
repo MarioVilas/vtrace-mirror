@@ -10,6 +10,11 @@ import platform
 
 import PE
 
+import vstruct
+import vstruct.builder as vs_builder
+import vstruct.defs.win32 as vs_win32
+import vstruct.defs.windows as vs_windows
+
 import vtrace
 import vtrace.archs.i386 as v_i386
 import vtrace.archs.amd64 as v_amd64
@@ -45,6 +50,7 @@ QWORD   = c_ulonglong
 DWORD   = c_ulong
 WORD    = c_ushort
 BOOL    = c_ulong
+BYTE    = c_ubyte
 NULL    = 0
 
 INFINITE = 0xffffffff
@@ -211,6 +217,75 @@ MEM_PRIVATE = 0x20000
 DEBUG_ONLY_THIS_PROCESS = 0x02
 
 MAX_PATH=260
+
+class MSR(Structure):
+    _fields_ = [
+        ('msr', DWORD),
+        ('value', QWORD),
+    ]
+
+# The enum of NtSystemDebugControl operations
+SysDbgReadMsr  = 16
+SysDbgWriteMsr = 17
+
+def wrmsr(msrid, value):
+    m = MSR()
+    m.msr = msrid
+    m.value = value
+    mptr = addressof(m)
+    x = ntdll.NtDebugSystemControl(SysDbgWriteMsr, mptr, sizeof(m), 0, 0, 0)
+    if x != 0:
+        raise vtrace.PlatformException('NtDebugSystemControl Failed: 0x%.8x' % kernel32.GetLastError())
+    return 0
+
+def rdmsr(msrid):
+    m = MSR()
+    m.msr = msrid
+    m.value = 0
+
+    mptr = addressof(m)
+    msize = sizeof(m)
+
+    x = ntdll.NtDebugSystemControl(SysDbgReadMsr, mptr, msize, mptr, msize, 0)
+    if x != 0:
+        raise vtrace.PlatformException('NtDebugSystemControl Failed: 0x%.8x' % kernel32.GetLastError())
+    return m.value
+
+SC_MANAGER_ALL_ACCESS           = 0xF003F
+SC_MANAGER_CREATE_SERVICE       = 0x0002
+SC_MANAGER_CONNECT              = 0x0001
+SC_MANAGER_ENUMERATE_SERVICE    = 0x0004
+SC_MANAGER_LOCK                 = 0x0008
+SC_MANAGER_MODIFY_BOOT_CONFIG   = 0x0020
+SC_MANAGER_QUERY_LOCK_STATUS    = 0x0010
+
+SC_ENUM_PROCESS_INFO = 0
+
+SERVICE_WIN32       = 0x30
+
+SERVICE_ACTIVE      = 0x01
+SERVICE_INNACTIVE   = 0x02
+SERVICE_STATE_ALL   = 0x03
+
+class SERVICE_STATUS_PROCESS(Structure):
+    _fields_ = [
+            ('dwServiceType', DWORD),
+            ('dwCurrentState', DWORD),
+            ('dwControlsAccepted', DWORD),
+            ('dwWin32ExitCode', DWORD),
+            ('dwServiceSpecificExitCode',DWORD),
+            ('dwCheckPoint', DWORD),
+            ('dwWaitHint', DWORD),
+            ('dwProcessId', DWORD),
+            ('dwServiceFlags', DWORD)
+    ]
+            
+class ENUM_SERVICE_STATUS_PROCESS(Structure):
+    _fields_ = [
+            ('lpServiceName', c_wchar_p),
+            ('lpDisplayName', c_wchar_p),
+            ('ServiceStatusProcess', SERVICE_STATUS_PROCESS),
+    ]
 
 class EXCEPTION_RECORD(Structure):
     _fields_ = [
@@ -711,6 +786,14 @@ ObjectTypeInformation       = 2
 ObjectAllTypesInformation   = 3
 ObjectHandleInformation     = 4
 
+# ProcessInformationClass
+ProcessBasicInformation = 0  # Get pointer to PEB
+ProcessDebugPort        = 7  # Get DWORD_PTR to debug port number
+ProcessWow64Information = 26 # Get WOW64 status
+# FIXME may be more reliable to use this! \|/
+ProcessImageFileName    = 27 # Get a UNICODE_STRING of the filename
+ProcessExecuteFlags     = 34 # Get DWORD of execute status (including DEP) (bug: your process only)
+
 class UNICODE_STRING(Structure):
     _fields_ = (
         ("Length",c_ushort),
@@ -764,9 +847,10 @@ if sys.platform == "win32":
     kernel32.OpenProcess.restype = HANDLE
     kernel32.CreateProcessA.argtypes = [LPVOID, c_char_p, LPVOID, LPVOID, c_uint, DWORD, LPVOID, LPVOID, LPVOID, LPVOID]
     kernel32.ReadProcessMemory.argtypes = [HANDLE, LPVOID, LPVOID, SIZE_T, LPVOID]
-    #kernel32.WriteProcessMemory.argtypes = [HANDLE, LPVOID, LPVOID, SIZE_T, LPVOID]
+    kernel32.WriteProcessMemory.argtypes = [HANDLE, LPVOID, c_char_p, SIZE_T, LPVOID]
     kernel32.GetThreadContext.argtypes = [HANDLE, LPVOID]
     kernel32.SetThreadContext.argtypes = [HANDLE, LPVOID]
+    kernel32.CreateRemoteThread.argtypes = [HANDLE, LPVOID, SIZE_T, LPVOID, LPVOID, DWORD, LPVOID]
     kernel32.SuspendThread.argtypes = [HANDLE,]
     kernel32.ResumeThread.argtypes = [HANDLE,]
     kernel32.VirtualQueryEx.argtypes = [HANDLE, LPVOID, LPVOID, SIZE_T]
@@ -776,7 +860,9 @@ if sys.platform == "win32":
     kernel32.TerminateProcess.argtypes = [HANDLE, DWORD]
     kernel32.VirtualProtectEx.argtypes = [HANDLE, LPVOID, SIZE_T, DWORD, LPVOID]
     kernel32.VirtualAllocEx.argtypes = [HANDLE, LPVOID, SIZE_T, DWORD, DWORD]
+    kernel32.VirtualFreeEx.argtypes = [HANDLE, LPVOID, SIZE_T, DWORD]
     kernel32.DuplicateHandle.argtypes = [HANDLE, HANDLE, HANDLE, LPVOID, DWORD, DWORD, DWORD]
+    kernel32.SetEvent.argtypes = [HANDLE, ]
 
     IsWow64Process = getattr(kernel32, 'IsWow64Process', None)
     if IsWow64Process != None:
@@ -791,6 +877,7 @@ if sys.platform == "win32":
     ntdll = windll.ntdll
     ntdll.NtQuerySystemInformation.argtypes = [DWORD, LPVOID, DWORD, LPVOID]
     ntdll.NtQueryObject.argtypes = [HANDLE, DWORD, c_void_p, DWORD, LPVOID]
+    ntdll.NtQueryInformationProcess.argtypes = [HANDLE, DWORD, c_void_p, DWORD, LPVOID]
 
     try:
 
@@ -816,6 +903,7 @@ if sys.platform == "win32":
         dbghelp.SymEnumTypes.restype = BOOL
         dbghelp.SymGetTypeInfo.argtypes = [HANDLE, QWORD, DWORD, DWORD, c_void_p]
         dbghelp.SymGetTypeInfo.restype = BOOL
+        dbghelp.SymFromAddr.argtypes = [HANDLE, QWORD, POINTER(QWORD), POINTER(SYMBOL_INFO) ]
 
     except Exception, e:
         print "WARNING: Failed to import dbghelp/symsrv: %s" % e
@@ -824,7 +912,90 @@ if sys.platform == "win32":
     advapi32.LookupPrivilegeValueA.argtypes = [LPVOID, c_char_p, LPVOID]
     advapi32.OpenProcessToken.argtypes = [HANDLE, DWORD, HANDLE]
     advapi32.AdjustTokenPrivileges.argtypes = [HANDLE, DWORD, LPVOID, DWORD, LPVOID, LPVOID]
+    advapi32.OpenSCManagerA.argtypes = [ LPVOID, LPVOID, DWORD ]
+    advapi32.OpenSCManagerA.restype = HANDLE
+    advapi32.EnumServicesStatusExW.argtypes = [ HANDLE,
+                                                LPVOID,
+                                                DWORD,
+                                                DWORD,
+                                                LPVOID,
+                                                DWORD,
+                                                LPVOID,
+                                                LPVOID,
+                                                LPVOID,
+                                                LPVOID ]
+    advapi32.EnumServicesStatusExW.restype = BOOL
+    advapi32.CloseServiceHandle.argtypes = [ HANDLE, ]
+    advapi32.CloseServiceHandle.restype = BOOL
 
+def getServicesList():
+    '''
+    Get a list of (pid, servicename, displayname) tuples for the
+    currently running services.
+    '''
+
+    ret = []
+    scmh = advapi32.OpenSCManagerA(NULL, NULL, SC_MANAGER_ENUMERATE_SERVICE)
+
+    try:
+        dwSvcSize  = DWORD(0)
+        dwSvcCount = DWORD(0)
+
+        advapi32.EnumServicesStatusExW( scmh,
+                                        SC_ENUM_PROCESS_INFO,
+                                        SERVICE_WIN32,
+                                        SERVICE_ACTIVE,
+                                        NULL,
+                                        0,
+                                        addressof(dwSvcSize),
+                                        addressof(dwSvcCount),
+                                        NULL,
+                                        NULL)
+
+        buf = create_string_buffer(dwSvcSize.value)
+
+        #print 'NEEDED',dwSvcSize
+        #print 'COUNT',dwSvcCount
+
+        advapi32.EnumServicesStatusExW( scmh,
+                                        SC_ENUM_PROCESS_INFO,
+                                        SERVICE_WIN32,
+                                        SERVICE_ACTIVE,
+                                        addressof(buf),
+                                        dwSvcSize.value,
+                                        addressof(dwSvcSize),
+                                        addressof(dwSvcCount),
+                                        NULL,
+                                        NULL)
+
+        #p = POINTER(ENUM_SERVICE_STATUS_PROCESS)(addressof(buf))
+        p = cast(buf, POINTER(ENUM_SERVICE_STATUS_PROCESS))
+
+        for i in xrange(dwSvcCount.value):
+            pid = p[i].ServiceStatusProcess.dwProcessId
+            name = p[i].lpServiceName
+            descr = p[i].lpDisplayName
+            ret.append((pid, name, descr))
+
+    finally:
+        advapi32.CloseServiceHandle(scmh)
+
+    return ret
+
+x = '''
+BOOL WINAPI EnumServicesStatusEx(
+  __in         SC_HANDLE hSCManager,
+  __in         SC_ENUM_TYPE InfoLevel,
+  __in         DWORD dwServiceType,
+  __in         DWORD dwServiceState,
+  __out_opt    LPBYTE lpServices,
+  __in         DWORD cbBufSize,
+  __out        LPDWORD pcbBytesNeeded,
+  __out        LPDWORD lpServicesReturned,
+  __inout_opt  LPDWORD lpResumeHandle,
+  __in_opt     LPCTSTR pszGroupName
+);
+'''
 
 SE_PRIVILEGE_ENABLED    = 0x00000002
 TOKEN_ADJUST_PRIVILEGES = 0x00000020
@@ -851,6 +1022,8 @@ def getDebugPrivileges():
         kernel32.CloseHandle(token)
         print "AdjustTokenPrivileges Failed: %d" % kernel32.GetLastError()
         return False
+
+    kernel32.CloseHandle(token)
 
 def buildSystemHandleInformation(count):
     """
@@ -903,9 +1076,6 @@ class WindowsMixin:
         # injected breakpoint (cause libs are loaded by then)
         self.enableAutoContinue(vtrace.NOTIFY_ATTACH)
 
-        # We only set this when we intend to deliver it
-        self.setMeta("PendingException", False)
-
         self.setupDosDeviceMaps()
 
         # Setup our binary format meta
@@ -918,16 +1088,20 @@ class WindowsMixin:
         self.setMeta("WindowsCsd", csd)
         self.setMeta("WindowsProcessorType", ptype)
 
-        # These activities *must* all be carried out by the same
-        # thread on windows.
-        self.threadWrap("platformAttach", self.platformAttach)
-        self.threadWrap("platformDetach", self.platformDetach)
-        self.threadWrap("platformStepi", self.platformStepi)
-        self.threadWrap("platformContinue", self.platformContinue)
-        self.threadWrap("platformWait", self.platformWait)
-        self.threadWrap("platformGetRegCtx", self.platformGetRegCtx)
-        self.threadWrap("platformSetRegCtx", self.platformSetRegCtx)
-        self.threadWrap("platformExec", self.platformExec)
+        # Setup modes which only apply to windows systems
+        self.initMode('BlockStep', False, 'Single step to branch entry points')
+
+        # If possible, get a default set of struct definitions
+        # for ntdll...
+        nt = vs_windows.getCurrentDef('ntdll')
+        if nt != None:
+            self.vsbuilder.addVStructNamespace('ntdll', nt)
+
+        # Either way, add the fallback "win32" namespace
+        self.vsbuilder.addVStructNamespace('win32', vs_win32)
+
+        # We need thread proxying for a few calls...
+        self.fireTracerThread()
 
     def platformGetFds(self):
         ret = []
@@ -946,6 +1120,9 @@ class WindowsMixin:
             htype = object_type_map.get(typestr, vtrace.FD_UNKNOWN)
             ret.append( (hand, htype, "%s: %s" % (typestr,namestr)) )
         return ret
+
+    def _winJitEvent(self, handle):
+        kernel32.SetEvent(handle)
 
     def dupHandle(self, handle):
         """
@@ -1005,12 +1182,13 @@ class WindowsMixin:
         devs = dname.raw[:size-1].split("\x00")
         for dev in devs:
             dosname = "%s:" % dev[0]
-            kernel32.QueryDosDeviceA("%s:" % dev[0], addressof(dname), 512)
+            kernel32.QueryDosDeviceA("%s:" % dev[0], pointer(dname), 512)
             self.dosdevs.append( (dosname, dname.value) )
 
     def platformKill(self):
         kernel32.TerminateProcess(self.phandle, 0)
 
+    @v_base.threadwrap
     def platformExec(self, cmdline):
         sinfo = STARTUPINFO()
         pinfo = PROCESS_INFORMATION()
@@ -1022,22 +1200,27 @@ class WindowsMixin:
         # Unless we want to fail checkBreakpoints, we'll need to set ShouldBreak
         self.setMeta('ShouldBreak', True)
 
+        kernel32.CloseHandle(pinfo.Process)
+        kernel32.CloseHandle(pinfo.Thread)
+
         return pinfo.ProcessId
 
     def platformInjectSo(self, filename):
-        try:
-            lla = self.parseExpression("kernel32.LoadLibraryA")
-        except:
-            raise Exception("ERROR: symbol kernel32.LoadLibraryA not found!")
-        regs = self.platformCall(lla, [filename,])
-        if regs == None:
-            raise Exception("ERROR: platformCall for LoadLibraryA Failed!")
-        return regs.get("eax", 0)
-        
+        tid = c_uint32()
+        x = self.parseExpression('kernel32.LoadLibraryA')
+        memaddr = self.allocateMemory(4096)
+        self.writeMemory(memaddr, '%s\x00' % filename)
+        t =  kernel32.CreateRemoteThread(self.phandle, 0, 0, x, memaddr, 0, addressof(tid))
+        self.joinThread(tid.value)
+        kernel32.CloseHandle(t)
+        kernel32.VirtualFreeEx(self.phandle, memaddr, 0, 0x8000) # MEM_RELEASE 0x8000  MEM_DECOMMIT 0x4000
+
+    @v_base.threadwrap
     def platformAttach(self, pid):
         if not kernel32.DebugActiveProcess(pid):
             raiseWin32Error("DebugActiveProcess")
 
+    @v_base.threadwrap
     def platformDetach(self):
         # Do the crazy "can't supress exceptions from detach" dance.
         if ((not self.exited) and
@@ -1074,29 +1257,31 @@ class WindowsMixin:
             raiseWin32Error("kernel32.ReadProcessMemory %s" % hex(address))
         return buf.raw
 
+    @v_base.threadwrap
     def platformContinue(self):
 
         magic = DBG_CONTINUE
 
-        if self.getMeta("PendingException"):
+        if self.getCurrentSignal() != None:
             magic = DBG_EXCEPTION_NOT_HANDLED
 
-        self.setMeta("PendingException", False)
         if self.flushcache:
             self.flushcache = False
             kernel32.FlushInstructionCache(self.phandle, 0, 0)
         if not kernel32.ContinueDebugEvent(self.pid, self.getMeta("StoppedThreadId"), magic):
             raiseWin32Error("ContinueDebugEvent")
 
+    @v_base.threadwrap
     def platformStepi(self):
         # We have some flag fields broken out as meta regs
         self.setRegisterByName("TF", 1)
+        if self.getMode('BlockStep'):
+            wrmsr(e_i386.MSR_DEBUGCTL, e_i386.MSR_DEBUGCTL_BTF)
         self._syncRegs()
         self.platformContinue()
 
     def platformWriteMemory(self, address, buf):
         ret = c_ulong(0)
-        #print "WRITE",self.phandle,address,buf,len(buf),addressof(ret)
         if not kernel32.WriteProcessMemory(self.phandle, address, buf, len(buf), addressof(ret)):
             raiseWin32Error("kernel32.WriteProcessMemory")
         # If we wrote memory, flush the instruction cache...
@@ -1128,6 +1313,7 @@ class WindowsMixin:
             kernel32.CloseHandle(hmodule)
         return ret
 
+    @v_base.threadwrap
     def platformWait(self):
         event = DEBUG_EVENT()
         if not kernel32.WaitForDebugEvent(addressof(event), INFINITE):
@@ -1165,7 +1351,7 @@ class WindowsMixin:
            self.win32threads[ThreadId] = teb
            self.thandles[ThreadId] = event.u.CreateProcessInfo.Thread
 
-           tobj = self.getStruct("win32.TEB", teb)
+           tobj = self.getStruct("ntdll.TEB", teb)
            peb = tobj.ProcessEnvironmentBlock
 
            self.setMeta("PEB", peb)
@@ -1214,27 +1400,21 @@ class WindowsMixin:
             eventdict["FirstChance"] = bool(firstChance)
             eventdict["ExceptionInformation"] = plist
 
-            self.setMeta("PendingException", False)
-
             if firstChance:
 
                 if excode == EXCEPTION_BREAKPOINT:
-                    self.setMeta("PendingException", False)
+
                     if not self.checkBreakpoints():
                         # On first attach, all the library load
                         # events occur, then we hit a CC.  So,
                         # if we don't find a breakpoint, notify
                         # break anyay....
                         self.fireNotifiers(vtrace.NOTIFY_BREAK)
-                        # Don't eat the BP exception if we didn't make it...
-                        # Actually, for win2k's sake, let's do eat the breaks
-                        #self.setMeta("PendingException", True)
 
                 elif excode == EXCEPTION_SINGLE_STEP:
                     # NOTE: on win32, aparently a hardware breakpoints
                     # come through with an EXCEPTION_SINGLE_STEP code
                     # rather than EXCEPTION_BREAKPOINT.
-                    self.setMeta("PendingException", False)
                     if not self.checkWatchpoints():
                         self.fireNotifiers(vtrace.NOTIFY_STEP)
 
@@ -1245,12 +1425,10 @@ class WindowsMixin:
 
                     # First we check for PageWatchpoint faults
                     if not self.checkPageWatchpoints():
-                        self.setMeta("PendingException", True)
-                        self.fireNotifiers(vtrace.NOTIFY_SIGNAL)
+                        self._fireSignal(excode, siginfo=plist)
 
             else:
-                self.setMeta("PendingException", True)
-                self.fireNotifiers(vtrace.NOTIFY_SIGNAL)
+                self._fireSignal(excode, siginfo=plist)
 
         elif event.DebugEventCode == EXIT_PROCESS_DEBUG_EVENT:
             ecode = event.u.ExitProcess.ExitCode
@@ -1334,12 +1512,6 @@ class WindowsMixin:
 
         return ret
 
-    def platformGetSignal(self):
-        if not self.getMeta('PendingException', False):
-            return None
-        event = self.getMeta('Win32Event')
-        return event.get('ExceptionCode', None)
-
     def platformGetThreads(self):
         return self.win32threads
 
@@ -1363,19 +1535,14 @@ class WindowsMixin:
         sympath = self.getMeta('NtSymbolPath')
         parser = Win32SymbolParser(self.phandle, filename, baseaddr, sympath=sympath)
         parser.parse()
-
-        for name, addr, size, flags in parser.symbols:
-            symclass = e_resolv.Symbol
-            if flags & funcflags:
-                symclass = e_resolv.FunctionSymbol
-            sym = symclass(name, addr, size, normname)
-            self.addSymbol(sym)
+        parser.loadSymsIntoTrace(self, normname)
 
     def parseWithPE(self, filename, baseaddr, normname):
         pe = PE.peFromMemoryObject(self, baseaddr)
         for rva, ord, name in pe.getExports():
             self.addSymbol(e_resolv.Symbol(name, baseaddr+rva, 0, normname))
 
+    @v_base.threadwrap
     def platformGetRegCtx(self, threadid):
         ctx = self.archGetRegCtx()
         c = self._winGetRegStruct()
@@ -1392,21 +1559,28 @@ class WindowsMixin:
         ctx._rctx_Import(c)
         return ctx
 
+    @v_base.threadwrap
     def platformSetRegCtx(self, threadid, ctx):
 
         c = self._winGetRegStruct()
 
         thandle = self.thandles.get(threadid, None)
         if not thandle:
-            raise Exception("Getting registers for unknown thread")
+            raise Exception("Getting registers for unknown thread: %d" % threadid)
 
         if not kernel32.GetThreadContext(thandle, addressof(c)):
-            raiseWin32Error("kernel32.GetThreadContext")
+            raiseWin32Error("kernel32.GetThreadContext (tid: %d)" % threadid)
 
         ctx._rctx_Export(c)
 
         if not kernel32.SetThreadContext(thandle, addressof(c)):
-            raiseWin32Error("kernel32.SetThreadContext")
+            raiseWin32Error("kernel32.SetThreadContext (tid: %d)" % threadid)
+
+    def _getSvcList(self):
+        '''
+        Expose the getServicesList via the trace for remote...
+        '''
+        return getServicesList()
 
 # NOTE: The order of the constructors vs inheritance is very important...
 
@@ -1455,6 +1629,53 @@ class WindowsAmd64Trace(
     def _winGetMemStruct(self):
         return MEMORY_BASIC_INFORMATION64()
 
+reserved = {
+    'None': True,
+    'True': True,
+    'False': True,
+}
+
+VT_EMPTY    = 0 
+VT_NULL     = 1 
+VT_I2       = 2 
+VT_I4       = 3 
+VT_R4       = 4 
+VT_R8       = 5 
+VT_CY       = 6 
+VT_DATE     = 7 
+VT_BSTR     = 8 
+VT_DISPATCH = 9 
+VT_ERROR    = 10 
+VT_BOOL     = 11 
+VT_VARIANT  = 12 
+VT_UNKNOWN  = 13 
+VT_I1       = 16
+VT_UI1      = 17 
+VT_UI2      = 18
+VT_UI4      = 19
+VT_INT      = 20
+VT_UINT     = 21
+
+class VARIANT_guts(Union):
+    _fields_ = [
+        ('ui1', c_uint8),
+        ('ui2', c_uint16),
+        ('ui4', c_uint32),
+        ('i1', c_int8),
+        ('i2', c_int16),
+        ('i4', c_int32),
+        ('pad', BYTE*32),
+    ]
+
+class VARIANT(Structure):
+    _fields_ = [
+        ('vt', WORD),
+        ('res1', WORD),
+        ('res2', WORD),
+        ('res3', WORD),
+        ('u', VARIANT_guts),
+    ]
+
 class Win32SymbolParser:
 
     def __init__(self, phandle, filename, loadbase, sympath=None):
@@ -1464,7 +1685,8 @@ class Win32SymbolParser:
         self.sympath = sympath
         self.symbols = []
         self.symopts = (SYMOPT_UNDNAME | SYMOPT_NO_PROMPTS | SYMOPT_NO_CPP)
-        self.types = []
+        self._sym_types = {}
+        self._sym_enums = {}
 
     def printSymbolInfo(self, info):
         # Just a helper function for "reversing" how dbghelp works
@@ -1481,7 +1703,19 @@ class Win32SymbolParser:
     def symGetTypeName(self, typeid):
         n = c_wchar_p()
         self.symGetTypeInfo(typeid, TI_GET_SYMNAME, pointer(n))
-        return n.value
+        val = n.value
+        # Strip leading / trailing _'s
+        if val != None:
+            val = val.strip('_')
+        if val == '<unnamed-tag>' or val == 'unnamed':
+            val = '_unnamed_%d' % typeid
+        #print repr(val)
+        return val
+
+    def symGetUdtKind(self, typeid):
+        offset = c_ulong(0)
+        self.symGetTypeInfo(typeid, TI_GET_UDTKIND, pointer(offset))
+        return offset.value
 
     def symGetTypeOffset(self, typeid):
         offset = c_ulong(0)
@@ -1493,6 +1727,28 @@ class Win32SymbolParser:
         self.symGetTypeInfo(typeid, TI_GET_LENGTH, pointer(size))
         return size.value
 
+    def symGetArrayIndexType(self, typeid):
+        offset = c_ulong(0)
+        self.symGetTypeInfo(typeid, TI_GET_ARRAYINDEXTYPEID, pointer(offset))
+        return offset.value
+
+    def symGetTypeValue(self, typeid):
+        #size = c_ulonglong(0)
+        v = VARIANT()
+        self.symGetTypeInfo(typeid, TI_GET_VALUE, pointer(v))
+
+        vt = v.vt
+
+        # Messy, but gotta do it...
+        if vt == VT_I1: return v.u.i1
+        if vt == VT_I2: return v.u.i2
+        if vt == VT_I4: return v.u.i4
+        if vt == VT_UI1: return v.u.ui1
+        if vt == VT_UI2: return v.u.ui2
+        if vt == VT_UI4: return v.u.ui4
+
+        raise Exception('Unhandled Variant Type: %d' % v.vt)
+
     def symGetTypeBase(self, typeid):
         btype = c_ulong(typeid)
         # Resolve the deepest base type
@@ -1500,7 +1756,7 @@ class Win32SymbolParser:
             self.symGetTypeInfo(btype.value, TI_GET_BASETYPE, pointer(btype))
         return btype.value
 
-    def symGetChildType(self, child):
+    def symGetTypeType(self, child):
         ktype = c_ulong(0)
         self.symGetTypeInfo(child, TI_GET_TYPE, pointer(ktype))
         return ktype.value
@@ -1510,44 +1766,122 @@ class Win32SymbolParser:
         self.symGetTypeInfo(typeid, TI_GET_SYMTAG, pointer(btype))
         return btype.value
 
-    def typeEnumCallback(self, psym, size, ctx):
-        sym = psym.contents
-        if sym.Name == "__unnamed":
-            return True
+    def _fixKidName(self, kidname):
+        if kidname[0].isdigit():
+            kidname = '_%s' % kidname
 
-        #FIXME more big deltas comming here!
-        s = c_ulong(0)
-        self.symGetTypeInfo(sym.TypeIndex, TI_GET_CHILDRENCOUNT, pointer(s))
-        tif = buildFindChildrenParams(s.value)
-        self.symGetTypeInfo(sym.TypeIndex, TI_FINDCHILDREN, pointer(tif))
-        btype = c_ulong(0)
+        if reserved.get(kidname):
+            kidname = '_%s' % kidname
+
+        return kidname
+
+    def _symTypeEnum(self, name, tidx):
+        size = self.symGetTypeLength(tidx)
         kids = []
-        for i in range(s.value):
-            child = tif.Children[i]
+        for child in self._symGetChildren(tidx):
+            kidname = self.symGetTypeName(child)
+            kidval = self.symGetTypeValue(child)
+            kidname = self._fixKidName(kidname)
+            kids.append((kidname, kidval))
 
+        self._sym_enums[name] = (name, size, kids)
+
+    def _symTypeUserDefined(self, name, tidx):
+        size = self.symGetTypeLength(tidx)
+        kids = []
+        for child in self._symGetChildren(tidx):
             kidname = self.symGetTypeName(child)
             kidoff = self.symGetTypeOffset(child)
-            ktype = self.symGetChildType(child)
+            ktype = self.symGetTypeType(child)
             ksize = self.symGetTypeLength(ktype)
-
             ktag = self.symGetTypeTag(ktype)
-            if ktag == SymTagPointerType:
-                kidname += "*"
-            elif ktag == SymTagArrayType:
-                kidname += "[]"
-            elif ktag == SymTagBaseType:
-                kidname += "_base"
 
-            kids.append((kidoff, kidname, ksize))
-            #FIXME free type info!
-        self.types.append((sym.Name, kids))
+            kidname = self._fixKidName(kidname)
+            kflags = 0
+            ktypename = None
+            kcount = None
+
+            if ktag == SymTagPointerType:
+                kflags |= vs_builder.VSFF_POINTER
+                ptype = self.symGetTypeType(ktype)
+                ktypename = self.symGetTypeName(ptype)
+
+            elif ktag == SymTagArrayType:
+                atype = self.symGetTypeType(ktype)
+                asize = self.symGetTypeLength(atype)
+                kcount = ksize / asize
+
+                # Now, we setup our *child* to be the type
+                ktypename = self.symGetTypeName(atype)
+                ksize = asize
+
+                if self.symGetTypeTag(atype) == SymTagPointerType:
+                    kflags |= vs_builder.VSFF_POINTER
+
+            elif ktag == SymTagEnum:
+                #ktypename = self.symGetTypeName(ktype)
+                pass
+
+            elif ktag == SymTagUDT:
+                ktypename = self.symGetTypeName(ktype)
+
+            elif ktag == SymTagBaseType:
+                pass
+
+            else:
+                print '%s:%s Unknown Type Tag: %d' % (name, kidname, ktag)
+
+            kids.append((kidname, kidoff, ksize, ktypename, kflags, kcount))
+
+        self._sym_types[name] = (name, size, kids)
+
+    def _symGetChildren(self, typeIndex):
+
+        s = c_ulong(0)
+        self.symGetTypeInfo(typeIndex, TI_GET_CHILDRENCOUNT, pointer(s))
+        tif = buildFindChildrenParams(s.value)
+        self.symGetTypeInfo(typeIndex, TI_FINDCHILDREN, pointer(tif))
+        for i in range(s.value):
+            child = tif.Children[i]
+            yield child
+
+    def typeEnumCallback(self, psym, size, ctx):
+        sym = psym.contents
+
+        myname = self.symGetTypeName(sym.TypeIndex)
+        mytag = self.symGetTypeTag(sym.TypeIndex)
+
+        if mytag == SymTagUDT:
+            self._symTypeUserDefined(myname, sym.TypeIndex)
+            return True
+
+        if mytag == SymTagEnum:
+            self._symTypeEnum(myname, sym.TypeIndex)
+            return True
 
         return True
 
     def symEnumCallback(self, psym, size, ctx):
         sym = psym.contents
-        self.symbols.append((sym.Name, int(sym.Address), int(sym.Size), sym.Flags))
+        #tidx = self.symGetTypeBase(sym.TypeIndex)
+        tidx = self.symGetTypeType(sym.TypeIndex)
+        symtag = self.symGetTypeTag(tidx)
+        #if symtag == SymTagFunction:
+        flags = sym.Flags
+        if symtag == SymTagFunction:
+            flags |= SYMFLAG_FUNCTION
+        self.symFromAddr(sym.Address)
+
+        self.symbols.append((sym.Name, int(sym.Address), int(sym.Size), flags))
         return True
+
+    def symFromAddr(self, address):
+        si = SYMBOL_INFO()
+        si.SizeOfStruct = sizeof(si) - 2000
+        si.MaxNameLen = 2000
+        disp = QWORD()
+        dbghelp.SymFromAddr(self.phandle, address, pointer(disp), pointer(si))
+        return si
 
     def symInit(self):
             dbghelp.SymInitialize(self.phandle, self.sympath, False)
@@ -1583,6 +1917,7 @@ class Win32SymbolParser:
                         SYMCALLBACK(self.symEnumCallback),
                         NULL)
 
+            self.parseTypes()
 
             self.symCleanup()
 
@@ -1591,11 +1926,31 @@ class Win32SymbolParser:
             raise
 
     def parseTypes(self):
-        self.symInit()
+        #self.symInit()
         # This is how you enumerate type information
         dbghelp.SymEnumTypes(self.phandle,
                     self.loadbase,
                     SYMCALLBACK(self.typeEnumCallback),
                     NULL)
-        self.symCleanup()
+
+        #self.symCleanup()
+
+    def loadSymsIntoTrace(self, trace, normname):
+
+        funcflags = (SYMFLAG_FUNCTION | SYMFLAG_EXPORT)
+
+        for name, addr, size, flags in self.symbols:
+            symclass = e_resolv.Symbol
+            if flags & funcflags:
+                symclass = e_resolv.FunctionSymbol
+            sym = symclass(name, addr, size, normname)
+            trace.addSymbol(sym)
+
+        t = self._sym_types.values()
+        e = self._sym_enums.values()
+
+        # Only add the namespace if we have values...
+        if len(t):
+            builder = vs_builder.VStructBuilder(defs=t, enums=e)
+            trace.vsbuilder.addVStructNamespace(normname, builder)
 

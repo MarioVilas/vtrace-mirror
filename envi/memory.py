@@ -61,6 +61,9 @@ class IMemory:
     def __init__(self, archmod=None):
         self.imem_psize = struct.calcsize("P")
         self.imem_arch = archmod
+        # If the specified an arch module, use that!
+        if archmod != None:
+            self.imem_psize = archmod.getPointerSize()
 
     def readMemory(self, va, size):
         """
@@ -121,7 +124,7 @@ class IMemory:
         # Somehow, pointers are "signed" when they
         # get chopped up by python's struct package
         if self.imem_psize == 4:
-            fmt = fmt.replace("P","L")
+            fmt = fmt.replace("P","I")
         elif self.imem_psize == 8:
             fmt = fmt.replace("P","Q")
 
@@ -144,7 +147,7 @@ class IMemory:
         elif size == 2:
             return struct.unpack("<H", bytes)[0]
         elif size == 4:
-            return struct.unpack("<L", bytes)[0]
+            return struct.unpack("<I", bytes)[0]
         elif size == 8:
             return struct.unpack("<Q", bytes)[0]
 
@@ -198,8 +201,6 @@ class IMemory:
         """
         results = []
         for va,size,perm,fname in self.getMemoryMaps():
-            if not perm & MM_READ:
-                continue
             try:
                 results.extend(self.searchMemoryRange(needle, va, size, regex=regex))
             except:
@@ -280,7 +281,7 @@ class MemoryObject(IMemory):
 
         Example: mem.setMemorySnap(snap)
         '''
-        self._map_defs = snap
+        self._map_defs = [list(md) for md in snap]
 
     def getMemoryMap(self, va):
         """

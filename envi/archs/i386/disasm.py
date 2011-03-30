@@ -96,6 +96,7 @@ priv_lookup = {
 iflag_lookup = {
     opcode86.INS_RET: envi.IF_NOFALL|envi.IF_RET,
     opcode86.INS_CALL: envi.IF_CALL,
+    opcode86.INS_HALT: envi.IF_NOFALL,
     opcode86.INS_CALLCC: envi.IF_CALL,
     opcode86.INS_BRANCH: envi.IF_NOFALL | envi.IF_BRANCH,
     opcode86.INS_BRANCHCC: envi.IF_BRANCH,
@@ -597,7 +598,7 @@ class i386Disasm:
         self._dis_amethods[opcode86.ADDRMETH_E>>16] = self.ameth_e
         self._dis_amethods[opcode86.ADDRMETH_M>>16] = self.ameth_e
         self._dis_amethods[opcode86.ADDRMETH_N>>16] = self.ameth_n
-        self._dis_amethods[opcode86.ADDRMETH_Q>>16] = self.ameth_n
+        self._dis_amethods[opcode86.ADDRMETH_Q>>16] = self.ameth_q
         self._dis_amethods[opcode86.ADDRMETH_R>>16] = self.ameth_e
         self._dis_amethods[opcode86.ADDRMETH_W>>16] = self.ameth_w
         self._dis_amethods[opcode86.ADDRMETH_I>>16] = self.ameth_i
@@ -917,10 +918,20 @@ class i386Disasm:
         return self.extended_parse_modrm(bytes, offset, tsize)
 
     def ameth_n(self, bytes, offset, tsize, prefixes):
-        return self.extended_parse_modrm(bytes, offset, tsize, self.ROFFSETMMX)
+        mod,reg,rm = self.parse_modrm(ord(bytes[offset]))
+        return (1, i386RegOper(rm + self.ROFFSETMMX, tsize))
+
+    def ameth_q(self, bytes, offset, tsize, prefixes):
+        mod,reg,rm = self.parse_modrm(ord(bytes[offset]))
+        if mod == 3:
+            return (1, i386RegOper(rm + self.ROFFSETMMX, tsize))
+        return self.extended_parse_modrm(bytes, offset, tsize)
 
     def ameth_w(self, bytes, offset, tsize, prefixes):
-        return self.extended_parse_modrm(bytes, offset, tsize, self.ROFFSETSIMD)
+        mod,reg,rm = self.parse_modrm(ord(bytes[offset]))
+        if mod == 3:
+            return (1, i386RegOper(rm + self.ROFFSETSIMD, tsize))
+        return self.extended_parse_modrm(bytes, offset, tsize)
 
     def ameth_i(self, bytes, offset, tsize, prefixes):
         # FIXME sign extend here if opflags has OP_SIGNED

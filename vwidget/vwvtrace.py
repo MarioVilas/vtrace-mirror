@@ -122,6 +122,9 @@ class TraceToolBar(gtk.Toolbar, vtrace.Notifier):
 
     @firethread
     def tbreak(self, button):
+        if self.trace.getMeta('PendingBreak'):
+            return
+        self.trace.setMeta('PendingBreak', True)
         self.trace.sendBreak()
 
     @firethread

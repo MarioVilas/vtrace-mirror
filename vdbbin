@@ -12,23 +12,38 @@ import vtrace.snapshot as vt_snap
 import cobra
 
 def usage():
-    print "Usage: vdb [options]"
-    print "\t-S\t\tServer mode (start a vtrace server)"
-    print "\t-v\t\tVerbose mode"
-    print "\t-G\t\tDo the GUI thang..."
-    print "\t-R <host>\tConnect to remote vdb server"
-    print "\t-p <pid> \tAttach to the given pid"
-    print "\t-s <file>\tLoad process snapshot from file"
+    print 'Usage: vdb [options]'
+    print '\t-S\t\tServer mode (start a vtrace server)'
+    print '\t-v\t\tVerbose mode'
+    print '\t-G\t\tDo the GUI thang...'
+    print '\t-r\t\tRun after attach'
+    print '\t-R <host>\tConnect to remote vdb server.'
+    print '\t-p <pid> \tAttach to the given pid.'
+    print '\t-s <file>\tLoad process snapshot from file'
+    print '\t--gdb-server <server_info>\tAttach to gdbserver! ("--gdb-server help" for more)'
+    sys.exit(0)
+
+def usage_gdbserver():
+    print 'NOTE: gdbserver is only tested for vmware... (qemu, openocd soon!)'
+    print 'use: --gdb-server <gdb_host>:<gdb_port>:<gdb_arch>'
+    print 'gdb_host - The host running the gdb stub'
+    print 'gdb_port - The port listening on the host (tcp)'
+    print 'gdb_arch - The target arch: i386 amd64 arm'
+    print ''
     sys.exit(0)
 
 if __name__ == "__main__":
 
-    pidstr = None
     cmd = None
-    snapshot = None
+    pidstr = None
+    eventid = None
+    runagain = False
+    gdbserver = None
+
+    trace = None
 
     try:
-        opts,args = getopt.getopt(sys.argv[1:], "R:vGSp:s:c:")
+        opts,args = getopt.getopt(sys.argv[1:], "e:R:vGSp:s:c:r", ['gdb-server=',])
     except:
         usage()
 
@@ -41,11 +56,14 @@ if __name__ == "__main__":
         elif opt == "-c":
             cmd = optarg
 
+        elif opt == '-e':
+            eventid = int(optarg)
+
         elif opt == "-G":
             do_gui = True
 
         elif opt == "-s":
-            snapshot = optarg
+            trace = vt_snap.loadSnapshot(optarg)
 
         elif opt == "-S":
             vtrace.startVtraceServer()
@@ -57,12 +75,26 @@ if __name__ == "__main__":
             vtrace.verbose = True
             cobra.verbose = True
 
-    if snapshot != None:
-        trace = vt_snap.loadSnapshot(snapshot)
-    else:
+        elif opt == '-r':
+            runagain = True
+
+        elif opt == '--gdb-server':
+            import vtrace.platforms.gdbstub as vt_gdbstub
+            try:
+                gdbserver, gdbport, gdbarch = optarg.split(':', 2)
+                trace = vt_gdbstub.GdbStubTrace(gdbarch)
+                trace.setMeta('GdbServerHost', gdbserver)
+                trace.setMeta('GdbServerPort', int(gdbport, 0))
+            except Exception ,e:
+                usage_gdbserver()
+
+    if trace == None:
         trace = vtrace.getTrace()
 
     db = vdb.Vdb(trace)
+    db.runagain = runagain
+    db.windows_jit_event = eventid
+
     if do_gui:
         import vwidget.main as vw_main
         import vdb.gui
@@ -74,6 +106,9 @@ if __name__ == "__main__":
 
     elif cmd != None:
         trace.execute(cmd)
+
+    if eventid != None:
+        db.trace.setMeta('WindowsJitEvent', eventid)
 
     if do_gui:
 

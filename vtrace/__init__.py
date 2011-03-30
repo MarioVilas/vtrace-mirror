@@ -136,18 +136,22 @@ class Trace(e_mem.IMemory, e_reg.RegisterContext, e_resolv.SymbolResolver, objec
     worry about the methods that come from the mixins...  Everything that is
     *meant* to be used from the API is contained and documented here.
     """
-    def __init__(self):
+    def __init__(self, archname=None):
         # For the crazy thread-call-proxy-thing
         # (must come first for __getattribute__
         self.requires_thread = {}
         self.proxymeth = None # FIXME hack for now...
-        self.fireTracerThread()
+        self._released = False
 
         # The universal place for all modes
         # that might be platform dependant...
         self.modes = {}
         self.modedocs = {}
         self.notifiers = {}
+
+        # For all transient data (if notifiers want
+        # to track stuff per-trace
+        self.metadata = {}
 
         self.initMode("RunForever", False, "Run until RunForever = False")
         self.initMode("NonBlocking", False, "A call to wait() fires a thread to wait *for* you")
@@ -166,15 +170,14 @@ class Trace(e_mem.IMemory, e_reg.RegisterContext, e_resolv.SymbolResolver, objec
 
         # Set us up with an envi arch module
         # FIXME eventually we should just inherit one...
-        self.arch = envi.getArchModule()
+        if archname == None:
+            archname = envi.getCurrentArch()
+        self.setMeta('Architecture', archname)
+        self.arch = envi.getArchModule(name=archname)
 
         e_resolv.SymbolResolver.__init__(self, width=self.arch.getPointerSize())
         e_mem.IMemory.__init__(self, archmod=self.arch)
         e_reg.RegisterContext.__init__(self)
-
-        # We'll just use our own notify interface to catch some stuff
-        # (which also more-or-less guarentees we'll be first notified for these)
-        self.registerNotifier(NOTIFY_ALL, self)
 
         # Add event numbers to here for auto-continue
         self.auto_continue = [NOTIFY_LOAD_LIBRARY, NOTIFY_CREATE_THREAD, NOTIFY_UNLOAD_LIBRARY, NOTIFY_EXIT_THREAD, NOTIFY_DEBUG_PRINT]
@@ -309,6 +312,17 @@ class Trace(e_mem.IMemory, e_reg.RegisterContext, e_resolv.SymbolResolver, objec
         self.attached = False
         self.pid = 0
         self.mapcache = None
+
+    def release(self):
+        '''
+        Release resources for this tracer.  This API should be called
+        once you are done with the trace.
+        '''
+        if not self._released:
+            self._released = True
+            if self.attached:
+                self.detach()
+            self._cleanupResources()
 
     def getPid(self):
         """
@@ -485,8 +499,7 @@ class Trace(e_mem.IMemory, e_reg.RegisterContext, e_resolv.SymbolResolver, objec
         Some examples of metadata used:
         ShouldBreak - We're expecting a non-signal related break
         ExitCode - The int() exit code  (if exited)
-        PendingSignal - Used on posix systems
-        PendingException - Mostly for win32 for now
+        PendingSignal - The current signal
 
         """
         self.metadata[name] = value
@@ -538,6 +551,9 @@ class Trace(e_mem.IMemory, e_reg.RegisterContext, e_resolv.SymbolResolver, objec
         """
         Inject a shared object into the target of the trace.  So, on windows
         this is easy with InjectDll and on *nix... it's.. fugly...
+
+        NOTE: This method will likely cause the trace to run.  Do not call from
+              within a notifier!
         """
         self.requireNotRunning()
         self.platformInjectSo(filename)
@@ -846,12 +862,11 @@ class Trace(e_mem.IMemory, e_reg.RegisterContext, e_resolv.SymbolResolver, objec
         This is only valid if the target is actually running...
         """
         self.requireAttached()
-        #if not self.isRunning():
-            #raise Exception("Why sending a break when not running?!?!")
         self.setMode("RunForever", False)
         self.setMode("FastBreak", False)
         self.setMeta("ShouldBreak", True)
         self.platformSendBreak()
+        time.sleep(0.01)
         # If we're non-blocking, we gotta wait...
         if self.getMode("NonBlocking", True):
             while self.isRunning():
@@ -932,15 +947,50 @@ class Trace(e_mem.IMemory, e_reg.RegisterContext, e_resolv.SymbolResolver, objec
         will begin execution on the next process run().
         """
         self.requireNotRunning()
-        #FIXME platformInjectThread()
+        #self.platformInjectThread(pc)
         pass
+
+    def joinThread(self, threadid):
+        '''
+        Run the trace in a loop until the specified thread exits.
+        '''
+        self.setMode('RunForever', True)
+        self._join_thread = threadid
+        # Temporarily make run/wait blocking
+        nb = self.getMode('NonBlocking')
+        self.setMode('NonBlocking', False)
+        self.run()
+        self.setMode('NonBlocking', nb)
+
+    def getStructNames(self, namespace=None):
+        '''
+        This method returns either the structure names, or
+        the structure namespaces that the target tracer is aware
+        of.  If "namespace" is specified, it is structures within
+        that namespace, otherwise it is "known namespaces"
+
+        Example: namespaces = trace.getStructNames()
+                 ntdll_structs = trace.getStructNames(namespace='ntdll')
+        '''
+        if namespace:
+            return self.vsbuilder.getVStructNames(namespace=namespace)
+        return self.vsbuilder.getVStructNamespaceNames()
 
     def getStruct(self, sname, address):
         """
         Retrieve a vstruct structure populated with memory from
         the specified address.  Returns a standard vstruct object.
         """
-        vs = vstruct.getStructure(sname)
+        # Check if we need to parse symbols for a library
+        libbase = sname.split('.')[0]
+        self._loadBinaryNorm(libbase)
+
+        if self.vsbuilder.hasVStructNamespace(libbase):
+            vs = self.vsbuilder.buildVStruct(sname)
+
+        # FIXME this is depreicated and should die...
+        else:
+            vs = vstruct.getStructure(sname)
         bytes = self.readMemory(address, len(vs))
         vs.vsParse(bytes)
         return vs
@@ -975,6 +1025,18 @@ class Trace(e_mem.IMemory, e_reg.RegisterContext, e_resolv.SymbolResolver, objec
         """
         w = self.arch.getPointerSize()
         return e_bits.hex(value, width)
+
+    def buildNewTrace(self):
+        '''
+        Build a new/clean trace "like" this one.  For platforms where a
+        special trace was handed in, this allows initialization of a new one.
+        For most implementations, this is very simple....
+
+        Example:
+            if need_another_trace:
+                newt = trace.buildNewTrace()
+        '''
+        return self.__class__()
 
 class TraceGroup(Notifier, v_util.TraceManager):
     """
@@ -1118,7 +1180,6 @@ class VtraceExpressionLocals(e_expr.MemoryExpressionLocals):
                 'vtrace':vtrace
         })
         self.update({
-            'struct':self.struct,
             'frame':self.frame,
             'teb':self.teb,
             'bp':self.bp,
@@ -1128,7 +1189,7 @@ class VtraceExpressionLocals(e_expr.MemoryExpressionLocals):
 
     def __getitem__(self, name):
         # Check registers
-        if self.trace.isAttached():
+        if self.trace.isAttached() and not self.trace.isRunning():
             regs = self.trace.getRegisters()
             r = regs.get(name, None)
             if r != None:
@@ -1139,15 +1200,6 @@ class VtraceExpressionLocals(e_expr.MemoryExpressionLocals):
         if r != None:
             return r
         return e_expr.MemoryExpressionLocals.__getitem__(self, name)
-
-    def struct(self, sname, saddr):
-        """
-        Return a VStruct structure of type "sname" which has been
-        populated with the values from saddr.
-
-        Usage: struct("PEB", <peb address>)
-        """
-        return self.trace.getStruct(sname, saddr)
 
     def go(self):
         '''
@@ -1283,10 +1335,12 @@ def getTrace():
         import vtrace.platforms.darwin as v_darwin
         if arch == 'i386':
             return v_darwin.Darwini386Trace()
+        elif arch == 'amd64':
+            return v_darwin.DarwinAmd64Trace()
         else:
             raise Exception('Darwin not supported on %s (only i386...)' % arch)
 
-    elif os_name == "Windows":
+    elif os_name in ['Microsoft', 'Windows']:
 
         import vtrace.platforms.win32 as v_win32
 

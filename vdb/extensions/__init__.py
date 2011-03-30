@@ -4,7 +4,7 @@ A package to contain all the extended functionality for platform specific
 commands and modules.
 '''
 
-__all__ = ['loadExtensions','windows','i386','darwin','amd64']
+__all__ = ['loadExtensions','windows','i386','darwin','amd64','gdbstub','arm']
 
 def loadExtensions(vdb, trace):
     '''

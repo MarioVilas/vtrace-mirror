@@ -32,6 +32,39 @@ class OpcodeRenderer(e_canvas.MemoryRenderer):
         mcanv.addText("\n")
         return len(op)
 
+class SymbolRenderer(e_canvas.MemoryRenderer):
+    def __init__(self, trace):
+        a = trace.getMeta("Architecture")
+        self.arch = envi.getArchModule(a)
+        self.pwidth = self.arch.getPointerSize()
+
+    def render(self, mcanv, va):
+        # This is only used with tracer based stuff...
+        trace = mcanv.mem
+        vastr = self.arch.pointerString(va)
+        # NOTE: we assume the memobj is a trace
+        trace = mcanv.mem
+        p = trace.readMemoryFormat(va, 'P')[0]
+
+        isptr = trace.isValidPointer(p)
+
+        pstr = self.arch.pointerString(p)
+
+        mcanv.addVaText(vastr, va=va)
+        mcanv.addText(": ")
+        if isptr:
+            mcanv.addVaText(pstr, p)
+        else:
+            mcanv.addText(pstr)
+
+        if isptr:
+            sym = trace.getSymByAddr(p, exact=False)
+            if sym != None:
+                mcanv.addText(' %s + %d' % (repr(sym), p-long(sym)))
+        mcanv.addText('\n')
+
+        return self.pwidth
+
 class DerefRenderer(e_canvas.MemoryRenderer):
     def __init__(self, trace):
         a = trace.getMeta("Architecture")
@@ -42,8 +75,7 @@ class DerefRenderer(e_canvas.MemoryRenderer):
         vastr = self.arch.pointerString(va)
         # NOTE: we assume the memobj is a trace
         trace = mcanv.mem
-        p = trace.readMemoryFormat(va, "P")[0]
-        p = e_bits.unsigned(p, self.pwidth)
+        p = trace.readMemoryFormat(va, 'P')[0]
 
         isptr = trace.isValidPointer(p)
 

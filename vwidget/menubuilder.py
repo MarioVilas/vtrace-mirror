@@ -8,7 +8,7 @@ class FieldAdder:
         self.menu.idx = 0
         self.menu.kids = {}
 
-    def addField(self, pathstr, callback=None, args=()):
+    def addField(self, pathstr, callback=None, args=(), stockid=None):
         parent = self.menu
         kid = None
         plist = pathstr.split(self.splitchar)
@@ -27,9 +27,13 @@ class FieldAdder:
                 parent.kids[p] = kid
             parent = kid
 
-        item = gtk.MenuItem(plist[-1], True)
+        if stockid != None:
+            item = gtk.ImageMenuItem(stock_id=stockid)
+        else:
+            item = gtk.MenuItem(plist[-1], True)
         if callback != None:
             item.connect("activate", callback, *args)
+
         item.show()
         item.set_name("vwidget_menu")
         parent.insert(item, parent.idx)

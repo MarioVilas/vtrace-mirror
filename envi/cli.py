@@ -6,9 +6,11 @@ import code
 import traceback
 import threading
 
+import envi.bits as e_bits
 import envi.memory as e_mem
-import envi.memcanvas as e_canvas
 import envi.config as e_config
+import envi.resolver as e_resolv
+import envi.memcanvas as e_canvas
 import envi.expression as e_expr
 
 from cmd import Cmd
@@ -116,7 +118,7 @@ class EnviCli(Cmd):
     def doAlias(self, line):
         for opt in self.config.options("Aliases"):
             if line.startswith(opt):
-                line = line.replace(opt, self.config.get("Aliases", opt))
+                line = line.replace(opt, self.config.get("Aliases", opt), 1)
         return line
 
     def cmdloop(self, intro=None):
@@ -138,8 +140,8 @@ class EnviCli(Cmd):
         except SystemExit:
             raise
         except Exception, msg:
-            self.vprint(traceback.format_exc())
-            self.vprint("ERROR: (%s) %s" % (msg.__class__.__name__,msg))
+            #self.vprint(traceback.format_exc())
+            self.vprint("\nERROR: (%s) %s" % (msg.__class__.__name__,msg))
 
         if self.shutdown.isSet():
             return True
@@ -243,6 +245,23 @@ class EnviCli(Cmd):
         l = self.getExpressionLocals()
         return long(e_expr.evaluate(expr, l))
 
+    def do_binstr(self, line):
+        '''
+        Display a binary representation of the given value expression
+        (padded to optional width in bits)
+        
+        Usage: binstr <val_expr> [<bitwidth_expr>]
+        '''
+        argv = splitargs(line)
+        if len(argv) == 0:
+            return self.do_help('binstr')
+        bitwidth = None
+        value = self.parseExpression(argv[0])
+        if len(argv) > 1:
+            bitwidth = self.parseExpression(argv[1])
+        binstr = e_bits.binrepr(value, bitwidth=bitwidth)
+        self.canvas.addText("0x%.8x (%d) %s\n" % (value, value, binstr))
+
     def do_eval(self, line):
         """
         Evaluate an expression on the CLI to show it's value.
@@ -321,10 +340,11 @@ class EnviCli(Cmd):
         Search memory for patterns.
 
         Usage: search [options] <pattern>
-        -X The specified pattern is in hex (ie.  414141424242 is AAABBB)
+        -e Encode the pattern with a codec (ie utf-16le, hex, etc)
         -E The specified pattern is an expression (search for numeric values)
-        -R <baseexpr:sizeexpr> Search a specific range only.
         -r The specified pattern is a regular expression
+        -R <baseexpr:sizeexpr> Search a specific range only.
+        -X The specified pattern is in hex (ie.  414141424242 is AAABBB)
         """
         if len(line) == 0:
             return self.do_help("search")
@@ -333,21 +353,24 @@ class EnviCli(Cmd):
         dohex = False
         doexpr = False
         regex = False
+        encode = None
 
         argv = splitargs(line)
         try:
-            opts,args = getopt(argv, "ER:rX")
+            opts,args = getopt(argv, "e:ER:rX")
         except:
             return self.do_help("search")
 
         for opt,optarg in opts:
-            if opt == "-E":
+            if opt == '-E':
                 doexpr = True
-            elif opt == "-R":
+            elif opt == '-e':
+                encode = optarg
+            elif opt == '-R':
                 range = optarg
             elif opt == '-r':
                 regex = True
-            elif opt == "-X":
+            elif opt == '-X':
                 dohex = True
 
         pattern = " ".join(args)
@@ -356,6 +379,7 @@ class EnviCli(Cmd):
             sval = self.parseExpression(pattern)
             pattern = struct.pack("<L", sval) # FIXME 64bit (and alt arch)
         if dohex: pattern = pattern.decode('hex')
+        if encode: pattern = pattern.encode(encode)
         if range:
             try:
                 addrexpr, sizeexpr = range.split(":")
@@ -562,11 +586,10 @@ class EnviMutableCli(EnviCli):
         addr = self.parseExpression(args[0])
         perm = e_mem.parsePerms(args[1])
 
-        map = self.memobj.getMemoryMap(addr)
-        if map == None:
-            raise Exception("Unknown memory map for 0x%.8x" % addr)
-
         if size == None:
+            map = self.memobj.getMemoryMap(addr)
+            if map == None:
+                raise Exception("Unknown memory map for 0x%.8x" % addr)
             size = map[1]
 
         self.memobj.protectMemory(addr, size, perm)

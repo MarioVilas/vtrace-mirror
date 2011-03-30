@@ -1321,14 +1321,14 @@ class ArmRegOper(envi.Operand):
         emu.setRegister(self.reg, val)
 
     def render(self, mcanv, op, idx):
-        rname = arm_regnames[self.reg]
+        rname = arm_regs[self.reg][0]
         if self.oflags & OF_W:
             rname += "!"
         mcanv.addNameText(rname, typename='registers')
 
 
     def repr(self, op):
-        rname = arm_regnames[self.reg]
+        rname = arm_regs[self.reg][0]
         if self.oflags & OF_W:
             rname += "!"
         return rname
@@ -1360,16 +1360,16 @@ class ArmRegShiftRegOper(envi.Operand):
         return shifters[self.shtype](emu.getRegister(self.reg), emu.getRegister(shreg))
 
     def render(self, mcanv, op, idx):
-        rname = arm_regnames[self.reg]
+        rname = arm_regs[self.reg][0]
         mcanv.addNameText(rname, typename='registers')
         mcanv.addText(', ')
         mcanv.addNameText(shift_names[self.shtype])
         mcanv.addText(' ')
-        mcanv.addNameText(arm_regnames[self.shreg], typename='registers')
+        mcanv.addNameText(arm_regs[self.shreg][0], typename='registers')
 
     def repr(self, op):
-        rname = arm_regnames[self.reg]+","
-        return " ".join([rname, shift_names[self.shtype], arm_regnames[self.shreg]])
+        rname = arm_regs[self.reg][0]+","
+        return " ".join([rname, shift_names[self.shtype], arm_regs[self.shreg][0]])
 
 class ArmRegShiftImmOper(envi.Operand):
 
@@ -1403,7 +1403,7 @@ class ArmRegShiftImmOper(envi.Operand):
         return shifters[self.shtype](emu.getRegister(self.reg), self.shimm)
 
     def render(self, mcanv, op, idx):
-        rname = arm_regnames[self.reg]
+        rname = arm_regs[self.reg][0]
         mcanv.addNameText(rname, typename='registers')
         if self.shimm != 0:
             mcanv.addText(', ')
@@ -1415,7 +1415,7 @@ class ArmRegShiftImmOper(envi.Operand):
             mcanv.addNameText(shift_names[self.shtype])
 
     def repr(self, op):
-        rname = arm_regnames[self.reg]
+        rname = arm_regs[self.reg][0]
         retval = [ rname ]
         if self.shimm != 0:
             retval.append(", "+shift_names[self.shtype])
@@ -1496,8 +1496,8 @@ class ArmScaledOffsetOper(envi.Operand):
     def render(self, mcanv, op, idx):
         pom = ('-','')[(self.pubwl>>4)&1]
         idxing = self.pubwl & 0x12
-        basereg = arm_regnames[self.base_reg]
-        offreg = arm_regnames[self.offset_reg]
+        basereg = arm_regs[self.base_reg][0]
+        offreg = arm_regs[self.offset_reg][0]
         shname = shift_names[self.shtype]
 
         mcanv.addText('[')
@@ -1521,8 +1521,8 @@ class ArmScaledOffsetOper(envi.Operand):
     def repr(self, op):
         pom = ('-','')[(self.pubwl>>4)&1]
         idxing = self.pubwl & 0x12
-        basereg = arm_regnames[self.base_reg]
-        offreg = arm_regnames[self.offset_reg]
+        basereg = arm_regs[self.base_reg][0]
+        offreg = arm_regs[self.offset_reg][0]
         shname = shift_names[self.shtype]
         if self.shval != 0:
             shval = "%s #%d"%(shname,self.shval)
@@ -1566,8 +1566,8 @@ class ArmRegOffsetOper(envi.Operand):
     def render(self, mcanv, op, idx):
         pom = ('-','')[(self.pubwl>>4)&1]
         idxing = self.pubwl & 0x12
-        basereg = arm_regnames[self.base_reg]
-        offreg = arm_regnames[self.offset_reg]
+        basereg = arm_regs[self.base_reg][0]
+        offreg = arm_regs[self.offset_reg][0]
 
         mcanv.addText('[')
         mcanv.addNameText(basereg, typename='registers')
@@ -1585,8 +1585,8 @@ class ArmRegOffsetOper(envi.Operand):
     def repr(self, op):
         pom = ('-','')[(self.pubwl>>4)&1]
         idxing = self.pubwl & 0x12
-        basereg = arm_regnames[self.base_reg]
-        offreg = arm_regnames[self.offset_reg]
+        basereg = arm_regs[self.base_reg][0]
+        offreg = arm_regs[self.offset_reg][0]
         if (idxing&0x10) == 0:         # post-indexed
             tname = '[%s], %s%s' % (basereg, pom, offreg)
         elif idxing == 0x10:  # offset addressing, not updated
@@ -1641,7 +1641,7 @@ class ArmImmOffsetOper(envi.Operand):
     def render(self, mcanv, op, idx):
         pom = ('-','')[(self.pubwl>>4)&1]
         idxing = self.pubwl & 0x12
-        basereg = arm_regnames[self.base_reg]
+        basereg = arm_regs[self.base_reg][0]
         mcanv.addText('[')
         mcanv.addNameText(basereg, typename='registers')
         if self.offset == 0:
@@ -1662,7 +1662,7 @@ class ArmImmOffsetOper(envi.Operand):
     def repr(self, op):
         pom = ('-','')[(self.pubwl>>4)&1]
         idxing = (self.pubwl) & 0x12
-        basereg = arm_regnames[self.base_reg]
+        basereg = arm_regs[self.base_reg][0]
         if self.offset != 0:
             offset = ", #%s0x%x"%(pom,self.offset)
         else:
@@ -1790,7 +1790,7 @@ class ArmRegListOper(envi.Operand):
         mcanv.addText('{')
         for l in xrange(16):
             if self.val & 1<<l:
-                mcanv.addNameText(arm_regnames[l], typename='registers')
+                mcanv.addNameText(arm_regs[l][0], typename='registers')
                 mcanv.addText(', ')
         mcanv.addText('}')
         if self.oflags & OF_UM:
@@ -1811,7 +1811,7 @@ class ArmRegListOper(envi.Operand):
             s = [ "{" ]
             for l in xrange(16):
                 if (self.val & (1<<l)):
-                    s.append(arm_regnames[l])
+                    s.append(arm_regs[l][0])
             s.append('}')
             if self.oflags & OF_UM:
                 s.append('^')

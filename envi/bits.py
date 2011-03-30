@@ -168,6 +168,8 @@ hex_fmt = {
 }
 
 def intwidth(val):
+    if val < 0:
+        val = abs(val)
     ret = 0
     while val:
         ret += 1
@@ -192,6 +194,20 @@ def hex(value, size=None):
 
     return hex_fmt.get(size) % value
 
+def binrepr(intval, bitwidth=None):
+    '''
+    Return a string of one's and zero's for the given value.
+    '''
+    ret = []
+    while intval:
+        ret.append(str(intval & 0x1))
+        intval >>= 1
+    ret.reverse()
+    binstr = ''.join(ret)
+    if bitwidth != None:
+        binstr = binstr.rjust(bitwidth, '0')
+    return binstr
+
 def binary(binstr):
     '''
     Decode a binary string of 1/0's into a python number
@@ -200,4 +216,42 @@ def binary(binstr):
     for c in binstr:
         x = (x << 1) + int(c)
     return x
+
+def binbytes(binstr):
+    '''
+    Decode a binary string of 1/0's into a python binary
+    string.
+    '''
+    if len(binstr) % 8 != 0:
+        raise Exception('Byte padded binary strings only for now!')
+    bytes = ''
+    while binstr:
+        bytes += chr( binary(binstr[:8]) )
+        binstr = binstr[8:]
+    return bytes
+
+def parsebits(bytes, offset, bitoff, bitsize):
+    '''
+    Parse bitsize bits from the bit offset bitoff beginning
+    at offset bytes.
+
+    Example: 
+    '''
+    val = 0
+    cnt = 0
+    addoff = offset + (bitoff / 8)
+    modoff = bitoff % 8
+    o = ord(bytes[addoff])
+    while cnt < bitsize:
+        # bit offset 3 byteoff = 4 (8 - 3) - 1)
+        byteoff = (8 - modoff) - 1
+        val = (val << 1) + ((o >> byteoff) & 1)
+        cnt += 1
+        modoff += 1
+        if modoff == 8:
+            addoff += 1
+            o = ord(bytes[addoff])
+            modoff = 0
+    return val
+
 

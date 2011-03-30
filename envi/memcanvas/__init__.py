@@ -103,7 +103,7 @@ class MemoryCanvas:
         """
         Add text to the canvas with a specified tag.
         """
-        sys.stdout.write(text)
+        sys.stdout.write(text.encode(sys.stdout.encoding,'replace'))
 
     def addNameText(self, text, name=None, typename=None):
         if name == None:

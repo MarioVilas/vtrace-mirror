@@ -1,5 +1,7 @@
 
 import struct
+
+from inspect import isclass
 from StringIO import StringIO
 
 import vstruct.primitives as vs_prims
@@ -27,7 +29,7 @@ class VStruct(vs_prims.v_base):
         '''
         return '%s.%s' % (self.__module__, self._vs_name)
 
-    def vsParse(self, bytes, offset=0):
+    def vsParse(self, sbytes, offset=0):
         """
         For all the primitives contained within, allow them
         an opportunity to parse the given data and return the
@@ -36,9 +38,10 @@ class VStruct(vs_prims.v_base):
         plist = self.vsGetPrims()
         fmt = self.vsGetFormat()
         size = struct.calcsize(fmt)
-        vals = struct.unpack(fmt, bytes[offset:offset+size])
+        vals = struct.unpack(fmt, sbytes[offset:offset+size])
         for i in range(len(plist)):
             plist[i].vsSetParsedValue(vals[i])
+        return offset + size
 
     def vsEmit(self):
         """
@@ -76,12 +79,21 @@ class VStruct(vs_prims.v_base):
             raise Exception("Invalid field: %s" % name)
         return x
 
+    def vsHasField(self, name):
+        return self._vs_values.get(name) != None
+
     def vsSetField(self, name, value):
         if isVstructType(value):
             self._vs_values[name] = value
             return
         x = self._vs_values.get(name)
         return x.vsSetValue(value)
+
+    # FIXME implement more arithmetic for structs...
+    def __ixor__(self, other):
+        for name,value in other._vs_values.items():
+            self._vs_values[name] ^= value
+        return self
 
     def vsAddField(self, name, value):
         if not isVstructType(value):
@@ -194,7 +206,7 @@ class VStruct(vs_prims.v_base):
     def __repr__(self):
         return self._vs_name
 
-    def tree(self, va=0):
+    def tree(self, va=0, reprmax=None):
         ret = ""
         for off, indent, name, field in self.vsGetPrintInfo():
             rstr = field.vsGetTypeName()
@@ -203,7 +215,9 @@ class VStruct(vs_prims.v_base):
                 rstr = '0x%.8x (%d)' % (val,val)
             elif isinstance(field, vs_prims.v_prim):
                 rstr = repr(field)
-            ret += "%.8x%s %s: %s\n" % (va+off, " "*(indent*2),name,rstr)
+            if reprmax != None and len(rstr) > reprmax:
+                rstr = rstr[:reprmax] + '...'
+            ret += "%.8x (%.2d)%s %s: %s\n" % (va+off, len(field), " "*(indent*2),name,rstr)
         return ret
 
 class VArray(VStruct):
@@ -241,7 +255,16 @@ def resolve(impmod, nameparts):
 
     return m
 
-added_structs = {}
+def resolvepath(impmod, pathstr):
+    '''
+    Resolve an object/module from within the given module
+    by path name (ie. 'foo.bar.baz')
+
+    Example: x = resolvepath(vstruct.defs, 'win32.SEH_SCOPETABLE')
+    '''
+    nameparts = pathstr.split('.')
+    return resolve(impmod, nameparts)
+
 # NOTE: Gotta import this *after* VStruct/VSArray defined
 import vstruct.defs as vs_defs
 
@@ -252,47 +275,11 @@ def getStructure(sname):
     addStructure() or a python path (ie. win32.TEB) of a
     definition from within vstruct.defs.
     """
-    s = added_structs.get(sname, None)
-    if s != None:
-        return s()
-
     x = resolve(vs_defs, sname.split("."))
     if x != None:
         return x()
 
     return None
-
-def addStructure(sname, builder):
-    """
-    Add a new structure definition.  This is
-    done by adding a builder which will be called
-    when somebody requests an instance of the
-    new struct.
-    """
-    added_structs[sname] = builder
-
-def buildStructure(name, fields):
-    """
-    Build a structure which was defined at runtime.
-
-    fields is a list of (name, type, kwargs) tuples.
-    """
-    s = VStruct(name)
-    for fname, ftype, kwargs in fields:
-        f = ftype(**kwargs)
-        s.vsAddField(fname, f)
-    return s
-
-class StructureBuilder:
-    def __init__(self, name, fields):
-        self.name = name
-        self.fields = fields
-
-    def __call__(self):
-        return buildStructure(self.name, self.fields)
-
-def addStructureBuilder(name, fields):
-    addStructure(name, StructureBuilder(name, fields))
 
 def getModuleNames():
     return [x for x in dir(vs_defs) if not x.startswith("__")]
@@ -305,7 +292,7 @@ def getStructNames(modname):
 
     for n in dir(mod):
         x = getattr(mod, n)
-        if issubclass(x, VStruct):
+        if isclass(x) and issubclass(x, VStruct):
             ret.append(n)
 
     return ret

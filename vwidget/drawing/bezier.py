@@ -13,7 +13,7 @@ def splitline(pt1, pt2, percent=0.5):
     deltax = (pt2_x - pt1_x) * percent
     deltay = (pt2_y - pt1_y) * percent
 
-    return pt1_x + deltax, pt1_y + deltay
+    return int(pt1_x + deltax), int(pt1_y + deltay)
 
 def calculate_bezier(points, steps = 30):
     '''

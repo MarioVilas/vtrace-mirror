@@ -251,6 +251,8 @@ class FreeBSDMixin:
     def __init__(self):
         self.initMode("Syscall", False, "Break on Syscalls")
         self.kvmh = libkvm.kvm_open(None, None, None, 0, "vtrace")
+        if not os.path.exists('/proc/curproc/file'):
+            raise Exception("VDB needs /proc! (use: mount -t procfs procfs /proc)")
 
     def finiMixin(self):
         print "FIXME I DON'T THINK THIS IS BEING CALLED"
@@ -286,10 +288,15 @@ class FreeBSDMixin:
         if v_posix.ptrace(PT_IO, self.pid, ctypes.addressof(iod), 0) != 0:
             raise Exception("ptrace PT_IO failed to read 0x%.8x" % address)
 
+    @v_base.threadwrap
     def platformAttach(self, pid):
         if v_posix.ptrace(PT_ATTACH, pid, 0, 0) != 0:
             raise Exception("Ptrace Attach Failed")
 
+    def _getExeName(self, pid):
+        return os.readlink('/proc/%d/file' % pid)
+
+    #@v_base.threadwrap
     def platformExec(self, cmdline):
         # Basically just like the one in the Ptrace mixin...
         self.execing = True
@@ -302,6 +309,11 @@ class FreeBSDMixin:
             sys.exit(-1)
         return pid
 
+    def handleAttach(self):
+        self.setMeta('ExeName', self._getExeName(self.pid))
+        return v_posix.PosixMixin.handleAttach(self)
+
+    @v_base.threadwrap
     def platformWait(self):
         status = v_posix.PosixMixin.platformWait(self)
         # Get the thread id from the ptrace interface
@@ -316,28 +328,32 @@ class FreeBSDMixin:
 
         return status
 
+    @v_base.threadwrap
     def platformStepi(self):
         self.stepping = True
         if v_posix.ptrace(PT_STEP, self.pid, 1, 0) != 0:
             raise Exception("ptrace PT_STEP failed!")
 
+    @v_base.threadwrap
     def platformContinue(self):
         cmd = PT_CONTINUE
         if self.getMode("Syscall"):
             cmd = PT_SYSCALL
 
-        sig = self.getMeta("PendingSignal", 0)
+        sig = self.getCurrentSignal()
+        if sig == None:
+            sig = 0
         # In freebsd address is the place to continue from
         # but 1 means use existing EIP
         if v_posix.ptrace(cmd, self.pid, 1, sig) != 0:
             raise Exception("ptrace PT_CONTINUE/PT_SYSCALL failed")
 
-    #def platformExec(self, cmdline):
-
+    @v_base.threadwrap
     def platformDetach(self):
         if v_posix.ptrace(PT_DETACH, self.pid, 1, 0) != 0:
             raise Exception("Ptrace Detach Failed")
 
+    @v_base.threadwrap
     def platformGetThreads(self):
         ret = {}
         cnt = self._getThreadCount()
@@ -348,10 +364,12 @@ class FreeBSDMixin:
             ret[x] = x
         return ret
 
+    @v_base.threadwrap
     def platformSuspendThread(self, tid):
         if v_posix.ptrace(PT_SUSPEND, tid, 0, 0) != 0:
             raise Exception("ptrace PT_SUSPEND failed!")
 
+    @v_base.threadwrap
     def platformResumeThread(self, tid):
         if v_posix.ptrace(PT_RESUME, tid, 0, 0) != 0:
             raise Exception("ptrace PT_RESUME failed!")
@@ -366,14 +384,12 @@ class FreeBSDMixin:
         # FIXME make this not need proc
         ret = []
         mpath = "/proc/%d/map" % self.pid
-        if not os.path.isfile(mpath):
-            raise Exception("Memory maps need /proc! (use: mount -t procfs procfs /proc)")
 
         mapfile = file(mpath, "rb")
         for line in mapfile:
             perms = 0
             fname = ""
-            maptup = line.split(None, 12)
+            maptup = line.split(None)
             base = int(maptup[0], 16)
             max  = int(maptup[1], 16)
             permstr = maptup[5]
@@ -501,6 +517,7 @@ class FreeBSDi386Trace(
         v_i386.i386Mixin.__init__(self)
         FreeBSDMixin.__init__(self)
 
+    @v_base.threadwrap
     def platformGetRegCtx(self, tid):
         ctx = self.archGetRegCtx()
         u = bsd_regs_i386()
@@ -515,6 +532,7 @@ class FreeBSDi386Trace(
 
         return ctx
 
+    @v_base.threadwrap
     def platformSetRegCtx(self, tid, ctx):
         u = bsd_regs_i386()
         ctx._rctx_Export(u)
@@ -541,27 +559,34 @@ class FreeBSDAmd64Trace(
         v_amd64.Amd64Mixin.__init__(self)
         FreeBSDMixin.__init__(self)
 
-    def platformGetRegCtx(self, tid):
-        ctx = self.archGetRegCtx()
+    def _getAmdRegsStruct(self, tid):
+        '''
+        Get (and populate) a register structure
+        (even set regs needs to get it first...)
+        '''
         u = bsd_regs_amd64()
-
         addr = ctypes.addressof(u)
         if v_posix.ptrace(PT_GETREGS, tid, addr, 0) != 0:
             raise Exception("ptrace PT_GETREGS failed!")
         if v_posix.ptrace(PT_GETDBREGS, tid, addr+amd64_DBG_OFF, 0) != 0:
             raise Exception("ptrace PT_GETDBREGS failed!")
+        return u
 
+    @v_base.threadwrap
+    def platformGetRegCtx(self, tid):
+        ctx = self.archGetRegCtx()
+        u = self._getAmdRegsStruct(tid)
         ctx._rctx_Import(u)
-
         return ctx
 
+    @v_base.threadwrap
     def platformSetRegCtx(self, tid, ctx):
-        u = bsd_regs_amd64()
+        u = self._getAmdRegsStruct(tid)
         ctx._rctx_Export(u)
         addr = ctypes.addressof(u)
-        if v_posix.ptrace(PT_SETREGS, self.pid, addr, 0) != 0:
+        if v_posix.ptrace(PT_SETREGS, tid, addr, 0) != 0:
             raise Exception("ptrace PT_SETREGS failed!")
-        if v_posix.ptrace(PT_SETDBREGS, self.pid, addr+amd64_DBG_OFF, 0) != 0:
+        if v_posix.ptrace(PT_SETDBREGS, tid, addr+amd64_DBG_OFF, 0) != 0:
             raise Exception("ptrace PT_SETDBREGS failed!")
 
 

@@ -54,24 +54,21 @@ class i386WatchMixin:
         if size not in [1,2,4]:
             raise Exception("Unsupported watchpoint size %d (x86 supports 1,2,4)" % size)
 
-        regs = self.getRegisters()
-        ctrl = regs.get(dbg_ctrl)
-        if ctrl == None:
-            raise Exception("ERROR: Intel debug ctrl register not found!")
+        ctrl = 0
 
         self.hwdebug[idx] = address
-        drname = drnames[idx]
-        regs[drname] = address
 
-        fouri = 4*idx
         ctrl |= 1 << (2*idx)           # Enabled
         mask = ((size-1) << 2) + pbits # perms and size
         ctrl |= (mask << (16+(4*idx)))
         #ctrl |= 0x100 # Local exact (ignored by p6+ for read)
 
-        regs[dbg_ctrl] = ctrl
-        #print "%s: %.8x debug7: %.8x" % (drname,address,ctrl)
-        self.setRegisters(regs)
+        for tid in self.getThreads().keys():
+            ctx = self.getRegisterContext(tid)
+            ctrl_orig = ctx.getRegister(e_i386.REG_DEBUG7)
+            #print "debug%d: %.8x debug7: %.8x" % (idx,address,ctrl|ctrl_orig)
+            ctx.setRegister(e_i386.REG_DEBUG7, ctrl_orig | ctrl)
+            ctx.setRegister(e_i386.REG_DEBUG0 + idx, address)
         return
 
     def archRemWatchpoint(self, address):
@@ -84,20 +81,20 @@ class i386WatchMixin:
         if idx == None:
             raise Exception("Watchpoint not found at 0x%.8x" % address)
 
-        regs = self.getRegisters()
-        ctrl = regs.get(dbg_ctrl)
-        if ctrl == None:
-            raise Exception("ERROR: Intel debug ctrl register not found!")
-
         self.hwdebug[idx] = 0
 
-        ctrl &= ~(1 << (2*idx))      # we are not enabled
-        ctrl &= ~(0xf << (16+(4*idx))) # mask off the rwx stuff
+        ctrl_disable = ~(1 << (2*idx))      # we are not enabled
+        ctrl_disperm = ~(0xf << (16+(4*idx))) # mask off the rwx stuff
+        ctrl_mask = ctrl_disable & ctrl_disperm
 
-        drname = drnames[idx]
-        regs[drname] = 0
-        regs[dbg_ctrl] = ctrl
-        self.setRegisters(regs)
+        for tid in self.getThreads().keys():
+            ctx = self.getRegisterContext(tid)
+            ctrl = ctx.getRegister(e_i386.REG_DEBUG7)
+            ctrl &= ctrl_mask
+            #print "debug%d: %.8x debug7: %.8x" % (idx,address,ctrl|ctrl_orig)
+            ctx.setRegister(e_i386.REG_DEBUG7, ctrl)
+            ctx.setRegister(e_i386.REG_DEBUG0 + idx, 0)
+        return
 
     def archCheckWatchpoints(self):
         regs = self.getRegisters()
@@ -120,6 +117,8 @@ class i386Mixin(e_i386.i386Module, e_i386.i386RegisterContext, i386WatchMixin):
     def __init__(self):
         # Mixin our i386 envi architecture module and register context
         e_i386.i386Module.__init__(self)
+        # FIXME tracer base should inherit from RegisterContext and we should
+        # just have to load a register definition!
         e_i386.i386RegisterContext.__init__(self)
         i386WatchMixin.__init__(self)
 

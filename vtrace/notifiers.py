@@ -48,9 +48,8 @@ class VerboseNotifier(Notifier):
         if event == vtrace.NOTIFY_ALL:
             print "WTF, how did we get a vtrace.NOTIFY_ALL event?!?!"
         elif event == vtrace.NOTIFY_SIGNAL:
-            print "vtrace.NOTIFY_SIGNAL"
-            print "PendingSignal",trace.getMeta("PendingSignal")
-            print "PendingException",trace.getMeta("PendingException")
+            signo = trace.getCurrentSignal()
+            print "vtrace.NOTIFY_SIGNAL %d (0x%.8x)" % (signo, signo)
             if trace.getMeta("Platform") == "Windows":
                 print repr(trace.getMeta("Win32Event"))
         elif event == vtrace.NOTIFY_BREAK:

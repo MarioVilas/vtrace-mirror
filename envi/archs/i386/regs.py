@@ -13,6 +13,8 @@ MSR_DEBUGCTL_BTINT       = 0x0010 # Branch-trace-interrupt (gen interrupt on BTS
 MSR_DEBUGCTL_BTS_OFF_OS  = 0x0020 # disable ring0 branch trace store
 MSR_DEBUGCTL_BTS_OFF_USR = 0x0040 # disable non-ring0 branch trace store
 
+MSR_SYSENTER_EIP         = 0x0176 # Where is EIP at sysenter?
+
 IA32_DS_AREA_MSR         = 0x0600 # pointer to the configured debug storage area
 
 # Eflags bit masks

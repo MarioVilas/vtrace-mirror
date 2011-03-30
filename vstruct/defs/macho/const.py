@@ -1,7 +1,7 @@
 
 # Fat Defines...
 FAT_MAGIC = 0xcafebabe
-FAT_CIGAM = 0xbebafec   #NXSwapLong(FAT_MAGIC)
+FAT_CIGAM = 0xbebafeca   #NXSwapLong(FAT_MAGIC)
 
 MH_MAGIC                  = 0xfeedface #  the mach magic number 
 MH_CIGAM                  = 0xcefaedfe #  NXSwapInt(MH_MAGIC) 
@@ -70,6 +70,8 @@ LC_CODE_SIGNATURE         = 0x1d #  local of code signature
 LC_SEGMENT_SPLIT_INFO     = 0x1e #  local of info to split segments 
 LC_LAZY_LOAD_DYLIB        = 0x20 #  delay load of dylib until first use 
 LC_ENCRYPTION_INFO        = 0x21 #  encrypted segment information 
+LC_DYLD_INFO              = 0x22 #  compressed dyld information
+
 SG_HIGHVM                 = 0x1 #  the file contents for this segment is forthe high part of the VM space, the low partis zero filled (for stacks in core files) 
 SG_FVMLIB                 = 0x2 #  this segment is the VM that is allocated bya fixed VM library, for overlap checking inthe link editor 
 SG_NORELOC                = 0x4 #  this segment has nothing that was relocatedin it and nothing relocated to it, that isit maybe safely replaced without relocation
@@ -115,14 +117,79 @@ CPU_TYPE_VAX        = 1
 CPU_TYPE_MC680      = 6
 CPU_TYPE_X86        = 7
 CPU_TYPE_X86_64     = 0x01000007
-#CPU_TYPE_MIPS            ((cpu_type_t) 8)        */
-#CPU_TYPE_MC98000 ((cpu_type_t) 10)
-#CPU_TYPE_HPPA           ((cpu_type_t) 11)
-#CPU_TYPE_ARM             ((cpu_type_t) 12)
-#CPU_TYPE_MC88000 ((cpu_type_t) 13)
-#CPU_TYPE_SPARC           ((cpu_type_t) 14)
-#CPU_TYPE_I860            ((cpu_type_t) 15)
-#CPU_TYPE_ALPHA          ((cpu_type_t) 16)       */
-#CPU_TYPE_POWERPC         ((cpu_type_t) 18)
-#CPU_TYPE_POWERPC64               (CPU_TYPE_POWERPC | CPU_ARCH_ABI64)
+CPU_TYPE_MIPS       = 8
+CPU_TYPE_MC98000    = 10
+CPU_TYPE_HPPA       = 11
+CPU_TYPE_ARM        = 12
+CPU_TYPE_MC88000    = 13
+CPU_TYPE_SPARC      = 14
+CPU_TYPE_I860       = 15
+CPU_TYPE_ALPHA      = 16
+CPU_TYPE_POWERPC    = 18
+#CPU_TYPE_POWERPC64  (CPU_TYPE_POWERPC | CPU_ARCH_ABI64)
+
+mach_cpu_names = {
+    CPU_TYPE_VAX        : 'vax',
+    CPU_TYPE_MC680      : 'mc680',
+    CPU_TYPE_X86        : 'i386',
+    CPU_TYPE_X86_64     : 'amd64',
+    CPU_TYPE_MIPS       : 'mips',
+    CPU_TYPE_MC98000    : 'mc98000',
+    CPU_TYPE_HPPA       : 'hppa',
+    CPU_TYPE_ARM        : 'arm',
+    CPU_TYPE_MC88000    : 'mc88000',
+    CPU_TYPE_SPARC      : 'sparc',
+    CPU_TYPE_I860       : 'i860',
+    CPU_TYPE_ALPHA      : 'alpha',
+    CPU_TYPE_POWERPC    : 'powerpc',
+}
+
+# Symbol types
+N_GSYM      = 0x20      # global symbol:                name,,NO_SECT,type,0
+N_FNAME     = 0x22      # procedure name (f77 kludge):  name,,NO_SECT,0,0
+N_FUN       = 0x24      # procedure:                    name,,n_sect,linenumber,address
+N_STSYM     = 0x26      # static symbol:                name,,n_sect,type,address
+N_LCSYM     = 0x28      # .lcomm symbol:                name,,n_sect,type,address
+N_BNSYM     = 0x2e      # begin nsect sym:              0,,n_sect,0,address
+N_PC        = 0x30      # global pascal symbol:         name,,NO_SECT,subtype,line
+N_OPT       = 0x3c      # emitted with gcc2_compile and in gcc source
+N_RSYM      = 0x40      # register sym:                 name,,NO_SECT,type,register
+N_SLINE     = 0x44      # src line:                     0,,n_sect,linenumber,address
+N_ENSYM     = 0x4e      # end nsect sym:                0,,n_sect,0,address
+N_SSYM      = 0x60      # struct elt:                   name,,NO_SECT,type,struct_offset
+N_SO        = 0x64      # source file name:             name,,n_sect,0,address
+N_LSYM      = 0x80      # local sym:                    name,,NO_SECT,type,offset
+N_BINCL     = 0x82      # include file beginning:       name,,NO_SECT,0,sum
+N_SOL       = 0x84      # #included file name:          name,,n_sect,0,address
+N_PARAMS    = 0x86      # compiler parameters:          name,,NO_SECT,0,0
+N_VERSION   = 0x88      # compiler version:             name,,NO_SECT,0,0
+N_OLEVEL    = 0x8A      # compiler -O level:            name,,NO_SECT,0,0
+N_PSYM      = 0xA0      # parameter:                    name,,NO_SECT,type,offset
+N_EINCL     = 0xA2      # include file end:             name,,NO_SECT,0,0
+N_ENTRY     = 0xA4      # alternate entry:              name,,n_sect,linenumber,address
+N_LBRAC     = 0xC0      # left bracket:                 0,,NO_SECT,nesting level,address
+N_EXCL      = 0xC2      # deleted include file:         name,,NO_SECT,0,sum
+N_RBRAC     = 0xE0      # right bracket:                0,,NO_SECT,nesting level,address
+N_BCOMM     = 0xE2      # begin common:                 name,,NO_SECT,0,0
+N_ECOMM     = 0xE4      # end common:                   name,,n_sect,0,0
+N_ECOML     = 0xE8      # end common (local name):      0,,n_sect,0,address
+N_LENG      = 0xFE      # second stab entry with length information
+
+# The n_type field really contains four fields:
+#	unsigned char N_STAB:3,
+#		      N_PEXT:1,
+#		      N_TYPE:3,
+#		      N_EXT:1;
+
+N_STAB  = 0xe0  # if any of these bits set, a symbolic debugging entry
+N_PEXT  = 0x10  # private external symbol bit
+N_TYPE  = 0x0e  # mask for the type bits
+N_EXT   = 0x01  # external symbol bit, set for external symbols
+
+# Values for N_TYPE bits of the n_type field.
+N_UNDF   = 0x0 # undefined, n_sect == NO_SECT
+N_ABS    = 0x2 # absolute, n_sect == NO_SECT
+N_SECT   = 0xe # defined in section number n_sect
+N_PBUD   = 0xc # prebound undefined (defined in a dylib)
+N_INDR   = 0xa # indirect
 

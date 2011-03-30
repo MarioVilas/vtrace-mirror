@@ -1,6 +1,8 @@
 
 import struct
 
+class v_enum: pass
+
 class v_base(object):
     def __init__(self):
         self._vs_meta = {}
@@ -192,7 +194,7 @@ class v_uint16(v_number):
 
 class v_uint32(v_number):
     _vs_builder = True
-    _vs_fmt = "L"
+    _vs_fmt = "I"
 
 class v_uint64(v_number):
     _vs_builder = True
@@ -208,7 +210,7 @@ class v_int16(v_number):
 
 class v_int32(v_number):
     _vs_builder = True
-    _vs_fmt = "l"
+    _vs_fmt = "i"
 
 class v_int64(v_number):
     _vs_builder = True
@@ -219,7 +221,7 @@ pointersize = struct.calcsize("P")
 class v_size_t(v_number):
     _vs_builder = True
     if pointersize == 4:
-        _vs_fmt = "L"
+        _vs_fmt = "I"
     else:
         _vs_fmt = "Q"
 
@@ -231,7 +233,7 @@ class v_ptr(v_size_t):
 
 class v_ptr32(v_ptr):
     _vs_builder = True
-    _vs_fmt = "L"
+    _vs_fmt = "I"
 
 class v_ptr64(v_ptr):
     _vs_builder = True
@@ -338,13 +340,13 @@ class GUID(v_prim):
         gstr = gstr.replace("-","")
         bytes = gstr.decode("hex")
         # Totally cheating... ;)
-        self._guid_fields = struct.unpack(">LHH8B", bytes)
+        self._guid_fields = struct.unpack(">IHH8B", bytes)
 
     def vsSetValue(self, bytes):
-        self._guid_fields = struct.unpack("<LHH8B", bytes)
+        self._guid_fields = struct.unpack("<IHH8B", bytes)
 
     def vsGetValue(self):
-        return struck.pack("<LHH8B", *self._guid_fields)
+        return struck.pack("<IHH8B", *self._guid_fields)
 
     def __repr__(self):
         base = "{%.8x-%.4x-%.4x-%.2x%.2x-%.2x%.2x%.2x%.2x%.2x%.2x}"

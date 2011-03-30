@@ -482,7 +482,7 @@ tbl32_Main = [
 (40, 0, ARG_NONE, ARG_NONE, ARG_NONE, cpu_80386, 0, 0, 0, 0),  
 ( 0, INS_BRANCHCC, ADDRMETH_J | OPTYPE_b | OP_X, ARG_NONE, ARG_NONE, cpu_80386, "loopnz", 0, 0, 0),  
 ( 0, INS_BRANCHCC, ADDRMETH_J | OPTYPE_b | OP_X, ARG_NONE, ARG_NONE, cpu_80386, "loopz", 0, 0, 0),  
-( 0, INS_BRANCH, ADDRMETH_J | OPTYPE_b | OP_X, ARG_NONE, ARG_NONE, cpu_80386, "loop", 0, 0, 0),  
+( 0, INS_BRANCHCC, ADDRMETH_J | OPTYPE_b | OP_X, ARG_NONE, ARG_NONE, cpu_80386, "loop", 0, 0, 0),  
 ( 0, INS_BRANCHCC, ADDRMETH_J | OPTYPE_b | OP_X, ARG_NONE, ARG_NONE, cpu_80386, "jecxz", 0, 0, 0),  
 ( 0, INS_IN, OP_REG | OP_W, ADDRMETH_I | OPTYPE_b | OP_R, ARG_NONE, cpu_80386, "in", e_i386_regs.REG_AL, 0, 0),  
 ( 0, INS_IN, OP_REG | OP_W, ADDRMETH_I | OPTYPE_b | OP_R, ARG_NONE, cpu_80386, "in", e_i386_regs.REG_EAX, 0, 0),  
@@ -910,8 +910,9 @@ tbl32_660F = [
 ( 0, INS_MOV, ADDRMETH_V | OPTYPE_pd | OP_W, ADDRMETH_W | OPTYPE_pd | OP_R, ARG_NONE, cpu_PENTMMX, "haddpd", 0, 0, 0),  #
 ( 0, INS_MOV, ADDRMETH_V | OPTYPE_pd | OP_W, ADDRMETH_W | OPTYPE_pd | OP_R, ARG_NONE, cpu_PENTMMX, "hsubpd", 0, 0, 0),  #
 ( 0, INS_MOV, ADDRMETH_E | OPTYPE_d | OP_W, ADDRMETH_V | OPTYPE_dq | OP_R, ARG_NONE, cpu_PENTMMX, "movd", 0, 0, 0),  #
-( 0, INS_MOV, ADDRMETH_W | OPTYPE_dq | OP_W, ADDRMETH_V | OPTYPE_dq | OP_R, ARG_NONE, cpu_PENTMMX, "movqa", 0, 0, 0),  #
-    ( 0, INS_BRANCHCC, ADDRMETH_J | OPTYPE_z | OP_X, ARG_NONE, ARG_NONE, cpu_80386, "jo", 0, 0, 0),
+( 0, INS_MOV, ADDRMETH_Q | OPTYPE_q | OP_W, ADDRMETH_P | OPTYPE_q | OP_R, ARG_NONE, cpu_PENTMMX, "movq", 0, 0, 0),
+
+( 0, INS_BRANCHCC, ADDRMETH_J | OPTYPE_z | OP_X, ARG_NONE, ARG_NONE, cpu_80386, "jo", 0, 0, 0),
 ( 0, INS_BRANCHCC, ADDRMETH_J | OPTYPE_z | OP_X, ARG_NONE, ARG_NONE, cpu_80386, "jno", 0, 0, 0),
 ( 0, INS_BRANCHCC, ADDRMETH_J | OPTYPE_z | OP_X, ARG_NONE, ARG_NONE, cpu_80386, "jc", 0, 0, 0),
 ( 0, INS_BRANCHCC, ADDRMETH_J | OPTYPE_z | OP_X, ARG_NONE, ARG_NONE, cpu_80386, "jnc", 0, 0, 0),

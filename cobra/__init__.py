@@ -381,6 +381,15 @@ class CobraDaemon(ThreadingTCPServer):
     def getSharedObject(self, name):
         return self.shared.get(name, None)
 
+    def getSharedName(self, obj):
+        '''
+        If this object is shared already, get the name...
+        '''
+        for name, sobj in self.shared.items():
+            if sobj == obj:
+                return name
+        return None
+
     def getRandomName(self):
         ret = ""
         for byte in os.urandom(16):
@@ -692,9 +701,11 @@ class CobraProxy:
         """
         Tell the server we're done with our reference in case it's refcnt'd
         """
-        csock = getCobraSocket(self)
         try:
+            csock = getCobraSocket(self)
             csock.cobraTransaction(COBRA_GOODBYE, self.__dict__["__cobra_name"], "")
+        except socket.error, e:
+            if verbose: print "Probably Harmless: %s" % e
         except CobraException, e:
             if verbose: print "Probably Harmless: %s" % e
 
