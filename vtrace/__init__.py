@@ -1300,6 +1300,10 @@ def getTrace():
     This is the function you will use to get a tracer object
     with the appropriate ancestry for your host.
     ex. mytrace = vtrace.getTrace()
+
+    NOTE: Use the release() method on the tracer once debugging
+          is complete.  This releases the tracer thread and allows
+          garbage collection to function correctly.
     """
 
     if remote: #We have a remote server!

@@ -355,13 +355,13 @@ class FAST_IO_DISPATCH(vstruct.VStruct):
         self.ReleaseForCcFlush = v_ptr32()
 
 
-class ACCESS_STATE::__unnamed(vstruct.VStruct):
+class ACCESS_STATE(vstruct.VStruct):
     def __init__(self):
         vstruct.VStruct.__init__(self)
         self.InitialPrivilegeSet = INITIAL_PRIVILEGE_SET()
 
 
-class LARGE_INTEGER::__unnamed(vstruct.VStruct):
+class LARGE_INTEGER(vstruct.VStruct):
     def __init__(self):
         vstruct.VStruct.__init__(self)
         self.LowPart = v_uint32()
@@ -389,7 +389,7 @@ class IO_RESOURCE_DESCRIPTOR(vstruct.VStruct):
         self.Spare1 = v_uint8()
         self.Flags = v_uint16()
         self.Spare2 = v_uint16()
-        self.u = IO_RESOURCE_DESCRIPTOR::__unnamed()
+        self.u = IO_RESOURCE_DESCRIPTOR()
 
 
 class EX_PUSH_LOCK_CACHE_AWARE(vstruct.VStruct):
@@ -398,7 +398,7 @@ class EX_PUSH_LOCK_CACHE_AWARE(vstruct.VStruct):
         self.Locks = vstruct.VArray([ v_ptr32() for i in xrange(1) ])
 
 
-class EX_PUSH_LOCK::__unnamed::__unnamed(vstruct.VStruct):
+class EX_PUSH_LOCK(vstruct.VStruct):
     def __init__(self):
         vstruct.VStruct.__init__(self)
         self.Waiting = v_uint32()
@@ -448,7 +448,7 @@ class IMAGE_OPTIONAL_HEADER(vstruct.VStruct):
         self.DataDirectory = vstruct.VArray([ IMAGE_DATA_DIRECTORY() for i in xrange(16) ])
 
 
-class OWNER_ENTRY::__unnamed(vstruct.VStruct):
+class OWNER_ENTRY(vstruct.VStruct):
     def __init__(self):
         vstruct.VStruct.__init__(self)
         self.OwnerCount = v_uint32()
@@ -483,10 +483,10 @@ class VPB(vstruct.VStruct):
         self.VolumeLabel = vstruct.VArray([ v_uint16() for i in xrange(32) ])
 
 
-class IO_RESOURCE_DESCRIPTOR::__unnamed(vstruct.VStruct):
+class IO_RESOURCE_DESCRIPTOR(vstruct.VStruct):
     def __init__(self):
         vstruct.VStruct.__init__(self)
-        self.Port = IO_RESOURCE_DESCRIPTOR::__unnamed::__unnamed()
+        self.Port = IO_RESOURCE_DESCRIPTOR()
 
 
 class tagWin32AllocStats(vstruct.VStruct):
@@ -521,7 +521,7 @@ class ENTRY(vstruct.VStruct):
         self.pUser = v_ptr32()
 
 
-class IRP::__unnamed::__unnamed::__unnamed(vstruct.VStruct):
+class IRP(vstruct.VStruct):
     def __init__(self):
         vstruct.VStruct.__init__(self)
         self.ListEntry = LIST_ENTRY()
@@ -553,7 +553,7 @@ class LUID_AND_ATTRIBUTES(vstruct.VStruct):
         self.Attributes = v_uint32()
 
 
-class IRP::__unnamed::__unnamed(vstruct.VStruct):
+class IRP(vstruct.VStruct):
     def __init__(self):
         vstruct.VStruct.__init__(self)
         self.DeviceQueueEntry = KDEVICE_QUEUE_ENTRY()
@@ -601,7 +601,7 @@ class KTHREAD(vstruct.VStruct):
         vstruct.VStruct.__init__(self)
 
 
-class IO_STACK_LOCATION::__unnamed::__unnamed::__unnamed(vstruct.VStruct):
+class IO_STACK_LOCATION(vstruct.VStruct):
     def __init__(self):
         vstruct.VStruct.__init__(self)
         self.ReplaceIfExists = v_uint8()
@@ -609,7 +609,7 @@ class IO_STACK_LOCATION::__unnamed::__unnamed::__unnamed(vstruct.VStruct):
         self._pad0004 = v_bytes(size=2)
 
 
-class IO_STATUS_BLOCK::__unnamed(vstruct.VStruct):
+class IO_STATUS_BLOCK(vstruct.VStruct):
     def __init__(self):
         vstruct.VStruct.__init__(self)
         self.Status = v_uint32()
@@ -684,7 +684,7 @@ class FILE_NETWORK_OPEN_INFORMATION(vstruct.VStruct):
         self._pad0038 = v_bytes(size=4)
 
 
-class GENERAL_LOOKASIDE::__unnamed(vstruct.VStruct):
+class GENERAL_LOOKASIDE(vstruct.VStruct):
     def __init__(self):
         vstruct.VStruct.__init__(self)
         self.LastAllocateMisses = v_uint32()
@@ -703,10 +703,10 @@ class OBJECT_HANDLE_INFORMATION(vstruct.VStruct):
         self.GrantedAccess = v_uint32()
 
 
-class IRP::__unnamed(vstruct.VStruct):
+class IRP(vstruct.VStruct):
     def __init__(self):
         vstruct.VStruct.__init__(self)
-        self.Overlay = IRP::__unnamed::__unnamed()
+        self.Overlay = IRP()
         self._pad0030 = v_bytes(size=8)
 
 
@@ -752,10 +752,10 @@ class EX_PUSH_LOCK(vstruct.VStruct):
         self.Waiting = v_uint32()
 
 
-class CM_PARTIAL_RESOURCE_DESCRIPTOR::__unnamed(vstruct.VStruct):
+class CM_PARTIAL_RESOURCE_DESCRIPTOR(vstruct.VStruct):
     def __init__(self):
         vstruct.VStruct.__init__(self)
-        self.Generic = CM_PARTIAL_RESOURCE_DESCRIPTOR::__unnamed::__unnamed()
+        self.Generic = CM_PARTIAL_RESOURCE_DESCRIPTOR()
 
 
 class SECTION_OBJECT_POINTERS(vstruct.VStruct):
@@ -786,7 +786,7 @@ class tagVSTATE(vstruct.VStruct):
         self.lePoolTrackerHead = LIST_ENTRY()
 
 
-class EX_RUNDOWN_REF::__unnamed(vstruct.VStruct):
+class EX_RUNDOWN_REF(vstruct.VStruct):
     def __init__(self):
         vstruct.VStruct.__init__(self)
         self.Count = v_uint32()
@@ -827,7 +827,7 @@ class ACCESS_STATE(vstruct.VStruct):
         self.SubjectSecurityContext = SECURITY_SUBJECT_CONTEXT()
         self.SecurityDescriptor = v_ptr32()
         self.AuxData = v_ptr32()
-        self.Privileges = ACCESS_STATE::__unnamed()
+        self.Privileges = ACCESS_STATE()
         self.AuditPrivileges = v_uint8()
         self._pad0064 = v_bytes(size=3)
         self.ObjectName = UNICODE_STRING()
@@ -877,7 +877,7 @@ class WAIT_CONTEXT_BLOCK(vstruct.VStruct):
         self.BufferChainingDpc = v_ptr32()
 
 
-class EX_PUSH_LOCK::__unnamed(vstruct.VStruct):
+class EX_PUSH_LOCK(vstruct.VStruct):
     def __init__(self):
         vstruct.VStruct.__init__(self)
         self.Waiting = v_uint32()
@@ -975,7 +975,7 @@ class OBJECT_TYPE(vstruct.VStruct):
         self.ObjectLocks = vstruct.VArray([ ERESOURCE() for i in xrange(4) ])
 
 
-class DEVICE_OBJECT::__unnamed(vstruct.VStruct):
+class DEVICE_OBJECT(vstruct.VStruct):
     def __init__(self):
         vstruct.VStruct.__init__(self)
         self.ListEntry = LIST_ENTRY()
@@ -993,7 +993,7 @@ class DISPATCHER_HEADER(vstruct.VStruct):
         self.WaitListHead = LIST_ENTRY()
 
 
-class IRP::__unnamed::__unnamed::__unnamed::__unnamed(vstruct.VStruct):
+class IRP(vstruct.VStruct):
     def __init__(self):
         vstruct.VStruct.__init__(self)
         self.CurrentStackLocation = v_ptr32()
@@ -1041,7 +1041,7 @@ class SCSI_REQUEST_BLOCK(vstruct.VStruct):
         vstruct.VStruct.__init__(self)
 
 
-class IO_STACK_LOCATION::__unnamed::__unnamed::__unnamed::__unnamed(vstruct.VStruct):
+class IO_STACK_LOCATION(vstruct.VStruct):
     def __init__(self):
         vstruct.VStruct.__init__(self)
         self.ReplaceIfExists = v_uint8()
@@ -1077,7 +1077,7 @@ class DEVICE_OBJECT(vstruct.VStruct):
         self.DeviceType = v_uint32()
         self.StackSize = v_uint8()
         self._pad0034 = v_bytes(size=3)
-        self.Queue = DEVICE_OBJECT::__unnamed()
+        self.Queue = DEVICE_OBJECT()
         self.AlignmentRequirement = v_uint32()
         self.DeviceQueue = KDEVICE_QUEUE()
         self.Dpc = KDPC()
@@ -1187,7 +1187,7 @@ class NPAGED_LOOKASIDE_LIST(vstruct.VStruct):
         self._pad0050 = v_bytes(size=4)
 
 
-class ULARGE_INTEGER::__unnamed(vstruct.VStruct):
+class ULARGE_INTEGER(vstruct.VStruct):
     def __init__(self):
         vstruct.VStruct.__init__(self)
         self.LowPart = v_uint32()
@@ -1217,7 +1217,7 @@ class TL(vstruct.VStruct):
         self.pfnFree = v_ptr32()
 
 
-class IO_STACK_LOCATION::__unnamed::__unnamed(vstruct.VStruct):
+class IO_STACK_LOCATION(vstruct.VStruct):
     def __init__(self):
         vstruct.VStruct.__init__(self)
         self.Argument1 = v_ptr32()
@@ -1226,7 +1226,7 @@ class IO_STACK_LOCATION::__unnamed::__unnamed(vstruct.VStruct):
         self.Argument4 = v_ptr32()
 
 
-class CM_PARTIAL_RESOURCE_DESCRIPTOR::__unnamed::__unnamed(vstruct.VStruct):
+class CM_PARTIAL_RESOURCE_DESCRIPTOR(vstruct.VStruct):
     def __init__(self):
         vstruct.VStruct.__init__(self)
         self.DataSize = v_uint32()
@@ -1234,7 +1234,7 @@ class CM_PARTIAL_RESOURCE_DESCRIPTOR::__unnamed::__unnamed(vstruct.VStruct):
         self.Reserved2 = v_uint32()
 
 
-class ERESOURCE::__unnamed(vstruct.VStruct):
+class ERESOURCE(vstruct.VStruct):
     def __init__(self):
         vstruct.VStruct.__init__(self)
         self.Address = v_ptr32()
@@ -1247,14 +1247,14 @@ class IO_STACK_LOCATION(vstruct.VStruct):
         self.MinorFunction = v_uint8()
         self.Flags = v_uint8()
         self.Control = v_uint8()
-        self.Parameters = IO_STACK_LOCATION::__unnamed()
+        self.Parameters = IO_STACK_LOCATION()
         self.DeviceObject = v_ptr32()
         self.FileObject = v_ptr32()
         self.CompletionRoutine = v_ptr32()
         self.Context = v_ptr32()
 
 
-class IO_RESOURCE_DESCRIPTOR::__unnamed::__unnamed(vstruct.VStruct):
+class IO_RESOURCE_DESCRIPTOR(vstruct.VStruct):
     def __init__(self):
         vstruct.VStruct.__init__(self)
         self.Priority = v_uint32()
@@ -1286,7 +1286,7 @@ class IRP(vstruct.VStruct):
         self.Size = v_uint16()
         self.MdlAddress = v_ptr32()
         self.Flags = v_uint32()
-        self.AssociatedIrp = IRP::__unnamed()
+        self.AssociatedIrp = IRP()
         self.ThreadListEntry = LIST_ENTRY()
         self.IoStatus = IO_STATUS_BLOCK()
         self.RequestorMode = v_uint8()
@@ -1299,10 +1299,10 @@ class IRP(vstruct.VStruct):
         self.AllocationFlags = v_uint8()
         self.UserIosb = v_ptr32()
         self.UserEvent = v_ptr32()
-        self.Overlay = IRP::__unnamed()
+        self.Overlay = IRP()
         self.CancelRoutine = v_ptr32()
         self.UserBuffer = v_ptr32()
-        self.Tail = IRP::__unnamed()
+        self.Tail = IRP()
 
 
 class OBJECT_NAME_INFORMATION(vstruct.VStruct):
@@ -1412,10 +1412,10 @@ class DRIVER_EXTENSION(vstruct.VStruct):
         self.ServiceKeyName = UNICODE_STRING()
 
 
-class IO_STACK_LOCATION::__unnamed(vstruct.VStruct):
+class IO_STACK_LOCATION(vstruct.VStruct):
     def __init__(self):
         vstruct.VStruct.__init__(self)
-        self.Create = IO_STACK_LOCATION::__unnamed::__unnamed()
+        self.Create = IO_STACK_LOCATION()
 
 
 class KDEVICE_QUEUE_ENTRY(vstruct.VStruct):
@@ -1446,7 +1446,7 @@ class IO_RESOURCE_REQUIREMENTS_LIST(vstruct.VStruct):
         self.List = vstruct.VArray([ IO_RESOURCE_LIST() for i in xrange(1) ])
 
 
-class SLIST_HEADER::__unnamed(vstruct.VStruct):
+class SLIST_HEADER(vstruct.VStruct):
     def __init__(self):
         vstruct.VStruct.__init__(self)
         self.Next = SINGLE_LIST_ENTRY()
@@ -1460,7 +1460,7 @@ class CM_PARTIAL_RESOURCE_DESCRIPTOR(vstruct.VStruct):
         self.Type = v_uint8()
         self.ShareDisposition = v_uint8()
         self.Flags = v_uint16()
-        self.u = CM_PARTIAL_RESOURCE_DESCRIPTOR::__unnamed()
+        self.u = CM_PARTIAL_RESOURCE_DESCRIPTOR()
 
 
 

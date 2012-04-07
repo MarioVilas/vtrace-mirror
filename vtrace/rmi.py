@@ -71,7 +71,7 @@ def getCallbackProxy(trace, notifier):
     """
     global callback_daemon
     port = getCallbackPort()
-    host, nothing = cobra.getCobraSocket(trace).getSockName()
+    host, nothing = trace._cobra_getsock().getSockName()
     unique = callback_daemon.getSharedName(notifier)
     if unique == None:
         unique = md5.md5(os.urandom(20)).hexdigest()

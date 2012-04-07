@@ -37,7 +37,6 @@ class ArchitectureModule:
     def __init__(self, archname, maxinst=32):
         self._arch_name = archname
         self._arch_maxinst = maxinst
-        self._arch_call_convs = {}
 
     def archGetBreakInstr(self):
         """
@@ -77,20 +76,6 @@ class ArchitectureModule:
         """
         raise ArchNotImplemented("pointerString")
 
-    def addCallingConvention(self, name, obj):
-        self._arch_call_convs[name] = obj
-
-    def hasCallingConvention(self, name):
-        if self._arch_call_convs.get(name) != None:
-            return True
-        return False
-
-    def getCallingConvention(self, name):
-        return self._arch_call_conv.get(name)
-
-    def getCallingConventions(self):
-        return self._arch_call_convs.items()
-
 def stealArchMethods(obj, archname):
     '''
     Used by objects which are expected to inherit from an
@@ -101,17 +86,6 @@ def stealArchMethods(obj, archname):
         o = getattr(arch, name, None)
         if type(o) == types.MethodType:
             setattr(obj, name, o)
-
-################################################################
-#
-# FIXME going away and becomming part of opcode.
-#
-    def getStackDelta(self, op):
-        """
-        If the given opcode instruction changes the value of the
-        stack pointer, return the delta from that opcode...
-        """
-        raise ArchNotImplemented("getStackDelta")
 
 class EnviException(Exception):
     def __str__(self):
@@ -406,7 +380,7 @@ class Opcode:
     def getOperands(self):
         return list(self.opers)
 
-class Emulator(e_reg.RegisterContext, e_mem.IMemory):
+class Emulator(e_reg.RegisterContext, e_mem.MemoryObject):
     """
     The Emulator class is mostly "Abstract" in the java
     Interface sense.  The emulator should be able to
@@ -419,24 +393,14 @@ class Emulator(e_reg.RegisterContext, e_mem.IMemory):
     The intention is for "light weight" emulation to be
     implemented mostly for user-space emulation of 
     protected mode execution.
-
-    Additionally, the envi Emulator is capable of "partially defined
-    emulation" which is triggered by any registers or memory reads having
-    the value None (not 0).  In these cases, special exceptions may be used
-    to manage execution flow and determine whatever is possible from the 
-    PDE process that reversers typically do in their heads.
     """
-    def __init__(self, segs=None, memobj=None):
-        e_mem.IMemory.__init__(self)
+    def __init__(self, archmod=None):
+
+        e_mem.MemoryObject.__init__(self, archmod=archmod)
         e_reg.RegisterContext.__init__(self)
 
-        if segs == None:
-            segs = [(0,0xffffffff),]
-
-        self.segments = segs
-
-        # Save off the memory object
-        self.setMemoryObject(memobj)
+        self._emu_segments = [ (0, 0xffffffff), ]
+        self._emu_call_convs = {}
 
         # Automagically setup an instruction mnemonic handler dict
         # by finding all methods starting with i_ and assume they
@@ -448,6 +412,9 @@ class Emulator(e_reg.RegisterContext, e_mem.IMemory):
             if name.startswith("i_"):
                 self.op_methods[name[2:]] = getattr(self, name)
 
+    def getArchModule(self):
+        raise Exception('Emulators *must* implement getArchModule()!')
+
     def getEmuSnap(self):
         """
         Return the data needed to "snapshot" this emulator.  For most
@@ -455,38 +422,13 @@ class Emulator(e_reg.RegisterContext, e_mem.IMemory):
         and register values with it)
         """
         regs = self.getRegisterSnap()
-        mem = self.memobj.getMemorySnap()
+        mem = self.getMemorySnap()
         return regs,mem
 
     def setEmuSnap(self, snap):
         regs,mem = snap
         self.setRegisterSnap(regs)
-        self.memobj.setMemorySnap(mem)
-
-    def getSegmentInfo(self, op):
-        idx = self.getSegmentIndex(op)
-        return self.segments[idx]
-
-    def getSegmentIndex(self, op):
-        """
-        The *default* segmentation is none (most arch's will over-ride).
-        This method may be implemented to return a segment index based on either
-        emulator state or properties of the particular instruction in question.
-        """
-        return 0
-
-    def setSegmentInfo(self, idx, base, size):
-        self.segments[idx] = (base,size)
-
-    def setMemoryObject(self, memobj):
-        """
-        Give the emulator a memory object to use for reads and writes.
-        A memory object must implement the methods from the base MemoryObject.
-        """
-        self.memobj = memobj
-
-    def getMemoryObject(self):
-        return self.memobj
+        self.setMemorySnap(mem)
 
     def executeOpcode(self, opobj):
         """
@@ -508,32 +450,30 @@ class Emulator(e_reg.RegisterContext, e_mem.IMemory):
 
     def stepi(self):
         pc = self.getProgramCounter()
-        bytes = self.readMemory(pc, 32)
-        op = self.makeOpcode(bytes, va=pc)
+        op = self.parseOpcode(pc)
         self.executeOpcode(op)
 
-#############################################################
-#
-# NOTE: Although we are an IMemory object, our primitive
-# reads/writes/maps go to another...
-#
-    def readMemory(self, va, size):
-        """
-        Read memory bytes in the emulated environment.
-        For partially-defined emulation, this may return None when
-        the state is unknown.
-        """
-        return self.memobj.readMemory(va, size)
+    def getSegmentInfo(self, op):
+        idx = self.getSegmentIndex(op)
+        return self._emu_segments[idx]
 
-    def writeMemory(self, va, bytes):
+    def getSegmentIndex(self, op):
         """
-        Write memory in the emulation Environment
+        The *default* segmentation is none (most arch's will over-ride).
+        This method may be implemented to return a segment index based on either
+        emulator state or properties of the particular instruction in question.
         """
-        return self.memobj.writeMemory(va, bytes)
+        return 0
 
-    def getMemoryMaps(self):
-        return self.memobj.getMemoryMaps()
-#############################################################
+    def setSegmentInfo(self, idx, base, size):
+        '''
+        Set a base and size for a given segment index.
+        '''
+        if len(self._emu_segments) - idx == 0:
+            self._emu_segments.append( (base, size) )
+            return
+
+        self._emu_segments[idx] = (base,size)
 
     def getOperValue(self, op, idx):
         """
@@ -570,8 +510,7 @@ class Emulator(e_reg.RegisterContext, e_mem.IMemory):
 
         Usage: getCallArgs(3, "stdcall") -> (0, 32, 0xf00)
         """
-        # use _arch_call_convs assuming we are an ArchitectureModule
-        c = self._arch_call_convs.get(cc, None)
+        c = self._emu_call_convs.get(cc, None)
         if c == None:
             raise UnknownCallingConvention(cc)
 
@@ -585,11 +524,25 @@ class Emulator(e_reg.RegisterContext, e_mem.IMemory):
         care of any argument cleanup or other return time tasks
         for the calling convention)
         """
-        c = self._arch_call_convs.get(cc, None)
+        c = self._emu_call_convs.get(cc, None)
         if c == None:
             raise UnknownCallingConvention(cc)
 
         return c.setReturnValue(self, value, argc)
+
+    def addCallingConvention(self, name, obj):
+        self._emu_call_convs[name] = obj
+
+    def hasCallingConvention(self, name):
+        if self._emu_call_convs.get(name) != None:
+            return True
+        return False
+
+    def getCallingConvention(self, name):
+        return self._emu_call_conv.get(name)
+
+    def getCallingConventions(self):
+        return self._emu_call_convs.items()
 
 class CallingConvention:
     """

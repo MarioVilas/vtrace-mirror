@@ -182,7 +182,7 @@ class MemoryView(vw_views.VTextView, e_canvas.MemoryCanvas):
               rend != self.currend ):
 
 
-            self.render(va, size, rend=rend)
+            self.renderMemory(va, size, rend=rend)
 
     def goto(self, va, size=None, rend=None):
         if size == None:
@@ -240,7 +240,7 @@ class MemoryView(vw_views.VTextView, e_canvas.MemoryCanvas):
             #self.memwin.eentry.set_text(hex(va))
 
     @idlethreadsync
-    def render(self, va, size, rend=None):
+    def renderMemory(self, va, size, rend=None):
         self.vwClearText()
         self.iter = self.vwGetAppendIter()
 
@@ -389,7 +389,7 @@ class ScrolledMemoryView(MemoryView):
     def goto(self, va, size=None, rend=None):
         if size == None:
             size = self.lastsize
-        self.render(va, size, rend=rend)
+        self.renderMemory(va, size, rend=rend)
 
     def vwClearText(self):
         pass

@@ -45,6 +45,7 @@ def iterPcapFile(fd, reuse=False):
     pkt = PCAP_PACKET_HEADER()
     eII = vs_inet.ETHERII()
 
+    pktsize = len(pkt)
     eIIsize = len(eII)
 
     ipv4 = vs_inet.IPv4()
@@ -54,8 +55,8 @@ def iterPcapFile(fd, reuse=False):
     go = True
     while go:
 
-        hdr = fd.read(len(pkt))
-        if hdr == '':
+        hdr = fd.read(pktsize)
+        if len(hdr) != pktsize:
             break
 
         pkt.vsParse(hdr)

@@ -1,6 +1,6 @@
 import re
-
 import struct
+
 import envi
 
 """
@@ -64,6 +64,9 @@ class IMemory:
         # If the specified an arch module, use that!
         if archmod != None:
             self.imem_psize = archmod.getPointerSize()
+
+    def getPointerSize(self):
+        return self.imem_arch.getPointerSize()
 
     def readMemory(self, va, size):
         """
@@ -255,16 +258,14 @@ class IMemory:
 
 class MemoryObject(IMemory):
 
-    def __init__(self, maps=()):
+    def __init__(self, archmod=None):
         """
         Take a set of memory maps (va, perms, fname, bytes) and put them in
         a sparse space finder. You may specify your own page-size to optimize
         the search for an architecture.
         """
-        IMemory.__init__(self)
+        IMemory.__init__(self, archmod=archmod)
         self._map_defs = []
-        for va,perms,fname,bytes in maps:
-            self.addMemoryMap(va, perms, fname, bytes)
 
     #FIXME MemoryObject: def allocateMemory(self, size, perms=MM_RWX, suggestaddr=0):
 

@@ -31,27 +31,13 @@ class ArmModule(envi.ArchitectureModule):
     def pointerString(self, va):
         return "0x%.8x" % va
 
-    def prdisp(self, o):
-        # Just a displacement print helper
-        dabs = abs(o.disp)
-        if dabs > 4096:
-            if o.disp < 0:
-                return "- 0x%.8x" % dabs
-            else:
-                return "+ 0x%.8x" % dabs
-        else:
-            if o.disp < 0:
-                return "- %d" % dabs
-            else:
-                return "+ %d" % dabs
-
     def makeOpcode(self, bytes, offset=0, va=0):
         """
         Parse a sequence of bytes out into an envi.Opcode instance.
         """
         return self._arch_dis.disasm(bytes, offset, va)
 
-    #def getEmulator(self):
-        #return ArmEmulator()
+    def getEmulator(self):
+        return ArmEmulator()
 
 from envi.archs.arm.emu import *

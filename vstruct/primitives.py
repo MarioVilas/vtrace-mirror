@@ -27,6 +27,7 @@ class v_prim(v_base):
         self._vs_value = None
         self._vs_length = None
         self._vs_fmt = None
+        self._vs_align = None
 
     def vsIsPrim(self):
         return True
@@ -302,6 +303,7 @@ class v_bytes(v_prim):
             vbytes = '\x00' * size
         self._vs_length = len(vbytes)
         self._vs_value = vbytes
+        self._vs_align = 1
 
     def vsSetValue(self, val):
         if len(val) != self._vs_length:
@@ -339,6 +341,7 @@ class v_str(v_prim):
         v_prim.__init__(self)
         self._vs_length = size
         self._vs_value = val.ljust(size, '\x00')
+        self._vs_align = 1
 
     def vsParse(self, fbytes, offset=0):
         offend = offset + self._vs_length
@@ -377,6 +380,7 @@ class v_wstr(v_str):
         self._vs_length = len(b)
         self._vs_value = b
         self._vs_encode = encode
+        self._vs_align = 2
 
     def vsParse(self, fbytes, offset=0):
         offend = offset + self._vs_length

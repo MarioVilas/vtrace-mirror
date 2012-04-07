@@ -410,7 +410,7 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
             size = self.parseExpression(argv[1])
 
         self.vprint("Dissassembly:")
-        self.canvas.render(addr, size, rend=self.opcoderend)
+        self.canvas.renderMemory(addr, size, rend=self.opcoderend)
 
     def do_var(self, line):
         """

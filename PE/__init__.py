@@ -1,5 +1,8 @@
 import os
 import struct
+
+from cStringIO import StringIO
+
 import vstruct
 import vstruct.defs.pe as vs_pe
 
@@ -349,7 +352,7 @@ class PE(object):
         self.high_bit_mask = 0x80000000
 
         self.IMAGE_DOS_HEADER = vstruct.getStructure("pe.IMAGE_DOS_HEADER")
-        dosbytes = fd.read(len(self.IMAGE_DOS_HEADER))
+        dosbytes = self.readAtOffset(0, len(self.IMAGE_DOS_HEADER))
         self.IMAGE_DOS_HEADER.vsParse(dosbytes)
 
         nt = self.readStructAtOffset(self.IMAGE_DOS_HEADER.e_lfanew,
@@ -455,6 +458,17 @@ class PE(object):
         '''
         return self.ResourceRoot.getResourceDef(rtype, name_id)
 
+    def getResources(self):
+        '''
+        Get the (rtype, nameid, (rva, size, codepage)) tuples for each
+        resource in the PE.
+        '''
+        ret = []
+        for rtype,subdir in self.ResourceRoot._rsrc_subdirs.items():
+            for nameid, subsubdir in subdir._rsrc_subdirs.items():
+                ret.append( (rtype, nameid, subsubdir._rsrc_data[0]) )
+        return ret
+
     def readResource(self, rtype, name_id):
         '''
         Return the bytes which define the specified resource.  Returns
@@ -536,6 +550,7 @@ class PE(object):
                 #print dirent.tree()
 
     def parseSections(self):
+
         self.sections = []
         off = self.IMAGE_DOS_HEADER.e_lfanew + len(self.IMAGE_NT_HEADERS)
 
@@ -762,7 +777,6 @@ class PE(object):
         if not funcoff or not ordoff and not nameoff or funcsize > 0x7FFF:
             return
     
-    
         funcbytes = self.readAtOffset(funcoff, funcsize)
 
         namebytes = self.readAtOffset(nameoff, namesize)
@@ -874,7 +888,7 @@ def peFromFileName(fname):
     f = file(fname, "rb")
     return PE(f)
 
-def peFromBytes(bytes):
-    pass
-    #make a cStringIO thing
+def peFromBytes(fbytes):
+    fd = StringIO(fbytes)
+    return PE(fd)
 

@@ -143,9 +143,8 @@ class CodeFlowContext(object):
                     if bva != va + len(op):
                         calls_from[bva] = True
 
-                else:
-                    if not opdone.get(bva):
-                        optodo.append(bva)
+                if not opdone.get(bva):
+                    optodo.append(bva)
 
         return calls_from.keys()
 

@@ -62,15 +62,13 @@ class Amd64Call(envi.CallingConvention):
 
 amd64call = Amd64Call()
 
-class Amd64Emulator(Amd64Module, Amd64RegisterContext, e_i386.IntelEmulator):
+class Amd64Emulator(Amd64RegisterContext, e_i386.IntelEmulator):
     def __init__(self):
         e_i386.IntelEmulator.__init__(self)
         # The above sets up the intel reg context, so we smash over it
         Amd64RegisterContext.__init__(self)
-        Amd64Module.__init__(self)
         # For the format calls in reading memory
         self.imem_psize = 8
         self.addCallingConvention("amd64call", amd64call)
-
 
 

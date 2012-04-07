@@ -15,7 +15,8 @@ def usage():
     print 'Usage: vdb [options]'
     print '\t-S\t\tServer mode (start a vtrace server)'
     print '\t-v\t\tVerbose mode'
-    print '\t-G\t\tDo the GUI thang...'
+    print '\t-G\t\t(depreicated) GTK gui...'
+    print '\t=Q\t\tQT gui!'
     print '\t-r\t\tRun after attach'
     print '\t-R <host>\tConnect to remote vdb server.'
     print '\t-p <pid> \tAttach to the given pid.'
@@ -43,15 +44,20 @@ if __name__ == "__main__":
     trace = None
 
     try:
-        opts,args = getopt.getopt(sys.argv[1:], "e:R:vGSp:s:c:r", ['gdb-server=',])
+        opts,args = getopt.getopt(sys.argv[1:], "e:QR:vGSp:s:c:r", ['gdb-server=',])
     except:
         usage()
 
+    do_qt = False
     do_gui = False
 
     for opt,optarg in opts:
-        if "R" in opt:
+
+        if opt == '-R':
             vtrace.remote = optarg
+
+        elif opt == '-Q':
+            do_qt = True
 
         elif opt == "-c":
             cmd = optarg
@@ -101,6 +107,13 @@ if __name__ == "__main__":
         vw_main.mainthread()
         vgui = vdb.gui.VdbGui(db)
 
+    if do_qt:
+        import vqt.main as vq_main
+        import vdb.qt.windows as v_q_windows
+        vq_main.startup()
+        qgui = v_q_windows.VdbWindow(db)
+        qgui.show()
+
     if pidstr != None:
         db.do_attach(pidstr)
 
@@ -113,6 +126,9 @@ if __name__ == "__main__":
     if do_gui:
 
         vw_main.main()
+
+    elif do_qt:
+        vq_main.main()
 
     else:
 

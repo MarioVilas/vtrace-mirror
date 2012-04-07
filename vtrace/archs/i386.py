@@ -167,10 +167,10 @@ class i386Mixin(e_i386.i386Module, e_i386.i386RegisterContext, i386WatchMixin):
 
         # Args are 
         #finalargs.reverse()
-        buf = struct.pack("<%dL" % len(finalargs), *finalargs) + buf
+        buf = struct.pack("<%dI" % len(finalargs), *finalargs) + buf
 
         # Saved EIP is target addr so when we hit the break...
-        buf = struct.pack("<L", address) + buf
+        buf = struct.pack("<I", address) + buf
         # Calc the new stack pointer
         newsp = sp-len(buf)
         # Write the stack buffer in
