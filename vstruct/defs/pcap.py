@@ -66,7 +66,7 @@ def iterPcapFile(fd, reuse=False):
 
         if linktype == PCAP_LINKTYPE_ETHER:
 
-            if len(b) < eIIlen:
+            if len(b) < eIIsize:
                 continue
 
             eII.vsParse(b, 0)

@@ -1,4 +1,4 @@
-
+import os
 import struct
 import vstruct
 import vstruct.defs.pe as vs_pe
@@ -175,23 +175,35 @@ class VS_VERSIONINFO:
         offset, vinfosig = self._eatStringAndAlign(bytes, offset)
         if vinfosig != 'VS_VERSION_INFO':
             Exception('Invalid VS_VERSION_INFO signature!: %s' % repr(vinfosig))
+
         if valsize:
             ffinfo = vs_pe.VS_FIXEDFILEINFO()
             ffinfo.vsParse(bytes[offset:offset+valsize])
+
         offset += valsize
-        self._stringFileInfo(bytes, offset)
-        # Offset would get aligned to 32bit bound here (no need)
+        offmod = offset % 4
+        if offmod:
+            offset += (4 - offmod)
+
+        xmax = offset + min(mysize, len(bytes))
+        i = 0
+        while offset < xmax and i < 2:
+            offset = self._stringFileInfo(bytes, offset)
+            i += 1
 
     def _eatStringAndAlign(self, bytes, offset):
         ret = ''
+        blen = len(bytes)
         while bytes[offset:offset+2] != '\x00\x00':
             ret += bytes[offset:offset+2]
             offset += 2
+            if offset >= blen:
+                break
         # Add 2 for the null terminator
         offset += 2
         offmod = offset % 4
         if offmod:
-            offset += 4 - offmod
+            offset += (4 - offmod)
         return offset, ret.decode('utf-16le')
 
     def _stringFileInfo(self, bytes, offset):
@@ -201,9 +213,33 @@ class VS_VERSIONINFO:
         xoffset, sigstr = self._eatStringAndAlign(bytes, xoffset)
         if sigstr not in ('VarFileInfo','StringFileInfo'):
             raise Exception('Invalid StringFileInfo Key!: %s' % repr(sigstr))
+
         xmax = offset + mysize
-        while xoffset < xmax:
-            xoffset = self._stringTable(bytes, xoffset, mysize - (xoffset-offset))
+
+        if sigstr == 'StringFileInfo':
+            while xoffset < xmax:
+                xoffset = self._stringTable(bytes, xoffset, mysize - (xoffset-offset))
+
+        elif sigstr == 'VarFileInfo':
+            while xoffset < xmax:
+                xoffset = self._varTable(bytes, xoffset, mysize - (xoffset-offset))
+
+        xmod = xoffset % 4
+        if xmod:
+            xoffset += (4 - xmod)
+
+        return xoffset
+
+    def _varTable(self, bytes, offset, size):
+        xmax = offset + size
+        xoffset = offset
+        mysize, valsize, valtype = struct.unpack('<HHH', bytes[xoffset:xoffset+6])
+        xoffset += 6
+        xoffset, varname = self._eatStringAndAlign(bytes, xoffset)
+        varval = struct.unpack('<I', bytes[xoffset:xoffset+4])[0]
+        xoffset += 4
+        self._version_info[varname] = varval
+        return offset + size
 
     def _stringTable(self, bytes, offset, size):
         xmax = offset + size
@@ -215,7 +251,7 @@ class VS_VERSIONINFO:
             xoffset = self._stringData(bytes, xoffset)
             xmod = xoffset % 4
             if xmod:
-                xoffset += 4 - xmod
+                xoffset += (4 - xmod)
         return offset + size
 
     def _stringData(self, bytes, offset):
@@ -224,6 +260,9 @@ class VS_VERSIONINFO:
         '''
         xoffset = offset
         mysize, valsize, stype = struct.unpack('<HHH', bytes[offset:offset+6])
+
+        if mysize == 0: raise Exception()
+
         xoffset += 6
         xoffset, strkey = self._eatStringAndAlign(bytes, xoffset)
 
@@ -293,6 +332,7 @@ class ResourceDirectory:
         return self._rsrc_data
 
 class PE(object):
+
     def __init__(self, fd, inmem=False):
         """
         Construct a PE object.  use inmem=True if you are
@@ -300,8 +340,10 @@ class PE(object):
         """
         object.__init__(self)
         self.inmem = inmem
+
+        fd.seek(0)
         self.fd = fd
-        self.fd.seek(0)
+
         self.pe32p = False
         self.psize = 4
         self.high_bit_mask = 0x80000000
@@ -387,10 +429,12 @@ class PE(object):
                 return s
         return None
 
-    def readStructAtRva(self, rva, structname):
+    def readStructAtRva(self, rva, structname, check=False):
         s = vstruct.getStructure(structname)
+        slen = len(s)
+        if check and not self.checkRva(rva, size=slen):
+            return None
         bytes = self.readAtRva(rva, len(s))
-        #print "%s: %s" % (structname, bytes.encode('hex'))
         s.vsParse(bytes)
         return s
 
@@ -436,45 +480,54 @@ class PE(object):
 
         self.ResourceRoot = ResourceDirectory()
 
-        sec = self.getSectionByName(".rsrc")
-        if sec == None:
-            return 
+        # RP BUG FIX - Binaries can have a .rsrc section it doesn't mean that the .rsrc section contains the resource data we think it does
+        # validate .rsrc == RESOURCE Section by checking data directory entries...
+        dresc = self.getDataDirectory(IMAGE_DIRECTORY_ENTRY_RESOURCE)
+        if not dresc.VirtualAddress:
+            return
 
-        rsrc_todo = [ (sec.VirtualAddress, self.ResourceRoot), ]
+        rsrc_todo = [ (dresc.VirtualAddress, self.ResourceRoot), ]
 
         while len(rsrc_todo):
 
             rsrva, rsdirobj = rsrc_todo.pop()
 
-            rsdir = self.readStructAtRva( rsrva, 'pe.IMAGE_RESOURCE_DIRECTORY' )
+            rsdir = self.readStructAtRva( rsrva, 'pe.IMAGE_RESOURCE_DIRECTORY', check=True )
+            if rsdir == None:
+                continue
 
             totcount = rsdir.NumberOfIdEntries + rsdir.NumberOfNamedEntries
-
+            
             offset = len(rsdir)
             for i in xrange(totcount):
 
-                dirent = self.readStructAtRva( rsrva + offset, 'pe.IMAGE_RESOURCE_DIRECTORY_ENTRY' )
+                dentrva = rsrva + offset
+
+                dirent = self.readStructAtRva( dentrva, 'pe.IMAGE_RESOURCE_DIRECTORY_ENTRY', check=True )
+                if dirent == None:
+                    break
 
                 # We use name/id interchangably in the python dict...
-
                 name_id = None
                 if dirent.Name & 0x80000000: # If high bit is set, it's a string!
-                    namerva = sec.VirtualAddress + (dirent.Name & 0x7fffffff)
+                    namerva = dresc.VirtualAddress + (dirent.Name & 0x7fffffff)
                     namelen_bytes = self.readAtRva(namerva, 2)
                     namelen = struct.unpack('<H', namelen_bytes)[0]
                     name_id = self.readAtRva(namerva + 2, namelen * 2).decode('utf-16le', 'ignore')
                 else:
                     name_id = dirent.Name
-
+                
+                # if OffsetToData & IMAGE_RESOURCE_DATA_IS_DIRECTORY then we have another directory
                 if dirent.OffsetToData & 0x80000000:
                     # This points to a subdirectory
                     subdir = rsdirobj.addRsrcDirectory(name_id)
-                    rsrc_todo.append( (sec.VirtualAddress + (dirent.OffsetToData & 0x7fffffff), subdir) )
+                    rsrc_todo.append( (dresc.VirtualAddress + (dirent.OffsetToData & 0x7fffffff), subdir) )
 
                 else:
-                    subdata = self.readStructAtRva( sec.VirtualAddress + dirent.OffsetToData, 'pe.IMAGE_RESOURCE_DATA_ENTRY')
-                    #rsdirobj.addRsrcData(sec.VirtualAddress + subdata.OffsetToData, subdata.Size, subdata.CodePage)
-                    rsdirobj.addRsrcData(subdata.OffsetToData, subdata.Size, subdata.CodePage)
+                    subdata = self.readStructAtRva( dresc.VirtualAddress + dirent.OffsetToData, 'pe.IMAGE_RESOURCE_DATA_ENTRY')
+                    # RP BUG FIX - sanity check the subdata
+                    if self.checkRva(subdata.OffsetToData, size=subdata.Size):
+                        rsdirobj.addRsrcData(subdata.OffsetToData, subdata.Size, subdata.CodePage)
 
                     #print 'Data %s : 0x%.8x (%d)' % (name_id, sec.VirtualAddress + subdata.OffsetToData, subdata.Size)
                     #print repr(self.readAtRva(subdata.OffsetToData, min(subdata.Size, 40) ))
@@ -519,7 +572,8 @@ class PE(object):
         self.IMAGE_LOAD_CONFIG = None
         cdir = self.getDataDirectory(IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG)
         rva = cdir.VirtualAddress
-        if rva != 0:
+        # RP BUG FIX - validate config directory
+        if self.checkRva(rva, size=cdir.Size):
             self.IMAGE_LOAD_CONFIG = self.readStructAtRva(rva, "pe.IMAGE_LOAD_CONFIG_DIRECTORY")
 
     def readPointerAtOffset(self, off):
@@ -531,22 +585,59 @@ class PE(object):
     def readPointerAtRva(self, rva):
         off = self.rvaToOffset(rva)
         return self.readPointerAtOffset(off)
+
+    def getMaxRva(self):
+        return self.IMAGE_NT_HEADERS.OptionalHeader.SizeOfImage
+
+    def checkRva(self, rva, size=None):
+        '''
+        Make sure an RVA falls inside the valid mapped range
+        for the file.  (also make sure it's not 0...)
+        '''
+        if rva == 0:
+            return False
+
+        isize = self.getMaxRva()
+
+        if rva > isize:
+            #raise Exception('too high! %d > %d' % (rva, isize))
+            return False
+
+        if size != None and (rva + size) > isize:
+            #raise Exception('too big! %d > %d' % (rva+size, isize))
+            return False
+        
+        return True
+
+    def readStringAtRva(self, rva, maxsize=None):
+        ret = ''
+        while True:
+            if maxsize and maxsize <= len(ret):
+                break
+            x = self.readAtRva(rva, 1)
+            if x == '\x00':
+                break
+            ret += x
+            rva += 1
+        return ret
         
     def parseImports(self):
         self.imports = []
 
         idir = self.getDataDirectory(IMAGE_DIRECTORY_ENTRY_IMPORT)
-        poff = self.rvaToOffset(idir.VirtualAddress)
 
-        if poff == 0:
+        # RP BUG FIX - invalid IAT entry will point of range of file
+        irva = idir.VirtualAddress
+        x = self.readStructAtRva(irva, 'pe.IMAGE_IMPORT_DIRECTORY', check=True)
+        if x == None:
             return
 
-        x = vstruct.getStructure("pe.IMAGE_IMPORT_DIRECTORY")
         isize = len(x)
-        x.vsParse(self.readAtOffset(poff, isize))
-        while x.Name != 0:
+        
+        while self.checkRva(x.Name):
 
-            libname = self.readAtRva(x.Name, 256).split("\x00")[0]
+            # RP BUG FIX - we can't assume that we have 256 bytes to read
+            libname = self.readStringAtRva(x.Name, maxsize=256)
 
             idx = 0
 
@@ -554,6 +645,9 @@ class PE(object):
             if imp_by_name == 0:
                 imp_by_name = x.FirstThunk
 
+            if not self.checkRva(imp_by_name):
+                break
+                
             while True:
 
                 arrayoff = self.psize * idx
@@ -566,15 +660,29 @@ class PE(object):
                     funcname = ordlookup.ordLookup(libname, ibn_rva & 0x7fffffff)
 
                 else:
-                    ibn = self.readStructAtRva(ibn_rva, 'pe.IMAGE_IMPORT_BY_NAME')
+                    # RP BUG FIX - we can't use this API on this call because we can have binaries that put their import table
+                    # right at the end of the file, statically saying the imported function name is 128 will cause use to potentially
+                    # over run our read and traceback...
+
+                    diff = self.getMaxRva() - ibn_rva - 2
+                    ibn = vstruct.getStructure("pe.IMAGE_IMPORT_BY_NAME")
+                    ibn.vsGetField('Name').vsSetLength( min(diff, 128) )
+                    bytes = self.readAtRva(ibn_rva, len(ibn))
+                    ibn.vsParse(bytes)
+
                     funcname = ibn.Name
 
                 self.imports.append((x.FirstThunk+arrayoff,libname,funcname))
 
                 idx += 1
                 
-            poff += isize
-            x.vsParse(self.readAtOffset(poff, len(x)))
+            irva += isize
+
+            # RP BUG FIX - if the import table is at the end of the file we can't count on the ending to be null
+            if not self.checkRva(irva, size=isize):
+                break
+
+            x.vsParse(self.readAtRva(irva, isize))
 
     def getRelocations(self):
         """
@@ -587,16 +695,27 @@ class PE(object):
         edir = self.getDataDirectory(IMAGE_DIRECTORY_ENTRY_BASERELOC)
         rva = edir.VirtualAddress
         rsize = edir.Size
-
-        if rva == 0: # no relocations
+        
+        # RP BUG FIX - don't watn to read past the end of the file
+        if not self.checkRva(rva):
             return
-
+        
         reloff = self.rvaToOffset(rva)
         relbytes = self.readAtOffset(reloff, rsize)
+        
 
         while relbytes:
             pageva, chunksize = struct.unpack("<LL", relbytes[:8])
             relcnt = (chunksize - 8) / 2
+            
+            # RP BUG FIX - when the reloc section has no fixups but the directory exists..
+            if not chunksize or not pageva:
+                return
+            # RP BUG FIX - sometimes the chunksize is invalid we do a quick check to make sure we dont overrun the buffer
+            if chunksize > len(relbytes):
+                return
+            
+            
             rels = struct.unpack("<%dH" % relcnt, relbytes[8:chunksize])
             for r in rels:
                 rtype = r >> 12
@@ -633,14 +752,21 @@ class PE(object):
 
         funcoff = self.rvaToOffset(self.IMAGE_EXPORT_DIRECTORY.AddressOfFunctions)
         funcsize = 4 * self.IMAGE_EXPORT_DIRECTORY.NumberOfFunctions
-        funcbytes = self.readAtOffset(funcoff, funcsize)
-
         nameoff = self.rvaToOffset(self.IMAGE_EXPORT_DIRECTORY.AddressOfNames)
         namesize = 4 * self.IMAGE_EXPORT_DIRECTORY.NumberOfNames
-        namebytes = self.readAtOffset(nameoff, namesize)
-
         ordoff = self.rvaToOffset(self.IMAGE_EXPORT_DIRECTORY.AddressOfOrdinals)
         ordsize = 2 * self.IMAGE_EXPORT_DIRECTORY.NumberOfNames
+        
+        
+        # RP BUG FIX - sanity check the exports before reading
+        if not funcoff or not ordoff and not nameoff or funcsize > 0x7FFF:
+            return
+    
+    
+        funcbytes = self.readAtOffset(funcoff, funcsize)
+
+        namebytes = self.readAtOffset(nameoff, namesize)
+
         ordbytes = self.readAtOffset(ordoff, ordsize)
 
         funclist = struct.unpack("%dI" % (len(funcbytes) / 4), funcbytes)
