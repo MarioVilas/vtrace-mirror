@@ -397,7 +397,6 @@ class TracerBase(vtrace.Notifier):
         try:
             bp.notify(vtrace.NOTIFY_BREAK, self)
         except Exception, msg:
-            traceback.print_exc()
             print "Breakpoint Exception 0x%.8x : %s" % (bp.address,msg)
 
         if not bp.fastbreak:

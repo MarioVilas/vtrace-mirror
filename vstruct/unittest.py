@@ -100,10 +100,3 @@ test(v, '0141')
 print v.tree()
 
 
-# ==============================================================
-v = woot()
-v.vsInsertField('ifield', v_uint8(), 'strfield')
-v.vsParse('\x01BA')
-test(v, '014241')
-print v.tree()
-

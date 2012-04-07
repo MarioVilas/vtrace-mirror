@@ -1857,8 +1857,7 @@ class Win32SymbolParser:
         return btype.value
 
     def _fixKidName(self, kidname):
-
-        if kidname and kidname[0].isdigit():
+        if kidname[0].isdigit():
             kidname = '_%s' % kidname
 
         if reserved.get(kidname):

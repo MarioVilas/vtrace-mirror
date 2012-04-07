@@ -306,11 +306,6 @@ class i386ImmMemOper(envi.DerefOper):
     def __init__(self, imm, tsize):
         self.imm = imm
         self.tsize = tsize
-        self._is_deref = True
-
-    def isDeref(self):
-        # The disassembler may reach in and set this (if lea...)
-        return self._is_deref
 
     def repr(self, op):
         return "%s [0x%.8x]" % (sizenames[self.tsize], self.imm)

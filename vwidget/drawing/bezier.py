@@ -2,7 +2,7 @@
 def splitline(pt1, pt2, percent=0.5):
     '''
     Return a point which splits the given line at the
-    given percentage...
+    given percentag...
 
     Example: splitline( (0,0), (20, 30), 0.1)
     '''
