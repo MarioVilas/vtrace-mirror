@@ -319,7 +319,6 @@ class LinuxMixin(v_posix.PtraceMixin, v_posix.PosixMixin):
         self.setMeta("ThreadId", tid)
         self.fireNotifiers(vtrace.NOTIFY_CREATE_THREAD)
 
-    @v_base.threadwrap
     def platformWait(self):
         # Blocking wait once...
         pid, status = os.waitpid(-1, 0x40000002)
@@ -331,8 +330,7 @@ class LinuxMixin(v_posix.PtraceMixin, v_posix.PosixMixin):
                 if tid == pid:
                     continue
                 try:
-                    # We use SIGSTOP here because they can't mask it.
-                    os.kill(tid, signal.SIGSTOP)
+                    os.kill(tid, signal.SIGTRAP)
                     os.waitpid(tid, 0x40000002)
                 except Exception, e:
                     print "WARNING TID is invalid %d %s" % (tid,e)
@@ -438,7 +436,7 @@ class LinuxMixin(v_posix.PtraceMixin, v_posix.PosixMixin):
         p = c_ulong(0)
         tid = self.getMeta("ThreadId", -1)
         if v_posix.ptrace(PT_GETEVENTMSG, tid, 0, addressof(p)) != 0:
-            raise Exception('ptrace PT_GETEVENTMSG failed!')
+            raise Exception("ptrace PT_GETEVENTMSG failed! %d" % x)
         return p.value
 
     def platformGetThreads(self):

@@ -1126,7 +1126,7 @@ class TraceGroup(Notifier, v_util.TraceManager):
 
     def execTrace(self, cmdline):
         trace = getTrace()
-        self._initTrace(trace)
+        self.initTrace(trace)
         trace.execute(cmdline)
         self.traces[trace.getPid()] = trace
         return trace
@@ -1141,7 +1141,7 @@ class TraceGroup(Notifier, v_util.TraceManager):
         if (type(proc) == types.IntType or
             type(proc) == types.LongType):
             trace = getTrace()
-            self._initTrace(trace)
+            self.initTrace(trace)
             self.traces[proc] = trace
             try:
                 trace.attach(proc)
@@ -1151,26 +1151,12 @@ class TraceGroup(Notifier, v_util.TraceManager):
 
         else: # Hopefully a tracer object... if not.. you're dumb.
             trace = proc
-            self._initTrace(trace)
+            self.initTrace(trace)
             self.traces[trace.getPid()] = trace
 
         return trace
 
-    def getTrace(self):
-        '''
-        Similar to vtrace.getTrace(), but also init's
-        the trace for being managed by a TraceGroup.
-
-        Example:
-            tg = TraceGroup()
-            t = tg.getTrace()
-            t....
-        '''
-        t = getTrace()
-        self.addTrace(t)
-        return t
-
-    def _initTrace(self, trace):
+    def initTrace(self, trace):
         """
          - INTERNAL -
         Setup a tracer object to be ready for being in this
@@ -1300,10 +1286,6 @@ def getTrace():
     This is the function you will use to get a tracer object
     with the appropriate ancestry for your host.
     ex. mytrace = vtrace.getTrace()
-
-    NOTE: Use the release() method on the tracer once debugging
-          is complete.  This releases the tracer thread and allows
-          garbage collection to function correctly.
     """
 
     if remote: #We have a remote server!

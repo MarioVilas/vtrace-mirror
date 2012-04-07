@@ -223,7 +223,7 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
 
         for name in dir(signal):
             if name[:3] == "SIG" and "_" not in name:
-                self.siglookup[name] = getattr(signal, name)
+                self.siglookup[name] = eval("signal.%s"%name)
         
     def getSignal(self, sig):
         """
@@ -236,8 +236,7 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
 
     def getExpressionLocals(self):
         r = vtrace.VtraceExpressionLocals(self.trace)
-        r['db'] = self
-        r['vprint'] = self.vprint
+        r["db"] = self
         return r
 
     def reprPointer(self, address):
@@ -410,7 +409,7 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
             size = self.parseExpression(argv[1])
 
         self.vprint("Dissassembly:")
-        self.canvas.renderMemory(addr, size, rend=self.opcoderend)
+        self.canvas.render(addr, size, rend=self.opcoderend)
 
     def do_var(self, line):
         """

@@ -1,8 +1,6 @@
 """
 Home for the i386 emulation code.
 """
-import struct
-
 import envi
 import envi.bits as e_bits
 import envi.memory as e_mem
@@ -43,127 +41,16 @@ GPR_BP = 5
 GPR_SI = 6
 GPR_DI = 7
 
-class IntelCall(envi.CallingConvention):
-
-    def getCallArgs(self, emu, count):
-        """
-        Standard intel stack arg parsing
-        """
-        esp = emu.getRegister(REG_ESP)
-        esp += 4 # For the saved eip
-        return struct.unpack("<%dI" % count, emu.readMemory(esp, 4*count))
-
-    def setReturnValue(self, emu, value, argc):
-        """
-        A return routine which cleans up it's stack args.
-        """
-        esp = emu.getRegister(REG_ESP)
-        eip = emu.readMemoryFormat(esp, '<I')[0]
-        esp += 4 # For the saved eip
-        esp += (4 * argc) # Cleanup saved args
-
-        emu.setRegister(REG_ESP, esp)
-        emu.setRegister(REG_EAX, value)
-        emu.setProgramCounter(eip)
-
-class StdCall(IntelCall): pass
-
-class Cdecl(IntelCall):
-
-    def setReturnValue(self, emu, value, argc):
-        """
-        A base non-cleanup stackarg return
-        """
-        esp = emu.getRegister(REG_ESP)
-        eip = struct.unpack("<I", emu.readMemory(esp, 4))[0]
-        esp += 4 # For the saved eip
-
-        emu.setRegister(REG_EAX, value)
-        emu.setStackCounter(esp)
-        emu.setProgramCounter(eip)
-
-class ThisCall(StdCall):
-
-    def getCallArgs(self, emu, count):
-        ret = [emu.getRegister(REG_ECX),]
-        count -= 1
-        esp = emu.getRegister(REG_ESP)
-        esp += 4 # For the saved eip
-        if count:
-            ret.extend(struct.unpack("<%dI" % count, emu.readMemory(esp, 4*count)))
-        return ret
-
-    def setReturnValue(self, emu, value, argc):
-        argc -= 1 # One for the ECX...
-        return StdCall.setReturnValue(self, emu, value, argc)
-
-class FastCall(envi.CallingConvention):
-
-    def __init__(self, reglist):
-        self.reglist = reglist
-
-    def getCallArgs(self, emu, count):
-
-        ret = []
-        for i in xrange(count):
-            if len(self.reglist) <= i:
-                break
-            regid = self.reglist[i]
-            ret.append(emu.getRegister(regid))
-            count -= 1
-
-        if count > 0:
-            esp = emu.getRegister(REG_ESP)
-            esp += 4 # For the saved eip
-            ret.extend(struct.unpack("<%dI" % count, emu.readMemory(esp, 4*count)))
-        return ret
-
-    def setReturnValue(self, emu, value, argc):
-        esp = emu.getRegister(REG_ESP)
-        eip = emu.readMemoryFormat(esp, '<I')[0]
-        esp += 4
-
-        if argc > len(self.reglist):
-            cbytes = (argc - len(self.reglist)) * 4
-            esp += cbytes
-
-        emu.setRegister(REG_EAX, value)
-        emu.setStackCounter(esp)
-        emu.setProgramCounter(eip)
-
-class MsFastCall(FastCall):
-    def __init__(self):
-        FastCall.__init__(self, (REG_ECX, REG_EDX))
-
-class BFastCall(FastCall):
-    def __init__(self):
-        FastCall.__init__(self, (REG_EAX, REG_EDX, REG_ECX))
-
-stdcall = StdCall()
-thiscall = ThisCall()
-cdecl = Cdecl()
-msfastcall = MsFastCall()
-bfastcall = BFastCall()
-
-class IntelEmulator(i386RegisterContext, envi.Emulator):
+class IntelEmulator(i386Module, i386RegisterContext, envi.Emulator):
 
     def __init__(self):
         # Set ourself up as an arch module *and* register context
-        #i386Module.__init__(self)
-        archmod = i386Module()
-        envi.Emulator.__init__(self, archmod=archmod)
+        i386Module.__init__(self)
 
-        for i in xrange(6):
-            self.setSegmentInfo(i, 0, 0xffffffff)
+        seglist = [ (0,0xffffffff) for i in range(6) ]
+        envi.Emulator.__init__(self, segs=seglist)
 
         i386RegisterContext.__init__(self)
-
-        # Add our known calling conventions
-        self.addCallingConvention('stdcall', stdcall)
-        self.addCallingConvention('thiscall', thiscall)
-        self.addCallingConvention('cdecl', cdecl)
-        self.addCallingConvention('msfastcall', msfastcall)
-        self.addCallingConvention('bfastcall', bfastcall)
 
     def getSegmentIndex(self, op):
         # FIXME this needs to account for push/pop/etc
@@ -183,6 +70,14 @@ class IntelEmulator(i386RegisterContext, envi.Emulator):
             return SEG_GS
         return SEG_DS
 
+    def undefFlags(self):
+        """
+        Used in PDE.
+        A flag setting operation has resulted in un-defined value.  Set
+        the flags to un-defined as well.
+        """
+        self.setRegister(REG_EFLAGS, None)
+
     def setFlag(self, which, state):
         flags = self.getRegister(REG_EFLAGS)
         if state:
@@ -193,6 +88,8 @@ class IntelEmulator(i386RegisterContext, envi.Emulator):
 
     def getFlag(self, which):
         flags = self.getRegister(REG_EFLAGS)
+        if flags == None:
+            raise envi.PDEUndefinedFlag(self)
         return bool(flags & which)
 
     def readMemValue(self, addr, size):
@@ -207,7 +104,7 @@ class IntelEmulator(i386RegisterContext, envi.Emulator):
         elif size == 2:
             return struct.unpack("<H", bytes)[0]
         elif size == 4:
-            return struct.unpack("<I", bytes)[0]
+            return struct.unpack("<L", bytes)[0]
         elif size == 8:
             return struct.unpack("<Q", bytes)[0]
 
@@ -218,7 +115,7 @@ class IntelEmulator(i386RegisterContext, envi.Emulator):
         elif size == 2:
             bytes = struct.pack("<H",value & 0xffff)
         elif size == 4:
-            bytes = struct.pack("<I", value & 0xffffffff)
+            bytes = struct.pack("<L", value & 0xffffffff)
         elif size == 8:
             bytes = struct.pack("<Q", value & 0xffffffffffffffff)
         self.writeMemory(addr, bytes)
@@ -240,12 +137,10 @@ class IntelEmulator(i386RegisterContext, envi.Emulator):
         meth = self.op_methods.get(op.mnem, None)
         if meth == None:
             raise envi.UnsupportedInstruction(self, op)
-
         if op.prefixes & PREFIX_REP:
             x = self.doRepPrefix(meth, op)
         else:
             x = meth(op)
-
         if x == None:
             pc = self.getProgramCounter()
             x = pc+op.size
@@ -358,8 +253,13 @@ class IntelEmulator(i386RegisterContext, envi.Emulator):
         (allows cmp and sub to use the same code)
         """
         # Src op gets sign extended to dst
+        #FIXME account for same operand with zero result for PDE
         dst = self.getOperValue(op, 0)
         src = self.getOperValue(op, 1)
+
+        if src == None or dst == None:
+            self.undefFlags()
+            return None
 
         # So we can either do a BUNCH of crazyness with xor and shifting to
         # get the necissary flags here, *or* we can just do both a signed and
@@ -399,6 +299,12 @@ class IntelEmulator(i386RegisterContext, envi.Emulator):
     def logicalAnd(self, op):
         dst = self.getOperValue(op, 0)
         src = self.getOperValue(op, 1)
+
+        # PDE
+        if dst == None or src == None:
+            self.undefFlags()
+            self.setOperValue(op, 0, None)
+            return
 
         dsize = op.opers[0].tsize
         ssize = op.opers[1].tsize
@@ -440,6 +346,11 @@ class IntelEmulator(i386RegisterContext, envi.Emulator):
     def i_adc(self, op):
         dst = self.getOperValue(op, 0)
         src = self.getOperValue(op, 1)
+        # PDE
+        if dst == None or src == None:
+            self.undefFlags()
+            self.setOperValue(op, 0, None)
+            return
 
         cf = 0
         if self.getFlag(EFLAGS_CF):
@@ -473,6 +384,12 @@ class IntelEmulator(i386RegisterContext, envi.Emulator):
 
         dsize = op.opers[0].tsize
         ssize = op.opers[1].tsize
+
+        #FIXME PDE and flags
+        if dst == None or src == None:
+            self.undefFlags()
+            self.setOperValue(op, 0, None)
+            return
 
         if dsize > ssize:
             src = e_bits.sign_extend(src, ssize, dsize)
@@ -570,7 +487,10 @@ class IntelEmulator(i386RegisterContext, envi.Emulator):
         saved = eip + op.size
         self.doPush(saved)
 
-        return self.getOperValue(op, 0)
+        val = self.getOperValue(op, 0)
+        if val == None:
+            raise envi.PDEException(self, "Unknown Call Target")
+        return val
 
     def i_clc(self, op):
         self.setFlag(EFLAGS_CF, False)
@@ -741,6 +661,10 @@ class IntelEmulator(i386RegisterContext, envi.Emulator):
     def i_cwd(self, op):
         #FIXME handle 16 bit variant
         eax = self.getRegister(REG_EAX)
+        #PDE
+        if eax == None:
+            self.setRegister(REG_EDX, None)
+            return
 
         if e_bits.is_signed(eax, 4):
             self.setRegister(REG_EDX, 0xffffffff)
@@ -763,12 +687,10 @@ class IntelEmulator(i386RegisterContext, envi.Emulator):
         self.setFlag(EFLAGS_PF, e_bits.is_parity_byte(val))
 
     def i_div(self, op):
-
         #FIXME this is probably broke
         oper = op.opers[0]
-        val = self.getOperValue(op, 1)
+        val = self.getOperValue(op, 0)
         if val == 0: raise envi.DivideByZero(self)
-
         if oper.tsize == 1:
             ax = self.getRegister(REG_AX)
             quot = ax / val
@@ -1493,7 +1415,7 @@ class IntelEmulator(i386RegisterContext, envi.Emulator):
     def i_scasb(self, op):
         al = self.getRegister(REG_AL)
         edi = self.getRegister(REG_EDI)
-        base,size = self._emu_segments[SEG_ES]
+        base,size = self.segments[SEG_ES]
         memval = ord(self.readMemory(base+edi, 1))
         self.intSubBase(al, memval, 1, 1)
         if self.getFlag(EFLAGS_DF):
@@ -1506,7 +1428,7 @@ class IntelEmulator(i386RegisterContext, envi.Emulator):
         #FIXME probably need to handle oper prefix by hand here...
         eax = self.getRegister(REG_EAX)
         edi = self.getRegister(REG_EDI)
-        base,size = self._emu_segments[SEG_ES]
+        base,size = self.segments[SEG_ES]
         memval = struct.unpack("<L",self.readMemory(base+edi, 4))[0]
         self.intSubBase(eax, memval, 4, 4)
         if self.getFlag(EFLAGS_DF):
@@ -1518,7 +1440,7 @@ class IntelEmulator(i386RegisterContext, envi.Emulator):
     def i_stosb(self, op):
         al = self.getRegister(REG_AL)
         edi = self.getRegister(REG_EDI)
-        base,size = self._emu_segments[SEG_ES]
+        base,size = self.segments[SEG_ES]
         self.writeMemory(base+edi, chr(al))
         if self.getFlag(EFLAGS_DF):
             edi -= 1
@@ -1529,7 +1451,7 @@ class IntelEmulator(i386RegisterContext, envi.Emulator):
     def i_stosd(self, op):
         eax = self.getRegister(REG_EAX)
         edi = self.getRegister(REG_EDI)
-        base,size = self._emu_segments[SEG_ES]
+        base,size = self.segments[SEG_ES]
         self.writeMemory(base+edi, struct.pack("<L", eax))
         if self.getFlag(EFLAGS_DF):
             edi -= 4
@@ -1608,7 +1530,7 @@ class IntelEmulator(i386RegisterContext, envi.Emulator):
         edi = self.getRegister(REG_EDI)
         # FIXME shouldn't have to do this directly
         # FIXME this needs a 32/16 bit mode check
-        base,size = self._emu_segments[SEG_ES]
+        base,size = self.segments[SEG_ES]
         self.writeMemValue(base+edi, eax, 4)
         # FIXME edi inc must be by oper len
         self.setRegister(REG_EDI, edi+4)

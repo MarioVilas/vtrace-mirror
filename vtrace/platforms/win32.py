@@ -579,15 +579,28 @@ class CONTEXTx86(Structure):
         self.xmm6 = (self.Extension._xmm6.High << 8) + self.Extension._xmm6.Low
         self.xmm7 = (self.Extension._xmm7.High << 8) + self.Extension._xmm7.Low
 
-class MEMORY_BASIC_INFORMATION(Structure):
+class MEMORY_BASIC_INFORMATION32(Structure):
     _fields_ = [
-        ("BaseAddress", SIZE_T),
-        ("AllocationBase", SIZE_T),
-        ("AllocationProtect", DWORD),
-        ("RegionSize", SIZE_T),
-        ("State", DWORD),
-        ("Protect", DWORD),
-        ("Type", DWORD),
+        ("BaseAddress", c_ulong),
+        ("AllocationBase", c_ulong),
+        ("AllocationProtect", c_ulong),
+        ("RegionSize", c_ulong),
+        ("State", c_ulong),
+        ("Protect", c_ulong),
+        ("Type", c_ulong),
+        ]
+
+class MEMORY_BASIC_INFORMATION64(Structure):
+    _fields_ = [
+        ("BaseAddress", c_ulonglong),
+        ("AllocationBase", c_ulonglong),
+        ("AllocationProtect", c_ulong),
+        ("alignment1", c_ulong),
+        ("RegionSize", c_ulonglong),
+        ("State", c_ulong),
+        ("Protect", c_ulong),
+        ("Type", c_ulong),
+        ("alignment2", c_ulong),
         ]
 
 class STARTUPINFO(Structure):
@@ -913,8 +926,6 @@ if sys.platform == "win32":
     ntdll.NtQuerySystemInformation.argtypes = [DWORD, LPVOID, DWORD, LPVOID]
     ntdll.NtQueryObject.argtypes = [HANDLE, DWORD, c_void_p, DWORD, LPVOID]
     ntdll.NtQueryInformationProcess.argtypes = [HANDLE, DWORD, c_void_p, DWORD, LPVOID]
-    ntdll.NtSystemDebugControl.restype = SIZE_T
-
 
     try:
 
@@ -1165,8 +1176,6 @@ class WindowsMixin:
         global dbgprivdone
         if not dbgprivdone:
             dbgprivdone = getDebugPrivileges()
-
-        self._is_wow64 = False  # 64 bit trace uses this...
 
         # Skip the attach event and plow through to the first
         # injected breakpoint (cause libs are loaded by then)
@@ -1457,14 +1466,13 @@ class WindowsMixin:
            eventdict["StartAddress"] = event.u.CreateProcessInfo.StartAddress
            eventdict["ThreadLocalBase"] = teb
 
-           self._is_wow64 = False
+           wow64 = False
            if IsWow64Process != None:
                b = BOOL()
                IsWow64Process(self.phandle, addressof(b))
                if b.value:
-                   self._is_wow64 = True
-
-           self.setMeta('IsWow64', self._is_wow64)
+                   wow64 = True
+           self.setMeta('IsWow64', wow64)
 
            self.fireNotifiers(vtrace.NOTIFY_ATTACH)
            self.addLibraryBase(ImageName, baseaddr)
@@ -1587,7 +1595,7 @@ class WindowsMixin:
         ret = []
         base = 0
 
-        mbi = MEMORY_BASIC_INFORMATION()
+        mbi = self._winGetMemStruct()
 
         while kernel32.VirtualQueryEx(self.phandle, base, addressof(mbi), sizeof(mbi)) > 0:
             if mbi.State == MEM_COMMIT:
@@ -1700,6 +1708,9 @@ class Windowsi386Trace(
                           CONTEXT_EXTENDED_REGISTERS)
         return c
 
+    def _winGetMemStruct(self):
+        return MEMORY_BASIC_INFORMATION32()
+
 class WindowsAmd64Trace(
             vtrace.Trace,
             WindowsMixin,
@@ -1717,6 +1728,9 @@ class WindowsAmd64Trace(
         c = CONTEXTx64()
         c.ContextFlags = (CONTEXT_AMD64 | CONTEXT_FULL | CONTEXT_DEBUG_REGISTERS)
         return c
+
+    def _winGetMemStruct(self):
+        return MEMORY_BASIC_INFORMATION64()
 
 reserved = {
     'None': True,
@@ -1857,8 +1871,7 @@ class Win32SymbolParser:
         return btype.value
 
     def _fixKidName(self, kidname):
-
-        if kidname and kidname[0].isdigit():
+        if kidname[0].isdigit():
             kidname = '_%s' % kidname
 
         if reserved.get(kidname):

@@ -308,7 +308,7 @@ class VdbMainWindow(vw_windows.MainWindow):
 
     def tools_python(self, *args):
         import vwidget.pydialog as vw_pydialog
-        l = self.db.getExpressionLocals()
+        l = vtrace.VtraceExpressionLocals(vdb.VdbTrace(self.db))
         p = vw_pydialog.PyDialog(l)
         p.show()
 

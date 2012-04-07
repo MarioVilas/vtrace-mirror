@@ -92,7 +92,6 @@ class z80Disasm:
             return z80RegOper(oinfo)
 
         elif otype == OPTYPE_Ind:
-            print 'OPTYPE IND'
 
         elif otype == OPTYPE_RegMemDisp:
             disp = e_bits.parsebytes(bytes, offset+immoff, 1, sign=True)

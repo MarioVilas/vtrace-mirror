@@ -8,7 +8,6 @@ import vstruct
 from vstruct.primitives import *
 
 ETH_P_IP    = 0x0800
-ETH_P_VLAN  = 0x8100
 
 IPPROTO_ICMP    = 1
 IPPROTO_TCP     = 6
@@ -50,15 +49,6 @@ class ETHERII(vstruct.VStruct):
         self.destmac    = v_bytes(size=6)
         self.srcmac     = v_bytes(size=6)
         self.etype      = v_uint16(bigend=True)
-
-    def vsParse(self, sbytes, offset=0):
-        # If we end up with a vlan tag, reparse
-        ret = vstruct.VStruct.vsParse(self, sbytes, offset=offset)
-        if self.etype == ETH_P_VLAN:
-            self.vsInsertField('vtag', v_uint16(bigend=True), 'etype')
-            self.vsInsertField('vlan', v_uint16(bigend=True), 'etype')
-            ret = vstruct.VStruct.vsParse(self, sbytes, offset=offset)
-        return ret
 
 class IPv4(vstruct.VStruct):
     def __init__(self):
@@ -103,12 +93,4 @@ class UDP(vstruct.VStruct):
         self.dstport    = v_uint16(bigend=True)
         self.udplen     = v_uint16(bigend=True)
         self.checksum   = v_uint16(bigend=True)
-
-if __name__ == '__main__':
-    eII = ETHERII()
-    eII.vsParse('AAAAAABBBBBB\x08\x00')
-    print eII.tree()
-    eII = ETHERII()
-    eII.vsParse('AAAAAABBBBBB\x81\x00\x02\x02\x08\x00')
-    print eII.tree()
 
