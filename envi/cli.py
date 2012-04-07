@@ -537,7 +537,7 @@ class EnviCli(Cmd):
             size = self.parseExpression(args[1])
 
         self.canvas.setRenderer(fmtname)
-        self.canvas.renderMemory(addr, size)
+        self.canvas.render(addr, size)
 
 class EnviMutableCli(EnviCli):
     """

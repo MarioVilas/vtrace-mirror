@@ -191,15 +191,10 @@ class VStruct(vs_prims.v_base):
             # If it's a primitive, all is well, if not, pad to size of
             # the first element of the VStruct/VArray...
             if value.vsIsPrim():
-                align = value._vs_align
-                if align == None:
-                    align = len(value)
+                align = len(value)
             else:
                 fname = value._vs_fields[0]
-                field = value._vs_values.get(fname)
-                align = field._vs_align
-                if align == None:
-                    align = len(field)
+                align = len(value._vs_values.get(fname))
 
             delta = len(self) % align
             if delta != 0:
@@ -209,18 +204,6 @@ class VStruct(vs_prims.v_base):
                 self._vs_values[pname] = vs_prims.v_bytes(align-delta)
 
         self._vs_fields.append(name)
-        self._vs_values[name] = value
-
-    def vsInsertField(self, name, value, befname):
-        '''
-        WARNING: vsInsertField does NOT honor field alignment! # FIXME
-        (AND CAN MESS UP OTHER FIELDS ALIGNMENT!)
-        '''
-        if not isVstructType(value):
-            raise Exception("Added fields MUST be vstruct types!")
-
-        idx = self._vs_fields.index(befname)
-        self._vs_fields.insert(idx, name)
         self._vs_values[name] = value
 
     def vsGetPrims(self):

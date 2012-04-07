@@ -73,10 +73,10 @@ class IMAGE_IMPORT_DIRECTORY(vstruct.VStruct):
         self.FirstThunk         = v_uint32()
 
 class IMAGE_IMPORT_BY_NAME(vstruct.VStruct):
-    def __init__(self, namelen=128):
+    def __init__(self):
         vstruct.VStruct.__init__(self)
         self.Hint   = v_uint16()
-        self.Name   = v_str(size=namelen)
+        self.Name   = v_str(size=128)
 
 class IMAGE_LOAD_CONFIG_DIRECTORY(vstruct.VStruct):
     def __init__(self):

@@ -24,9 +24,6 @@ class Symbol:
             return (True, False)
         return (value, t(self.value))
 
-    def __hash__(self):
-        return hash(long(self))
-
     def __long__(self):
         return long(self.value)
 
