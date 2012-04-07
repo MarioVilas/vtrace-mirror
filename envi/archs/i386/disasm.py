@@ -154,6 +154,16 @@ class i386RegOper(envi.RegisterOper):
             return False
         return True
 
+# For opcodes which need their immediate extended on print
+sextend = [
+    opcode86.INS_ADD,
+    opcode86.INS_SUB,
+    opcode86.INS_AND,
+    opcode86.INS_OR,
+    opcode86.INS_CMP,
+    opcode86.INS_TEST,
+]
+
 class i386ImmOper(envi.ImmedOper):
     """
     An operand representing an immediate.
@@ -164,6 +174,12 @@ class i386ImmOper(envi.ImmedOper):
 
     def repr(self, op):
         ival = self.imm
+        # Do the extra conditionals to make this fast
+        if self.tsize == 1:
+            if op.opcode in sextend:
+                o1 = op.opers[0]
+                if self.tsize != o1.tsize:
+                    ival = e_bits.sign_extend(ival, self.tsize, o1.tsize)
         if ival > 4096:
             return "0x%.8x" % ival
         return str(ival)
@@ -183,10 +199,7 @@ class i386ImmOper(envi.ImmedOper):
             name = addrToName(mcanv, value)
             mcanv.addVaText(name, value)
         else:
-            if self.imm >= 4096:
-                mcanv.addNameText('0x%.8x' % value)
-            else:
-                mcanv.addNameText(str(value))
+            mcanv.addNameText(str(value))
 
     def __eq__(self, other):
         if not isinstance(other, i386ImmOper):
@@ -306,11 +319,6 @@ class i386ImmMemOper(envi.DerefOper):
     def __init__(self, imm, tsize):
         self.imm = imm
         self.tsize = tsize
-        self._is_deref = True
-
-    def isDeref(self):
-        # The disassembler may reach in and set this (if lea...)
-        return self._is_deref
 
     def repr(self, op):
         return "%s [0x%.8x]" % (sizenames[self.tsize], self.imm)
@@ -879,17 +887,12 @@ class i386Disasm:
                 try:
                     if addrmeth == opcode86.ADDRMETH_I or addrmeth == opcode86.ADDRMETH_J:
                         osize, oper = ameth(bytes, offset+operoffset, tsize, prefixes)
-
-                        # If we are a sign extended immediate and not the same as the other operand,
-                        # do the sign extension during disassembly so nothing else has to worry about it..
-                        if operflags & opcode86.OP_SIGNED and len(operands) and tsize != operands[-1].tsize:
-                            otsize = operands[-1].tsize
-                            oper.imm = e_bits.sign_extend(oper.imm, oper.tsize, otsize)
-                            oper.tsize = otsize
-
+                        #if operflags & opcode86.OP_SIGNED and oper.tsize != tsize:
+                        #if oper.tsize == 1 and operflags & opcode86.OP_SIGNED:
+                            #oper.imm = e_bits.sign_extend(oper.imm, oper.tsize, 4)
+                            #oper.tsize = 4
                     else:
                         osize, oper = ameth(bytes, offset, tsize, prefixes)
-
                 except struct.error, e:
                     # Catch struct unpack errors due to insufficient data length
                     raise envi.InvalidInstruction(bytes=bytes[startoff:startoff+16])

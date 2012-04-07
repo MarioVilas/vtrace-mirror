@@ -133,25 +133,17 @@ class TracerBase(vtrace.Notifier):
         self.requireNotRunning()
         self.requireNotExited()
 
-        fastbreak = False
-        if self.curbp:
-            fastbreak = self.curbp.fastbreak
-
-        # If we are on a breakpoint, and it's a fastbreak
-        # we don't want to fire a "continue" event.
-        if not fastbreak:
-            self.fireNotifiers(vtrace.NOTIFY_CONTINUE)
+        self.fireNotifiers(vtrace.NOTIFY_CONTINUE)
 
         # Step past a breakpoint if we are on one.
         self._checkForBreak()
-
         # Throw down and activate breakpoints...
-        if not fastbreak:
-            self._throwdownBreaks()
+        self._throwdownBreaks()
 
         self.running = True
-        self.runagain = False
-        self._syncRegs()    # Must be basically last...
+        # Syncregs must happen *after* notifiers for CONTINUE
+        # and checkForBreak.
+        self._syncRegs()
         self.platformContinue()
         self.setMeta("PendingSignal", None)
 
@@ -208,10 +200,12 @@ class TracerBase(vtrace.Notifier):
         """
         Run through the breakpoints and setup
         the ones that are enabled.
-
-        NOTE: This should *not* get called when continuing
-        from a fastbreak...
         """
+        self.curbp = None
+
+        if self.getMode("FastBreak"):
+            if self.fb_bp_done:
+                return
 
         # Resolve deferred breaks
         for bp in self.deferred:
@@ -222,6 +216,9 @@ class TracerBase(vtrace.Notifier):
 
         for bp in self.breakpoints.values():
             self._activateBreak(bp)
+
+        if self.getMode("FastBreak"):
+            self.fb_bp_done = True
 
     def _syncRegs(self):
         """
@@ -265,7 +262,6 @@ class TracerBase(vtrace.Notifier):
             self.stepi()
             self.setMode("FastStep", orig)
             bp.activate(self)
-        self.curbp = None
 
     def shouldRunAgain(self):
         """
@@ -339,6 +335,14 @@ class TracerBase(vtrace.Notifier):
         """
         Fire the registered notifiers for the NOTIFY_* event.
         """
+        # Skip out on notifiers for NOTIFY_BREAK when in
+        # FastBreak mode
+        if self.getMode("FastBreak", False) and event == vtrace.NOTIFY_BREAK:
+            return
+
+        if self.getMode("FastStep", False) and event == vtrace.NOTIFY_STEP:
+            return
+
         if event == vtrace.NOTIFY_SIGNAL:
             signo = self.getCurrentSignal()
             if signo in self.getMeta("IgnoredSignals", []):
@@ -373,39 +377,29 @@ class TracerBase(vtrace.Notifier):
                 print "WARNING: Notifier exception for",repr(notifier)
                 traceback.print_exc()
 
-    def _cleanupBreakpoints(self):
+    def _cleanupBreakpoints(self, force=False):
         '''
-        Cleanup all breakpoints (if the current bp is "fastbreak" this routine
-        will not be called...
+        Cleanup any non-fastbreak breakpoints.  This routine doesn't even get
+        called in the event of mode FastBreak=True.
         '''
+        self.fb_bp_done = False
         for bp in self.breakpoints.itervalues():
-            bp.deactivate(self)
-
-    def _fireStep(self):
-        if self.getMode('FastStep', False):
-            return
-        self.fireNotifiers(vtrace.NOTIFY_STEP)
+            # No harm in calling deactivate on
+            # an inactive bp
+            if force or not bp.fastbreak:
+                bp.deactivate(self)
 
     def _fireBreakpoint(self, bp):
-
         self.curbp = bp
-
         # A breakpoint should be inactive when fired
-        # (even fastbreaks, we'll need to deactivate for stepi anyway)
-        bp.deactivate(self)
-
+        if bp.active:
+            bp.deactivate(self)
         try:
             bp.notify(vtrace.NOTIFY_BREAK, self)
         except Exception, msg:
-            traceback.print_exc()
             print "Breakpoint Exception 0x%.8x : %s" % (bp.address,msg)
-
         if not bp.fastbreak:
             self.fireNotifiers(vtrace.NOTIFY_BREAK)
-
-        else:
-            # fastbreak's are basically always "run again"
-            self.runagain = True
 
     def checkPageWatchpoints(self):
         """
@@ -423,7 +417,6 @@ class TracerBase(vtrace.Notifier):
             return False
 
         self._fireBreakpoint(wp)
-
         return True
 
     def checkWatchpoints(self):
@@ -439,10 +432,8 @@ class TracerBase(vtrace.Notifier):
         This is mostly for systems (like linux) where you can't tell
         the difference between some SIGSTOP/SIGBREAK conditions and
         an actual breakpoint instruction.
-
         This method will return true if either the breakpoint
         subsystem or the sendBreak (via ShouldBreak meta) is true
-        (and it will have handled firing events for the bp)
         """
         pc = self.getProgramCounter()
         bi = self.archGetBreakInstr()
@@ -497,7 +488,7 @@ class TracerBase(vtrace.Notifier):
         elif event == vtrace.NOTIFY_DETACH:
             for tid in self.sus_threads.keys():
                 self.resumeThread(tid)
-            self._cleanupBreakpoints()
+            self._cleanupBreakpoints(force=True)
 
         elif event == vtrace.NOTIFY_EXIT:
             self.setMode("RunForever", False)
@@ -508,7 +499,10 @@ class TracerBase(vtrace.Notifier):
             self.runagain = False
 
         else:
-            self._cleanupBreakpoints()
+            # Any of the events in this pool mean we're
+            # stopping but still attached.
+            if not self.getMode("FastBreak"):
+                self._cleanupBreakpoints()
 
     def delLibraryBase(self, baseaddr):
 
@@ -642,13 +636,6 @@ class TracerBase(vtrace.Notifier):
         '''
         # Default to the thing they all should do...
         return self.getMeta('PendingSignal', None)
-
-    def platformSetSignal(self, sig=None):
-        '''
-        Set the current signal to deliver to the process on cont.
-        (Use None for no signal delivery.
-        '''
-        self.setMeta('PendingSignal', sig)
 
     def platformGetMaps(self):
         """

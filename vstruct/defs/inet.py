@@ -8,7 +8,6 @@ import vstruct
 from vstruct.primitives import *
 
 ETH_P_IP    = 0x0800
-ETH_P_VLAN  = 0x8100
 
 IPPROTO_ICMP    = 1
 IPPROTO_TCP     = 6
@@ -29,16 +28,9 @@ TCP_F_SYNACK = (TCP_F_SYN | TCP_F_ACK)
 
 def reprIPv4Addr(addr):
     bytes = struct.pack('>I', addr)
-    return socket.inet_ntoa(bytes)
-
-def decIPv4Addr(addrstr):
-    bytes = socket.inet_aton(addrstr)
-    return struct.unpack('>I', bytes)[0]
+    return socket.inet_ntop(socket.AF_INET, bytes)
 
 class IPv4Address(v_uint32):
-
-    def __init__(self, value=0):
-        v_uint32.__init__(self, value=value, bigend=True)
 
     def __repr__(self):
         bytes = struct.pack('>I', self._vs_value)
@@ -46,31 +38,22 @@ class IPv4Address(v_uint32):
 
 class ETHERII(vstruct.VStruct):
     def __init__(self):
-        vstruct.VStruct.__init__(self)
+        vstruct.VStruct.__init__(self, bigend=True)
         self.destmac    = v_bytes(size=6)
         self.srcmac     = v_bytes(size=6)
-        self.etype      = v_uint16(bigend=True)
-
-    def vsParse(self, sbytes, offset=0):
-        # If we end up with a vlan tag, reparse
-        ret = vstruct.VStruct.vsParse(self, sbytes, offset=offset)
-        if self.etype == ETH_P_VLAN:
-            self.vsInsertField('vtag', v_uint16(bigend=True), 'etype')
-            self.vsInsertField('vlan', v_uint16(bigend=True), 'etype')
-            ret = vstruct.VStruct.vsParse(self, sbytes, offset=offset)
-        return ret
+        self.etype      = v_uint16()
 
 class IPv4(vstruct.VStruct):
     def __init__(self):
-        vstruct.VStruct.__init__(self)
+        vstruct.VStruct.__init__(self, bigend=True)
         self.veriphl    = v_uint8()
         self.tos        = v_uint8()
-        self.totlen     = v_uint16(bigend=True)
-        self.ipid       = v_uint16(bigend=True)
-        self.flagfrag   = v_uint16(bigend=True)
+        self.totlen     = v_uint16()
+        self.ipid       = v_uint16()
+        self.flagfrag   = v_uint16()
         self.ttl        = v_uint8()
         self.proto      = v_uint8()
-        self.cksum      = v_uint16(bigend=True)
+        self.cksum      = v_uint16()
         self.srcaddr    = IPv4Address()
         self.dstaddr    = IPv4Address()
 
@@ -82,33 +65,25 @@ class IPv4(vstruct.VStruct):
 class TCP(vstruct.VStruct):
 
     def __init__(self):
-        vstruct.VStruct.__init__(self)
-        self.srcport    = v_uint16(bigend=True)
-        self.dstport    = v_uint16(bigend=True)
-        self.sequence   = v_uint32(bigend=True)
-        self.ackseq     = v_uint32(bigend=True)
+        vstruct.VStruct.__init__(self, bigend=True)
+        self.srcport    = v_uint16()
+        self.dstport    = v_uint16()
+        self.sequence   = v_uint32()
+        self.ackseq     = v_uint32()
         self.doff       = v_uint8()
         self.flags      = v_uint8()
-        self.window     = v_uint16(bigend=True)
-        self.checksum   = v_uint16(bigend=True)
-        self.urgent     = v_uint16(bigend=True)
+        self.window     = v_uint16()
+        self.checksum   = v_uint16()
+        self.urgent     = v_uint16()
 
     def __len__(self):
         return self.doff >> 2
 
 class UDP(vstruct.VStruct):
     def __init__(self):
-        vstruct.VStruct.__init__(self)
-        self.srcport    = v_uint16(bigend=True)
-        self.dstport    = v_uint16(bigend=True)
-        self.udplen     = v_uint16(bigend=True)
-        self.checksum   = v_uint16(bigend=True)
-
-if __name__ == '__main__':
-    eII = ETHERII()
-    eII.vsParse('AAAAAABBBBBB\x08\x00')
-    print eII.tree()
-    eII = ETHERII()
-    eII.vsParse('AAAAAABBBBBB\x81\x00\x02\x02\x08\x00')
-    print eII.tree()
+        vstruct.VStruct.__init__(self, bigend=True)
+        self.srcport    = v_uint16()
+        self.dstport    = v_uint16()
+        self.udplen     = v_uint16()
+        self.checksum   = v_uint16()
 

@@ -156,11 +156,13 @@ class Trace(e_mem.IMemory, e_reg.RegisterContext, e_resolv.SymbolResolver, objec
         self.initMode("RunForever", False, "Run until RunForever = False")
         self.initMode("NonBlocking", False, "A call to wait() fires a thread to wait *for* you")
         self.initMode("ThreadProxy", True, "Proxy necissary requests through a single thread (can deadlock...)")
+        self.initMode("FastBreak", False, "Do *NOT* add/remove breakpoints per-run, but leave them there once active")
         self.initMode("SingleStep", False, "All calls to run() actually just step.  This allows RunForever + SingleStep to step forever ;)")
         self.initMode("FastStep", False, "All stepi() will NOT generate a step event")
 
         self.regcache = None
         self.regcachedirty = False
+        self.fb_bp_done = False # A little hack for FastBreak mode
         self.sus_threads = {}   # A dictionary of suspended threads
 
         # Set if we're a server and this trace is proxied
@@ -201,16 +203,6 @@ class Trace(e_mem.IMemory, e_reg.RegisterContext, e_resolv.SymbolResolver, objec
         Example: sig = trace.getCurrentSignal()
         '''
         return self.platformGetSignal()
-
-    def setCurrentSignal(self, sig=None):
-        '''
-        Set the currently pending signal for delivery to the target process on
-        continue.  This is intended for use by programs wishing the mask or change
-        the delivery of exceptions on a NOTIFY_SIGNAL event.
-
-        Example:  trace.setCurrentSignal(None)
-        '''
-        return self.platformSetSignal(sig)
 
     def addIgnoreSignal(self, code, address=0):
         """
@@ -574,36 +566,26 @@ class Trace(e_mem.IMemory, e_reg.RegisterContext, e_resolv.SymbolResolver, objec
         """
         return self.platformPs()
 
-    def addBreakByExpr(self, symname, fastbreak=False):
+    def addBreakByExpr(self, symname):
         '''
         Add a breakpoint by resolving an expression.  This will create
         the Breakpoint object for you and add it to the trace.  It
         returns the newly created breakpoint id.
-        
-        Optionally, set fastbreak=True to have the breakpoint behave in
-        "fast break" mode which automatically continues execution and does
-        not fire notifiers for the breakpoint.
 
         Example: trace.addBreakByExpr('kernel32.CreateFileA + ecx')
         '''
         bp = Breakpoint(None, expression=symname)
-        bp.fastbreak = fastbreak
         return self.addBreakpoint(bp)
 
-    def addBreakByAddr(self, va, fastbreak=False):
+    def addBreakByAddr(self, va):
         '''
         Add a breakpoint by address.  This will create the Breakpoint
         object for you and add it to the trace.  It returns the newly
         created breakpoint id.
 
-        Optionally, set fastbreak=True to have the breakpoint behave in
-        "fast break" mode which automatically continues execution and does
-        not fire notifiers for the breakpoint.
-
         Example: trace.addBreakByAddr(0x7c770308)
         '''
         bp = Breakpoint(va)
-        bp.fastbreak = fastbreak
         return self.addBreakpoint(bp)
 
     def addBreakpoint(self, breakpoint):
@@ -633,8 +615,9 @@ class Trace(e_mem.IMemory, e_reg.RegisterContext, e_resolv.SymbolResolver, objec
         self.bpbyid[breakpoint.id] = breakpoint
         self.breakpoints[addr] = breakpoint
 
-        # fastbreaks are always active... (except when they're not...)
-        if breakpoint.fastbreak:
+        # If we are in fastbreak mode or it is a fastbreak breakpoint
+        # we must activate it here...
+        if self.getMode('FastBreak') or breakpoint.fastbreak:
             self._activateBreak(breakpoint)
 
         return breakpoint.id
@@ -708,8 +691,6 @@ class Trace(e_mem.IMemory, e_reg.RegisterContext, e_resolv.SymbolResolver, objec
         bp = self.getBreakpoint(bpid)
         if bp == None:
             raise Exception("Breakpoint %d Not Found" % bpid)
-        if not enabled: # To catch the "disable" of fastbreaks...
-            bp.deactivate(self)
         return bp.setEnabled(enabled)
 
     def setBreakpointCode(self, bpid, pystr):
@@ -888,6 +869,7 @@ class Trace(e_mem.IMemory, e_reg.RegisterContext, e_resolv.SymbolResolver, objec
         """
         self.requireAttached()
         self.setMode("RunForever", False)
+        self.setMode("FastBreak", False)
         self.setMeta("ShouldBreak", True)
         self.platformSendBreak()
         time.sleep(0.01)
@@ -1126,7 +1108,7 @@ class TraceGroup(Notifier, v_util.TraceManager):
 
     def execTrace(self, cmdline):
         trace = getTrace()
-        self._initTrace(trace)
+        self.initTrace(trace)
         trace.execute(cmdline)
         self.traces[trace.getPid()] = trace
         return trace
@@ -1141,7 +1123,7 @@ class TraceGroup(Notifier, v_util.TraceManager):
         if (type(proc) == types.IntType or
             type(proc) == types.LongType):
             trace = getTrace()
-            self._initTrace(trace)
+            self.initTrace(trace)
             self.traces[proc] = trace
             try:
                 trace.attach(proc)
@@ -1151,26 +1133,12 @@ class TraceGroup(Notifier, v_util.TraceManager):
 
         else: # Hopefully a tracer object... if not.. you're dumb.
             trace = proc
-            self._initTrace(trace)
+            self.initTrace(trace)
             self.traces[trace.getPid()] = trace
 
         return trace
 
-    def getTrace(self):
-        '''
-        Similar to vtrace.getTrace(), but also init's
-        the trace for being managed by a TraceGroup.
-
-        Example:
-            tg = TraceGroup()
-            t = tg.getTrace()
-            t....
-        '''
-        t = getTrace()
-        self.addTrace(t)
-        return t
-
-    def _initTrace(self, trace):
+    def initTrace(self, trace):
         """
          - INTERNAL -
         Setup a tracer object to be ready for being in this
@@ -1300,10 +1268,6 @@ def getTrace():
     This is the function you will use to get a tracer object
     with the appropriate ancestry for your host.
     ex. mytrace = vtrace.getTrace()
-
-    NOTE: Use the release() method on the tracer once debugging
-          is complete.  This releases the tracer thread and allows
-          garbage collection to function correctly.
     """
 
     if remote: #We have a remote server!

@@ -239,22 +239,19 @@ def parsebits(bytes, offset, bitoff, bitsize):
     '''
     val = 0
     cnt = 0
+    addoff = offset + (bitoff / 8)
+    modoff = bitoff % 8
+    o = ord(bytes[addoff])
     while cnt < bitsize:
-
-        addbit = bitoff + cnt
-        addoff = offset + (addbit / 8)
-
-        modoff = addbit % 8
-
-        o = ord(bytes[addoff])
-        val = (val << 1) + ((o >> (7 - modoff)) & 1)
-
+        # bit offset 3 byteoff = 4 (8 - 3) - 1)
+        byteoff = (8 - modoff) - 1
+        val = (val << 1) + ((o >> byteoff) & 1)
         cnt += 1
-
+        modoff += 1
+        if modoff == 8:
+            addoff += 1
+            o = ord(bytes[addoff])
+            modoff = 0
     return val
 
-#if __name__ == '__main__':
-    #print hex(parsebits('\x0f\x00', 0, 4, 8))
-    #print hex(parsebits('\x0f\x0f', 0, 4, 12))
-    #print hex(parsebits('\x0f\x0f\xf0', 1, 4, 4))
 

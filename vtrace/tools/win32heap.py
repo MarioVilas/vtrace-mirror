@@ -223,7 +223,7 @@ class Win32Heap:
         return ret
 
     def _win7FreeLists(self):
-        #print 'Windows 7 Free List Parsing Fixme!'
+        print 'Windows 7 Free List Parsing Fixme!'
         return []
 
     def getFreeLists(self):
@@ -304,6 +304,7 @@ class Win32Segment:
                 # Skip any uncommited ranges...
                 usize = ucrdict.get(addr)
                 if usize != None:
+                    print 'UCRSIZE',usize
                     lastchunk = None
                     addr += usize
                     continue

@@ -5,66 +5,9 @@ The stalker subsystem is a breakpoint based coverage tool
 import vtrace
 
 import envi
-import envi.memory as e_mem
 import envi.codeflow as e_codeflow
 
-class StalkerCodeFlow(e_codeflow.CodeFlowContext):
-
-    def __init__(self, trace):
-        e_codeflow.CodeFlowContext.__init__(self, trace)
-        self.trace = trace
-        self.setupBreakLists(None)
-
-    def setupBreakLists(self, mmap):
-        self.mmap = mmap
-        self.bplist = []   # Block Breaks
-        self.sbreaks = []  # Stalker Breaks
-        self.scbreaks = [] # Callbreaks
-
-    def _cb_opcode(self, va, op, branches):
-
-        ret = []
-
-        for br,bflags in branches:
-
-            if bflags & envi.BR_DEREF and br != None:
-                bflags &= ~envi.BR_DEREF # Mask it back out...
-                if not self.trace.probeMemory(br, 1, e_mem.MM_READ):
-                    continue
-
-                br = self.trace.readMemoryFormat(br, '<P')[0]
-
-            # Skip branches to other maps...
-            if br != None and self.trace.getMemoryMap(br) != self.mmap:
-                continue
-
-            ret.append( (br, bflags) )
-
-            # Procedural branches to regs etc must be marked
-            # Otherwise, add another breakpoint like us
-            if bflags & envi.BR_PROC:
-                if br == None:
-                    self.scbreaks.append(op.va)
-                else:
-                    self.sbreaks.append(br)
-                continue
-
-            if br == None:
-                #print 'Skipping a branch from 0x%.8x: %s' % (op.va, repr(op))
-                self.scbreaks.append(op.va)
-                continue
-
-            # Conditional branches always create new blocks...
-            if bflags & envi.BR_COND:
-                self.bplist.append(br)
-                continue
-
-            # Even non-conditional jmp's will create new blocks for now...
-            if br != op.va + len(op):
-                self.bplist.append(br)
-                continue
-
-        return ret
+brskip = (envi.BR_PROC | envi.BR_DEREF)
 
 class StalkerBreak(vtrace.Breakpoint):
 
@@ -93,16 +36,23 @@ class StalkerBreak(vtrace.Breakpoint):
         breaks = trace.getMeta('StalkerBreaks')
         h = trace.getMeta('StalkerHits')
         h.append(self.address)
+        trace.runAgain()
+
+        self.bplist = []   # Block Breaks
+        self.sbreaks = []  # Stalker Breaks
+        self.scbreaks = [] # Callbreaks
 
         cf = trace.getMeta('StalkerCodeFlow')
         if cf == None:
-            cf = StalkerCodeFlow(trace)
+            cf = e_codeflow.CodeFlowContext(trace, opcallback=self.opcallback)
             trace.setMeta('StalkerCodeFlow', cf)
 
-        cf.setupBreakLists(self.mymap)
+        # we need to make sure it points to *our* callback
+        cf.opcallback = self.opcallback
+
         cf.addCodeFlow(self.address, persist=True)
 
-        for va in cf.bplist:
+        for va in self.bplist:
             if breaks.get(va):
                 continue
             breaks[va] = True
@@ -110,7 +60,7 @@ class StalkerBreak(vtrace.Breakpoint):
             b = StalkerBlockBreak(va)
             bid = trace.addBreakpoint(b)
 
-        for va in cf.sbreaks:
+        for va in self.sbreaks:
             if breaks.get(va):
                 continue
             breaks[va] = True
@@ -118,13 +68,48 @@ class StalkerBreak(vtrace.Breakpoint):
             b = StalkerBreak(va)
             bid = trace.addBreakpoint(b)
 
-        for va in cf.scbreaks:
+        for va in self.scbreaks:
             if breaks.get(va):
                 continue
             breaks[va] = True
             #print 'call: 0x%.8x' % va
             b = StalkerDynBreak(va)
             bid = trace.addBreakpoint(b)
+
+    def opcallback(self, va, op):
+        branches = op.getBranches()
+        for br,bflags in branches:
+
+            if bflags & envi.BR_DEREF and br != None:
+                br = self.trace.readMemoryFormat(br, '<P')[0]
+
+            # For now, we skip all branches to another module
+            if br != None and self.trace.getMemoryMap(br) != self.mymap:
+                continue
+
+            # Procedural branches to regs etc must be marked
+            # Otherwise, add another breakpoint like us
+            if bflags & envi.BR_PROC:
+                if br == None:
+                    self.scbreaks.append(op.va)
+                else:
+                    self.sbreaks.append(br)
+                continue
+
+            if br == None:
+                #print 'Skipping a branch from 0x%.8x: %s' % (op.va, repr(op))
+                self.scbreaks.append(op.va)
+                continue
+
+            # Conditional branches always create new blocks...
+            if bflags & envi.BR_COND:
+                self.bplist.append(br)
+                continue
+
+            # Even non-conditional jmp's will create new blocks for now...
+            if br != op.va + len(op):
+                self.bplist.append(br)
+                continue
 
 class StalkerBlockBreak(vtrace.Breakpoint):
     '''

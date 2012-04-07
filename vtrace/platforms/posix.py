@@ -135,7 +135,7 @@ class PosixMixin:
             if self.stepping:
                 #FIXME try out was single step thing for intel
                 self.stepping = False
-                self._fireStep()
+                self.fireNotifiers(vtrace.NOTIFY_STEP)
 
             elif self.checkWatchpoints():
                 return

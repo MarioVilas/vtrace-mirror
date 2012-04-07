@@ -67,22 +67,22 @@ class PageWatchpoint(Watchpoint):
         pc = trace.getProgramCounter()
         vaddr,vperm = trace.platformGetMemFault()
         pw.append((pc, vaddr, vperm))
-        # Change to/from fastbreak on pagerun...
-        self.fastbreak = trace.getMeta('pagerun')
+        if trace.getMeta('pagerun'):
+            trace.runAgain()
 
     def getName(self):
         bname = Breakpoint.getName(self)
         return "%s (%s %d bytes)" % (bname, e_mem.reprPerms(self._new_perms), self.wpsize)
 
     def activate(self, trace):
-        #trace.requireNotRunning()
+        trace.requireNotRunning()
         if not self.active:
             trace.protectMemory(self.address, self.wpsize, self._new_perms)
             self.active = True
         return self.active
 
     def deactivate(self, trace):
-        #trace.requireNotRunning()
+        trace.requireNotRunning()
         if self.active:
             trace.protectMemory(self.address, self.wpsize, self._orig_perms)
             self.active = False

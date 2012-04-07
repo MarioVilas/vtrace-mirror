@@ -65,7 +65,6 @@ class MemoryView(vw_views.VTextView, e_canvas.MemoryCanvas):
 
         self.registerHotKey(KEYCODE_esc, self.goback)
 
-    @idlethread
     def setColorMap(self, map):
         oldmap = None
         if self.colormap != None:
@@ -81,8 +80,7 @@ class MemoryView(vw_views.VTextView, e_canvas.MemoryCanvas):
         if self.colormap:
             for va,color in self.colormap.items():
                 tag = self.getVaTag(va)
-                tag.set_property('background', color)
-                tag.set_property('foreground', 'black')
+                tag.set_property("background", color)
 
     def registerHotKey(self, keycode, callback, args=(), kwargs={}):
         self.hotkeys[keycode] = (callback,args,kwargs)
@@ -182,7 +180,7 @@ class MemoryView(vw_views.VTextView, e_canvas.MemoryCanvas):
               rend != self.currend ):
 
 
-            self.renderMemory(va, size, rend=rend)
+            self.render(va, size, rend=rend)
 
     def goto(self, va, size=None, rend=None):
         if size == None:
@@ -240,7 +238,7 @@ class MemoryView(vw_views.VTextView, e_canvas.MemoryCanvas):
             #self.memwin.eentry.set_text(hex(va))
 
     @idlethreadsync
-    def renderMemory(self, va, size, rend=None):
+    def render(self, va, size, rend=None):
         self.vwClearText()
         self.iter = self.vwGetAppendIter()
 
@@ -389,7 +387,7 @@ class ScrolledMemoryView(MemoryView):
     def goto(self, va, size=None, rend=None):
         if size == None:
             size = self.lastsize
-        self.renderMemory(va, size, rend=rend)
+        self.render(va, size, rend=rend)
 
     def vwClearText(self):
         pass

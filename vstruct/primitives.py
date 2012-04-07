@@ -15,7 +15,7 @@ class v_base(object):
 
     # Sub-classes (primitive base, or VStruct must have these
     def vsParse(self, bytes): return NotImplemented
-    def vsCalculate(self): pass
+    def vsGetFormat(self): return NotImplemented
     def vsIsPrim(self): return NotImplemented
     def vsGetTypeName(self): return NotImplemented
 
@@ -27,7 +27,6 @@ class v_prim(v_base):
         self._vs_value = None
         self._vs_length = None
         self._vs_fmt = None
-        self._vs_align = None
 
     def vsIsPrim(self):
         return True
@@ -35,26 +34,31 @@ class v_prim(v_base):
     def vsGetTypeName(self):
         return self.__class__.__name__
 
-    def vsParse(self, bytes, offset=0):
+    def vsParse(self, bytes):
         """
         Parser for primitives which assumes we are
         calling parse directly.
         """
-        return NotImplemented
+        fmt = "<%s" % self.vsGetFormat()
+        val = struct.unpack(fmt, bytes)[0]
+        self.vsSetParsedValue(val)
 
-    def vsParseFd(self, fd):
-        # Most primitives should be able to simply use this...
-        fbytes = fd.read(self._vs_length)
-        if len(fbytes) != self._vs_length:
-            raise Excetpion('Not enough data in fd!')
+    def vsSetParsedValue(self, value):
+        """
+        Primitives will be assigned their values by a parser
+        which chops data up with struct format strings.  This
+        method will be called by parsers to assign the value
+        of a primitive from a struct.unpack call.
+        """
+        self._vs_value = value
 
-        self.vsParse(fbytes)
-
-    def vsEmit(self):
-        '''
-        Return the actual bytes which represent this field
-        '''
-        return NotImplemented
+    def vsGetFmtValue(self):
+        """
+        The emit function uses this to ask each primitive for the
+        object to be put into the struct pack sequence.
+        Most objects just return their value...
+        """
+        return self._vs_value
 
     def vsGetValue(self):
         """
@@ -70,12 +74,8 @@ class v_prim(v_base):
         """
         self._vs_value = value
 
-    def vsSetLength(self, size):
-        '''
-        Set the length of this primitive type.  This may be used to
-        dynamically update the length of string fields, etc...
-        '''
-        return NotImplemented
+    def vsGetFormat(self):
+        return self._vs_fmt
 
     def __repr__(self):
         return repr(self.vsGetValue())
@@ -86,77 +86,32 @@ class v_prim(v_base):
     def __str__(self):
         return str(self.vsGetValue())
 
-num_fmts = {
-    (True,1):'>B',
-    (True,2):'>H',
-    (True,4):'>I',
-    (True,8):'>Q',
-    (False,1):'<B',
-    (False,2):'<H',
-    (False,4):'<I',
-    (False,8):'<Q',
-}
-
 class v_number(v_prim):
 
-    _vs_length = 1
-
-    def __init__(self, value=0, bigend=False):
+    def __init__(self, value=0, swapend=False):
         v_prim.__init__(self)
-        self._vs_bigend = bigend
-        self._vs_value = value
-        self._vs_length = self.__class__._vs_length
-        self._vs_fmt = num_fmts.get( (bigend, self._vs_length) )
-
-    def vsGetValue(self):
-        return self._vs_value
-
-    def vsParse(self, fbytes, offset=0):
-        '''
-        Parse the given numeric type from the given bytes...
-        '''
-        sizeoff = offset + self._vs_length
-
-        if self._vs_fmt != None:
-            b = fbytes[ offset : sizeoff ]
-            self._vs_value = struct.unpack(self._vs_fmt, b)[0]
-
-        else:
-            r = []
-            for i in range(self._vs_length):
-                r.append( ord( fbytes[ offset + i ] ) )
-
-            if not self._vs_bigend:
-                r.reverse()
-
-            self._vs_value = 0
-            for x in r:
-                self._vs_value = (self._vs_value << 8) + x
-
-        return sizeoff
-
-    def vsEmit(self):
-        '''
-        Emit the bytes for this numeric type...
-        '''
-        if self._vs_fmt != None:
-            return struct.pack(self._vs_fmt, self._vs_value)
-
-        r = []
-        for i in range(self._vs_length):
-            r.append( chr( (self._vs_value >> (i*8)) & 0xff) )
-
-        if self._vs_bigend:
-            r.reverse()
-
-        return ''.join(r)
-
+        self._vs_swapend = swapend
+        self._vs_length = struct.calcsize(self.vsGetFormat())
+        self.vsSetValue(value)
 
     def vsSetValue(self, value):
         """
         Assure that the value is long() able for all numeric types.
         """
         self._vs_value = long(value)
+
+    def vsSetParsedValue(self, value):
+        # We were parsed N endian.  Switch if needed.
+        if self._vs_swapend:
+            oval = value
+            value = 0
+            for i in range(self._vs_length):
+                value = value << 8
+                value += (oval >> (8*i)) & 0xff
+        self.vsSetValue(value)
+
+    def vsGetFormat(self):
+        return self.__class__._vs_fmt
 
     def __int__(self):
         return int(self._vs_value)
@@ -231,49 +186,44 @@ class v_number(v_prim):
 
 class v_uint8(v_number):
     _vs_builder = True
-    _vs_length = 1
+    _vs_fmt = "B"
 
 class v_uint16(v_number):
     _vs_builder = True
-    _vs_length = 2
-
-class v_uint24(v_number):
-    _vs_builder = True
-    _vs_length = 3
+    _vs_fmt = "H"
 
 class v_uint32(v_number):
     _vs_builder = True
-    _vs_length = 4
+    _vs_fmt = "I"
 
 class v_uint64(v_number):
     _vs_builder = True
-    _vs_length = 8
+    _vs_fmt = "Q"
 
 class v_int8(v_number):
     _vs_builder = True
-    _vs_length = 1
+    _vs_fmt = "b"
 
 class v_int16(v_number):
     _vs_builder = True
-    _vs_length = 2
-
-class v_int24(v_number):
-    _vs_builder = True
-    _vs_length = 3
+    _vs_fmt = "h"
 
 class v_int32(v_number):
     _vs_builder = True
-    _vs_length = 4
+    _vs_fmt = "i"
 
 class v_int64(v_number):
     _vs_builder = True
-    _vs_length = 8
+    _vs_fmt = "q"
 
 pointersize = struct.calcsize("P")
 
 class v_size_t(v_number):
     _vs_builder = True
-    _vs_length = pointersize
+    if pointersize == 4:
+        _vs_fmt = "I"
+    else:
+        _vs_fmt = "Q"
 
     def __repr__(self):
         return "0x%.8x" % self._vs_value
@@ -283,17 +233,13 @@ class v_ptr(v_size_t):
 
 class v_ptr32(v_ptr):
     _vs_builder = True
-    _vs_length = 4
+    _vs_fmt = "I"
 
 class v_ptr64(v_ptr):
     _vs_builder = True
-    _vs_length = 8
+    _vs_fmt = "Q"
 
 class v_bytes(v_prim):
-
-    '''
-    v_bytes is used for fixed width byte fields.
-    '''
 
     _vs_builder = True
 
@@ -303,27 +249,9 @@ class v_bytes(v_prim):
             vbytes = '\x00' * size
         self._vs_length = len(vbytes)
         self._vs_value = vbytes
-        self._vs_align = 1
 
-    def vsSetValue(self, val):
-        if len(val) != self._vs_length:
-            raise Exception('v_bytes field set to wrong length!')
-        self._vs_value = val
-
-    def vsParse(self, fbytes, offset=0):
-        offend = offset + self._vs_length
-        self._vs_value = fbytes[offset : offend]
-        return offend
-
-    def vsEmit(self):
-        return self._vs_value
-
-    def vsSetLength(self, size):
-        size = int(size)
-        self._vs_length = size
-        # Either chop or expand my string...
-        b = self._vs_value[:size]
-        self._vs_value = b.ljust(size, '\x00')
+    def vsGetFormat(self):
+        return "%ds" % len(self)
 
     def __repr__(self):
         return self._vs_value.encode('hex')
@@ -341,29 +269,20 @@ class v_str(v_prim):
         v_prim.__init__(self)
         self._vs_length = size
         self._vs_value = val.ljust(size, '\x00')
-        self._vs_align = 1
-
-    def vsParse(self, fbytes, offset=0):
-        offend = offset + self._vs_length
-        self._vs_value = fbytes[offset : offend]
-        return offend
-
-    def vsEmit(self):
-        return self._vs_value
 
     def vsGetValue(self):
-        s = self._vs_value.split("\x00")[0]
-        return s
+        val = v_prim.vsGetValue(self)
+        return val.split("\x00")[0]
 
     def vsSetValue(self, val):
-        self._vs_value = val.ljust(self._vs_length, '\x00')
+        realval = val.ljust(len(self), '\x00')
+        v_prim.vsSetValue(self, realval)
 
-    def vsSetLength(self, size):
-        size = int(size)
-        self._vs_length = size
-        # Either chop or expand my string...
-        b = self._vs_value[:size]
-        self._vs_value = b.ljust(size, '\x00')
+    def vsGetFormat(self):
+        return "%ds" % len(self)
+
+    def __len__(self):
+        return len(self._vs_value)
 
 class v_wstr(v_str):
     '''
@@ -380,28 +299,23 @@ class v_wstr(v_str):
         self._vs_length = len(b)
         self._vs_value = b
         self._vs_encode = encode
-        self._vs_align = 2
-
-    def vsParse(self, fbytes, offset=0):
-        offend = offset + self._vs_length
-        self._vs_value = fbytes[offset : offend]
-        return offend
-
-    def vsEmit(self):
-        return self._vs_value
 
     def vsGetValue(self):
-        cstr = self._vs_value.decode(self._vs_encode)
-        return cstr.split('\x00')[0]
+        val = v_prim.vsGetValue(self)
+        val = val.decode(self._vs_encode)
+        return val.split("\x00")[0]
 
     def vsSetValue(self, val):
         rbytes = val.encode(self._vs_encode)
-        self._vs_value = rbytes.ljust(len(self), '\x00')
+        rbytes = rbytes.ljust(len(self), '\x00')
+        v_prim.vsSetValue(self, rbytes)
 
-    def vsGetValue(self):
-        s = self._vs_value.decode(self._vs_encode)
-        s = s.split("\x00")[0]
-        return s
+    def vsGetFormat(self):
+        return "%ds" % len(self)
+
+    def __len__(self):
+        return len(self._vs_value)
+    
 
 class GUID(v_prim):
 
@@ -420,14 +334,6 @@ class GUID(v_prim):
         if guidstr != None:
             self._parseGuidStr(guidstr)
 
-    def vsParse(self, fbytes, offset=0):
-        offend = offset + self._vs_length
-        self._guid_fields = struct.unpack("<IHH8B", bytes[offset:offend])
-        return offend
-
-    def vsEmit(self):
-        return struck.pack("<IHH8B", *self._guid_fields)
-
     def _parseGuidStr(self, gstr):
         gstr = gstr.replace("{","")
         gstr = gstr.replace("}","")
@@ -436,11 +342,11 @@ class GUID(v_prim):
         # Totally cheating... ;)
         self._guid_fields = struct.unpack(">IHH8B", bytes)
 
-    def vsSetValue(self, guidstr):
-        self._parseGuidStr(guidstr)
+    def vsSetValue(self, bytes):
+        self._guid_fields = struct.unpack("<IHH8B", bytes)
 
     def vsGetValue(self):
-        return repr(self)
+        return struck.pack("<IHH8B", *self._guid_fields)
 
     def __repr__(self):
         base = "{%.8x-%.4x-%.4x-%.2x%.2x-%.2x%.2x%.2x%.2x%.2x%.2x}"

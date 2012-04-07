@@ -1,6 +1,5 @@
 
 import os
-import re
 import code
 import time
 import socket
@@ -119,8 +118,6 @@ class KeBugCheckBreak(vtrace.Breakpoint):
         sp = trace.getStackCounter()
         savedpc, exccode = trace.readMemoryFormat(sp, '<PP')
         trace._fireSignal(exccode)
-
-bigmask = 0xffffffffffffffff
 
 class GdbStubMixin(e_registers.RegisterContext):
 
@@ -298,26 +295,9 @@ class GdbStubMixin(e_registers.RegisterContext):
         fsparts = fsstr.split()
         return int(fsparts[3], 16)
 
-    def _getVmwareIdtr(self):
-        istr = self._monitorCommand('r idtr')
-        m = re.match('.* base=(0x\w+) .*', istr)
-        idtr = long(m.groups()[0], 0)
-        return idtr
-
-    def _getNtOsKrnl(self, idtr):
-        x1, kptr, x2 = self.readMemoryFormat(idtr, '<IQI')
-        try:
-            kptr -= kptr & 0xfff
-            while not self.readMemory(kptr, 16).startswith('MZ\x90\x00'):
-                kptr -= 4096
-            return kptr
-        except Exception, e:
-            return None
-
     def _enumGdbTarget(self):
         psize = self.getPointerSize()
         vercmd = self._monitorCommand('version')
-
         if self._monitorCommand('help').find('linuxoffsets') != -1:
 
             self.setMeta('GdbPlatform', 'VMware%d' % (psize * 8))
@@ -331,18 +311,17 @@ class GdbStubMixin(e_registers.RegisterContext):
                 # Windows has a self reference in the KPCR...
                 if fs_fields[7] == fsbase:
 
+                    self.setMeta('GdbTargetPlatform', 'Windows')
+                    self.casesens = False
                     # Use KPCR from XP for now...
                     import vstruct.defs.windows.win_5_1_i386.ntoskrnl as vs_w_ntoskrnl
                     self.vsbuilder.addVStructNamespace('nt', vs_w_ntoskrnl)
 
-                    self.setMeta('GdbTargetPlatform', 'Windows')
-                    self.casesens = False
-
                     kpcr = self.getStruct('nt.KPCR', fsbase)
                     kver = self.getStruct('nt.DBGKD_GET_VERSION64', kpcr.KdVersionBlock)
 
-                    kernbase = kver.KernBase & bigmask
-                    modlist = kver.PsLoadedModuleList & bigmask
+                    kernbase = kver.KernBase & 0xffffffff
+                    modlist = kver.PsLoadedModuleList & 0xffffffff
 
                     self.setVariable('PsLoadedModuleList', modlist)
                     self.setVariable('KernelBase', kernbase)
@@ -356,9 +335,9 @@ class GdbStubMixin(e_registers.RegisterContext):
                     while ldr_entry != modlist:
                         ldte = self.getStruct('nt.LDR_DATA_TABLE_ENTRY', ldr_entry)
                         dllname = self.readMemory(ldte.FullDllName.Buffer, ldte.FullDllName.Length).decode('utf-16le')
-                        dllbase = ldte.DllBase & bigmask
+                        dllbase = ldte.DllBase & 0xffffffff
                         self.addLibraryBase(dllname, dllbase, always=True)
-                        ldr_entry = ldte.InLoadOrderLinks.Flink & bigmask
+                        ldr_entry = ldte.InLoadOrderLinks.Flink & 0xffffffff
 
                     try:
                         self.addBreakpoint(KeBugCheckBreak('nt.KeBugCheck'))
@@ -374,42 +353,9 @@ class GdbStubMixin(e_registers.RegisterContext):
                     # FIXME enumerate non-windows OSs!
                     self.fireNotifiers(vtrace.NOTIFY_ATTACH)
 
-            else: # FIXME 64bit vmware!
-
-                idtr = self._getVmwareIdtr()
-                self.setVariable('idtr', idtr)
-
-                win_kpcr = 0x07fffffde000
-
-                fields = [-1,]
-                try:
-                    fields = self.readMemoryFormat(win_kpcr, '<7Q')
-                except Exception, e:
-                    print 'Exception:',e
-
-                # FIXME other heuristics for linux/bsd/etc...
-                if fields[-1] == win_kpcr:
-                    self._initWin64(win_kpcr)
-                else:
-                    self.fireNotifiers(vtrace.NOTIFY_ATTACH)
-
-                #fsbase = self._getVmwareReg('fs')
-                #self.setVariable('fsbase', fsbase)
-
-                #fs_fields = self.readMemoryFormat(fsbase, '<8I')
-
-                #nt = self._getNtOsKrnl(idtr)
-                #if nt != None:
-                    # We are 64bit windows!
-                    #import vstruct.defs.windows.win_6_1_amd64.ntoskrnl as vs_w_ntoskrnl
-                    #self.vsbuilder.addVStructNamespace('nt', vs_w_ntoskrnl)
-                    #self.setMeta('GdbTargetPlatform', 'Windows')
-                    #self.setVariable('KernelBase', nt)
-                    #self.platformParseBinary = self.platformParseBinaryPe
-                    #self.fireNotifiers(vtrace.NOTIFY_ATTACH)
-                    #self.addLibraryBase('nt', nt, always=True)
-
-                #else:
+            else:
+                # FIXME 64bit vmware!
+                self.fireNotifiers(vtrace.NOTIFY_ATTACH)
 
         elif vercmd.lower().find('open on-chip debugger') != -1:
 
@@ -422,57 +368,6 @@ class GdbStubMixin(e_registers.RegisterContext):
 
 
     # FIXME implement getRegister(idx) and steal get/set for regs which are not part of the whole...
-    def _initWin64(self, kpcr):
-
-        import vstrct.defs.windows.win_6_1_amd64.ntoskrnl as vs_w_ntoskrnl
-        self.vsbuilder.addVStructNamespace('nt', vs_w_ntoskrnl)
-        self._initWinBase()
-                #nt = self._getNtOsKrnl(idtr)
-                #if nt != None:
-                    # We are 64bit windows!
-                    #import vstruct.defs.windows.win_6_1_amd64.ntoskrnl as vs_w_ntoskrnl
-                    #self.vsbuilder.addVStructNamespace('nt', vs_w_ntoskrnl)
-                    #self.setMeta('GdbTargetPlatform', 'Windows')
-                    #self.setVariable('KernelBase', nt)
-                    #self.platformParseBinary = self.platformParseBinaryPe
-                    #self.fireNotifiers(vtrace.NOTIFY_ATTACH)
-                    #self.addLibraryBase('nt', nt, always=True)
-
-    def _initWinBase(self, kpcr):
-        self.setMeta('GdbTargetPlatform', 'Windows')
-        self.casesens = False
-
-        kpcr = self.getStruct('nt.KPCR', kpcr)
-        kver = self.getStruct('nt.DBGKD_GET_VERSION64', kpcr.KdVersionBlock)
-
-        kernbase = kver.KernBase & bigmask
-        modlist = kver.PsLoadedModuleList & bigmask
-
-        self.setVariable('PsLoadedModuleList', modlist)
-        self.setVariable('KernelBase', kernbase)
-
-        self.platformParseBinary = self.platformParseBinaryPe
-
-        self.fireNotifiers(vtrace.NOTIFY_ATTACH)
-
-        self.addLibraryBase('nt', kernbase, always=True)
-        ldr_entry = self.readMemoryFormat(modlist, '<P')[0]
-        while ldr_entry != modlist:
-            ldte = self.getStruct('nt.LDR_DATA_TABLE_ENTRY', ldr_entry)
-            dllname = self.readMemory(ldte.FullDllName.Buffer, ldte.FullDllName.Length).decode('utf-16le')
-            dllbase = ldte.DllBase & bigmask
-            self.addLibraryBase(dllname, dllbase, always=True)
-            ldr_entry = ldte.InLoadOrderLinks.Flink & bigmask
-
-        try:
-            self.addBreakpoint(KeBugCheckBreak('nt.KeBugCheck'))
-        except Exception, e:
-            print 'Error Seting KeBugCheck Bp: %s' % e
-
-        try:
-            self.addBreakpoint(KeBugCheckBreak('nt.KeBugCheckEx'))
-        except Exception, e:
-            print 'Error Seting KeBugCheck Bp: %s' % e
 
     def platformProcessEvent(self, event):
         #print 'EVENT ->%s<-' % event
