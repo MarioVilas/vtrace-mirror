@@ -180,6 +180,7 @@ class LinuxMixin(v_posix.PtraceMixin, v_posix.PosixMixin):
 
     @v_base.threadwrap
     def platformExec(self, cmdline):
+        print 'FIXME: known bug with thread create events from execd linux trace!'
         pid = v_posix.PtraceMixin.platformExec(self, cmdline)
         self.pthreads = [pid,]
         self.setMeta("ExeName",self._findExe(pid))
@@ -192,7 +193,7 @@ class LinuxMixin(v_posix.PtraceMixin, v_posix.PosixMixin):
         if self.memfd == None:
             self.memfd = libc.open("/proc/%d/mem" % self.pid, O_RDWR | O_LARGEFILE, 0755)
 
-	x = libc.lseek64(self.memfd, offset, 0)
+        x = libc.lseek64(self.memfd, offset, 0)
 
     @v_base.threadwrap
     def platformAllocateMemory(self, size, perms=e_mem.MM_RWX, suggestaddr=0):

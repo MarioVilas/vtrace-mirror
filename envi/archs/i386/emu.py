@@ -795,6 +795,7 @@ class IntelEmulator(i386Module, i386RegisterContext, envi.Emulator):
             dsize = op.opers[0].tsize
             ssize = op.opers[1].tsize
 
+            # FIXME all these are taken care of in disasm now...
             if dsize > ssize:
                 src = e_bits.sign_extend(src, ssize, dsize)
                 ssize = dsize
@@ -1558,18 +1559,12 @@ class IntelEmulator(i386Module, i386RegisterContext, envi.Emulator):
         self.setOperValue(op, 1, temp)
 
     def i_xor(self, op):
-        # NOTE: This is pre-emptive for partially defined emulation
         dsize = op.opers[0].tsize
         ssize = op.opers[1].tsize
-        if op.opers[0] == op.opers[1]:
-            ret = 0
-        else:
-            dst = self.getOperValue(op, 0)
-            src = self.getOperValue(op, 1)
-            if dsize != ssize:
-                src = e_bits.sign_extend(src, ssize, dsize)
-                ssize = dsize
-            ret = src ^ dst
+        dst = self.getOperValue(op, 0)
+        src = self.getOperValue(op, 1)
+
+        ret = src ^ dst
 
         self.setOperValue(op, 0, ret)
 

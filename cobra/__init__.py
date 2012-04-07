@@ -358,6 +358,7 @@ def setSslCert(ctx, sslCert = None):
         ctx.use_certificate(cert)
 
 class CobraDaemon(ThreadingTCPServer):
+
     def __init__(self, host="", port=COBRA_PORT):
         self.shared = {}
         self.host = host
@@ -414,6 +415,9 @@ class CobraDaemon(ThreadingTCPServer):
         self.shared[name] = obj
         self.refcnts[name] = refcnt
         return name
+
+    def getObjectRefCount(self, name):
+        return self.refcnts.get(name)
 
     def decrefObject(self, name):
         """
@@ -528,6 +532,9 @@ class CobraConnectionHandler(BaseRequestHandler):
                 if verbose: traceback.print_exc()
                 try:
                     csock.sendMessage(COBRA_ERROR, name, e)
+                except TypeError, typee:
+                    # Probably about pickling...
+                    csock.sendMessage(COBRA_ERROR, name, Exception(str(e)))
                 except CobraClosedException:
                     pass
 

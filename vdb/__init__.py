@@ -749,12 +749,13 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
         -B         - Step past the next branch instruction
         -C <count> - Step <count> instructions
         -R         - Step to return from this function
+        -V         - Show operand values during single step (verbose!)
 
         """
         t = self.trace
         argv = e_cli.splitargs(line)
         try:
-            opts,args = getopt(argv, "A:BC:R")
+            opts,args = getopt(argv, "A:BC:RV")
         except Exception, e:
             return self.do_help("stepi")
 
@@ -762,6 +763,7 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
         taddr = None
         toret = False
         tobrn = False
+        showop = False
 
         for opt, optarg in opts:
             if opt == '-A':
@@ -775,6 +777,9 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
 
             elif opt == '-R':
                 toret = True
+
+            elif opt == '-V':
+                showop = True
 
         if ( count == None 
              and taddr == None
@@ -807,6 +812,14 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
                 self.canvas.addVaText('0x%.8x' % pc, pc)
                 self.canvas.addText(':  ')
                 op.render(self.canvas)
+                if showop:
+                    self.canvas.addText(' ; ')
+                    for oper in op.opers:
+                        try:
+                            val = oper.getOperValue(op, emu=t)
+                            self.canvas.addText('0x%.8x ' % val)
+                        except Exception, e:
+                            self.canvas.addText(str(e))
                 self.canvas.addText('\n')
 
                 if op.iflags & envi.IF_CALL:
@@ -861,9 +874,8 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
 
         finally:
             self.setMode('FastStep', oldmode)
-            # We ate all the events, tell the GUI to update
-            # if it's around...
-            if self.gui != None: self.gui.setTraceWindowsActive(True)
+            # We ate all the events, tell things we have updated...
+            t.fireNotifiers(vtrace.NOTIFY_STEP)
 
     def do_go(self, line):
         """
@@ -1283,7 +1295,7 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
         -L <libname> - Add bp's to all functions in <libname>
         -F <filename> - Load bpcode from file
         -W perms:size - Set a hardware Watchpoint with perms/size (ie -W rw:4)
-        -f - Make added breakpoints from this command into "FastBreaks"
+        -f - Make added breakpoints from this command into "fastbreaks"
         -S <libname>:<regex> - Add bp's to all matching funcs in <libname>
 
         <address>... - Create Breakpoint
@@ -1396,7 +1408,7 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
         self.vprint(" [ Breakpoints ]")
         for bp in self.trace.getBreakpoints():
             cmdstr = self.bpcmds.get(bp.id, '')
-            self.vprint("%s enabled: %s %s" % (bp, bp.isEnabled(), cmdstr))
+            self.vprint("%s enabled: %s fast: %s %s" % (bp, bp.isEnabled(), bp.fastbreak, cmdstr))
 
     def do_fds(self, args):
         """
@@ -1598,6 +1610,10 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
 
         if len(argv) == 0:
             return self.do_help('recon')
+
+        if self.trace.getMeta('Architecture') != 'i386':
+            self.vprint('FIXME: recon only works on i386 right now...')
+            return
 
         opts,args = getopt(argv, 'A:CHQS:')
         for opt, optarg in opts:

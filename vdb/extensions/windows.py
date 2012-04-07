@@ -5,6 +5,7 @@ import getopt
 import vtrace
 import vtrace.tools.win32heap as win32heap
 import vtrace.tools.win32aslr as win32_aslr
+import vtrace.tools.iathook as vt_iathook
 import vtrace.tools.win32stealth as win32_stealth
 import vtrace.util as v_util
 
@@ -203,6 +204,17 @@ def validate_heaps(db):
             db.vprint("%s: 0x%.8x" % ("segment".rjust(9),seg.address))
             try:
                 blist = seg.getChunks()
+                for i,chunk in enumerate(blist):
+                    if i == 0:
+                        continue
+                    if heap._win7_heap:
+                        continue
+                    pchunk = blist[i-1]
+                    if chunk.chunk.PreviousSize != pchunk.chunk.Size:
+                        db.vprint('Corruption! (block at 0x%.8x (size: %d) block at 0x%.8x (prevsize: %d)' % 
+                                  (pchunk.address, pchunk.chunk.Size, chunk.address, chunk.chunk.PreviousSize))
+                        break
+
             except Exception, e:
                 db.vprint("%s: %s" % (e.__class__.__name__,e))
 
@@ -222,6 +234,9 @@ def heaps(vdb, line):
     """
     t = vdb.getTrace()
     t.requireAttached()
+
+    if t.getMeta('Architecture') == 'amd64':
+        vdb.vprint("WARNING: not all 64bit heap stuff works quite right yet!")
 
     argv = e_cli.splitargs(line)
     freelist_heap = None
@@ -409,7 +424,6 @@ def pagewatch(vdb, line):
     Usage: pagewatch [options] [<addr_expression>]
     -C - Clear the current pagewatch log
     -F - Toggle auto-continue behavior (run and record vs. stop on hit)
-         (NOTE: use this with 'mode FastBreak=True' for *really* fast!
     -L - List the current hits from the pagewatch log
     -M - Add page watches to the entire memory map from addr_expression
     -R - Use to enable *read* watching while adding a page watch
@@ -591,6 +605,20 @@ def pe(vdb, line):
     -S      Show PE sections
     -v      Show FileVersion from VS_VERSIONINFO
     -V      Show all keys from VS_VERSIONINFO
+
+    NOTE: "libname" may be a vtrace expression:
+
+    Examples:
+
+        # Show the imports from a PE loaded at 0x777c0000
+        pe -I 0x777c0000
+
+        # Show the exports from advapi32.dll
+        pe -E advapi32
+
+        # Show the build timestamp of the PE pointed to by a register
+        pe -t esi+10
+
     """
     #-v      Show PE version information
     argv = e_cli.splitargs(line)
@@ -914,8 +942,40 @@ def uac(db, line):
     u = t._getUacStatus()
     db.vprint('UAC Status: %s' % token_elevation_types.get(u))
 
+def hookiat(db, line):
+    '''
+    Hook the specified IAT entries by munging a pointer and emulating
+    "breakpoint" like behavior on the resultant memory access errors.  Basically,
+    break on import call...
+
+    Usage: hookiat <libname> [ <implibname> [ <impfuncname> ] ]
+
+    Example:
+        hookiat calc
+        hookiat calc kernel32
+        hookiat calc kernel32 LoadLibraryA
+
+    NOTE: Once added, you may use "bp" and commands like "bpedit" to modify,
+    remove, or add code to "iat hooks"
+    '''
+    argv = e_cli.splitargs(line)
+    arglen = len(argv)
+    if arglen < 1:
+        return db.do_help('hookiat')
+    if arglen > 3:
+        return db.do_help('hookiat')
+
+    db.vprint('Adding IAT Hooks (use bp/bpedit cmds to review/modify...)')
+    hooks = vt_iathook.hookIat(db.trace, *argv)
+    if len(hooks):
+        db.vprint('[ bpid ] [ IAT Name ]')
+    for iatname, bpid in hooks:
+        db.vprint('[%6d] %s' % (bpid, iatname))
+    db.vprint('Added %d hooks.' % len(hooks))
+
 # The necissary module extension function
 def vdbExtension(db, trace):
+    db.registerCmdExtension(hookiat)
     db.registerCmdExtension(pe)
     db.registerCmdExtension(peb)
     db.registerCmdExtension(einfo)

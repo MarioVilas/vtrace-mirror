@@ -62,6 +62,7 @@ def iterPcapFile(fd, reuse=False):
         #print eII.tree()
         if not reuse:
             ipv4 = vs_inet.IPv4()
+
         ipv4.vsParse(b, offset)
 
         # Make b *only* the IP datagram bytes...
@@ -69,11 +70,16 @@ def iterPcapFile(fd, reuse=False):
         offset = 0
 
         offset += len(ipv4)
+        tsize = len(b) - offset
 
         if ipv4.proto == vs_inet.IPPROTO_TCP:
 
+            if tsize < 20:
+                continue
+
             if not reuse:
                 tcp_hdr = vs_inet.TCP()
+
             tcp_hdr.vsParse(b, offset)
             offset += len(tcp_hdr)
             pdata = b[offset:]
@@ -82,8 +88,12 @@ def iterPcapFile(fd, reuse=False):
 
         elif ipv4.proto == vs_inet.IPPROTO_UDP:
 
+            if tsize < 8:
+                continue
+
             if not reuse:
                 udp_hdr = vs_inet.UCP()
+
             udp_hdr.vsParse(b, offset)
             offset += len(udp_hdr)
             pdata = b[offset:]
@@ -91,5 +101,6 @@ def iterPcapFile(fd, reuse=False):
             yield pkt,ipv4,udp_hdr,pdata
 
         else:
-            print 'UNHANDLED IP PROTOCOL: %d' % ipv4.proto
+            pass
+            #print 'UNHANDLED IP PROTOCOL: %d' % ipv4.proto
 

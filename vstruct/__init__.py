@@ -11,7 +11,24 @@ def isVstructType(x):
 
 class VStruct(vs_prims.v_base):
 
-    def __init__(self, bigend=False):
+    '''
+    The VStruct class is the bases for all groups of primitive fields which define a "structure".
+    Fields may be added with vsAddField() or simply added as attributes (provided you use a VStruct
+    or one of the vstruct.primitives in the initial assignment.)
+
+    Example:
+        import vstruct
+        from vstruct.primitives import *
+
+        vs = vstruct.VStruct()
+        vs.fieldone = v_uint32()
+        vs.fieldtwo = v_str(size=30)
+
+        bytes = vs.vsEmit()
+
+    '''
+
+    def __init__(self):
         # A tiny bit of evil...
         object.__setattr__(self, "_vs_values", {})
         vs_prims.v_base.__init__(self)
@@ -19,9 +36,32 @@ class VStruct(vs_prims.v_base):
         self._vs_fields = []
         self._vs_field_align = False # To toggle visual studio style packing
         self._vs_padnum = 0
-        self._vs_fmtbase = '<'
-        if bigend:
-            self._vs_fmtbase = '>'
+        self._vs_pcallbacks = {}
+
+    def vsAddParseCallback(self, fieldname, callback):
+        '''
+        Register a callback which will be triggered when the field with the given name
+        is set by the parser.  This can be used to simplify auto-parsing to change fields
+        sizes or whatnot during parsing.
+
+        (You may also name a method pcb_<FieldName> to get a callback for your struct.)
+
+        Example:
+
+            def updateLengthTarget(vs):
+                dostuff()
+
+            v.vsAddParseCallback('lenfield', updateLengthTarget)
+        '''
+        if self._vs_values.get(fieldname) == None:
+            raise Exception('Invalid Field: %s' % fieldname)
+
+        cblist = self._vs_pcallbacks.get(fieldname)
+        if cblist == None:
+            cblist = []
+            self._vs_pcallbacks[fieldname] = cblist
+
+        cblist.append(callback)
 
     def vsGetClassPath(self):
         '''
@@ -29,44 +69,72 @@ class VStruct(vs_prims.v_base):
         '''
         return '%s.%s' % (self.__module__, self._vs_name)
 
+    def vsParseFd(self, fd):
+        '''
+        Parse from the given file like object as input.
+        '''
+        for fname, fobj in self.vsGetFields():
+            fobj.vsParseFd(fd)
+            callback = getattr(self, 'pcb_%s' % fname, None)
+            if callback != None:
+                callback()
+            cblist = self._vs_pcallbacks.get(fname)
+            if cblist != None:
+                for callback in cblist:
+                    callback(self)
+
     def vsParse(self, sbytes, offset=0):
         """
         For all the primitives contained within, allow them
         an opportunity to parse the given data and return the
         total offset...
+
+        Any method named pcb_<FieldName> will be called back when the specified
+        field is set by the parser.
+        
         """
-        plist = self.vsGetPrims()
-        fmt = self.vsGetFormat()
-        size = struct.calcsize(fmt)
-        vals = struct.unpack(fmt, sbytes[offset:offset+size])
-        for i in range(len(plist)):
-            plist[i].vsSetParsedValue(vals[i])
-        return offset + size
+        for fname, fobj in self.vsGetFields():
+            offset = fobj.vsParse(sbytes, offset=offset)
+            callback = getattr(self, 'pcb_%s' % fname, None)
+            if callback != None:
+                callback()
+            cblist = self._vs_pcallbacks.get(fname)
+            if cblist != None:
+                for callback in cblist:
+                    callback(self)
+        return offset
 
     def vsEmit(self):
         """
         Get back the byte sequence associated with this structure.
         """
-        fmt = self.vsGetFormat()
-        r = []
-        for p in self.vsGetPrims():
-            r.append(p.vsGetFmtValue())
-        return struct.pack(fmt, *r)
-
-    def vsGetFormat(self):
-        """
-        Return the format specifier which would then be used
-        """
-        # Unpack everything little endian, let vsParseValue deal...
-        ret = self._vs_fmtbase
-        for p in self.vsGetPrims():
-            ret += p.vsGetFormat()
+        # FIXME....
+        ret = ''
+        for fname, fobj in self.vsGetFields():
+            ret += fobj.vsEmit()
         return ret
+        
+    def vsCalculate(self):
+        '''
+        Calculate fields which need correction before emitting bytes etc...
+
+        (VStruct extenders may call this, then modify fields internally)
+        '''
+        for fname, fobj in self.vsGetFields():
+            fobj.vsCalculate()
 
     def vsIsPrim(self):
         return False
 
     def vsGetFields(self):
+        '''
+        Get a list of (fieldname, fieldobj) tuples for all the kids
+        in this VStruct (non-recursive)
+
+        Example:
+                for kidname, kidobj in x.vsGetFields():
+                    print kidname
+        '''
         ret = []
         for fname in self._vs_fields:
             fobj = self._vs_values.get(fname)
@@ -80,9 +148,20 @@ class VStruct(vs_prims.v_base):
         return x
 
     def vsHasField(self, name):
+        '''
+        Test weather this structure contains a field with the
+        given name....
+
+        Example:
+            if x.vsHasField('woot'):
+                print 'STRUCT HAS WOOT FIELD!'
+        '''
         return self._vs_values.get(name) != None
 
     def vsSetField(self, name, value):
+        '''
+        Mostly for internal use...
+        '''
         if isVstructType(value):
             self._vs_values[name] = value
             return
@@ -119,7 +198,6 @@ class VStruct(vs_prims.v_base):
 
             delta = len(self) % align
             if delta != 0:
-                print "PADDING %s by %d" % (name,align-delta)
                 pname = "_pad%d" % self._vs_padnum
                 self._vs_padnum += 1
                 self._vs_fields.append(pname)
@@ -148,7 +226,7 @@ class VStruct(vs_prims.v_base):
 
     def vsGetOffset(self, name):
         """
-        Return the offset of a member.
+        Return the offset of a member (by name):
         """
         offset = 0
         for fname in self._vs_fields:
@@ -174,8 +252,10 @@ class VStruct(vs_prims.v_base):
         return ret
 
     def __len__(self):
-        fmt = self.vsGetFormat()
-        return struct.calcsize(fmt)
+        ret = 0
+        for fname, fobj in self.vsGetFields():
+            ret += len(fobj)
+        return ret
 
     def __getattr__(self, name):
         # Gotta do this for pickle issues...

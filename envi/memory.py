@@ -153,8 +153,19 @@ class IMemory:
 
 
     def writeMemoryFormat(self, va, fmt, *args):
-        bytes = struct.pack(fmt, *args)
-        self.writeMemory(va, bytes)
+        '''
+        Write a python format sequence of variables out to memory after
+        serializing using struct pack...
+
+        Example:
+            trace.writeMemoryFormat(va, '<PBB', 10, 30, 99)
+        '''
+        if self.imem_psize == 4:
+            fmt = fmt.replace("P","I")
+        elif self.imem_psize == 8:
+            fmt = fmt.replace("P","Q")
+        mbytes = struct.pack(fmt, *args)
+        self.writeMemory(va, mbytes)
 
     def getMemoryMap(self, va):
         """

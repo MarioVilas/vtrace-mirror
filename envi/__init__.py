@@ -402,7 +402,9 @@ class Opcode:
     def getOperValue(self, idx, emu=None):
         oper = self.opers[idx]
         return oper.getOperValue(self, emu=emu)
-            
+
+    def getOperands(self):
+        return list(self.opers)
 
 class Emulator(e_reg.RegisterContext, e_mem.IMemory):
     """

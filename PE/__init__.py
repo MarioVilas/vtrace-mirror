@@ -30,6 +30,15 @@ machine_names = {
     IMAGE_FILE_MACHINE_AMD64: 'amd64',
 }
 
+IMAGE_REL_BASED_ABSOLUTE              = 0
+IMAGE_REL_BASED_HIGH                  = 1
+IMAGE_REL_BASED_LOW                   = 2
+IMAGE_REL_BASED_HIGHLOW               = 3
+IMAGE_REL_BASED_HIGHADJ               = 4
+IMAGE_REL_BASED_MIPS_JMPADDR          = 5
+IMAGE_REL_BASED_IA64_IMM64            = 9
+IMAGE_REL_BASED_DIR64                 = 10
+
 IMAGE_DIRECTORY_ENTRY_EXPORT          =0   # Export Directory
 IMAGE_DIRECTORY_ENTRY_IMPORT          =1   # Import Directory
 IMAGE_DIRECTORY_ENTRY_RESOURCE        =2   # Resource Directory
@@ -165,7 +174,7 @@ class VS_VERSIONINFO:
         offset += 6
         offset, vinfosig = self._eatStringAndAlign(bytes, offset)
         if vinfosig != 'VS_VERSION_INFO':
-            Exception('Invalid VS_VERSION_INFO signature!')
+            Exception('Invalid VS_VERSION_INFO signature!: %s' % repr(vinfosig))
         if valsize:
             ffinfo = vs_pe.VS_FIXEDFILEINFO()
             ffinfo.vsParse(bytes[offset:offset+valsize])
@@ -191,7 +200,7 @@ class VS_VERSIONINFO:
         xoffset += 6
         xoffset, sigstr = self._eatStringAndAlign(bytes, xoffset)
         if sigstr != 'StringFileInfo':
-            raise Exception('Invalid StringFileInfo Key!')
+            raise Exception('Invalid StringFileInfo Key!: %s' % repr(sigstr))
         xmax = offset + mysize
         while xoffset < xmax:
             xoffset = self._stringTable(bytes, xoffset, mysize - (xoffset-offset))

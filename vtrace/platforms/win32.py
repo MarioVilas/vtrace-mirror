@@ -1330,7 +1330,7 @@ class WindowsMixin:
         # Do the crazy "can't supress exceptions from detach" dance.
         if ((not self.exited) and
             self.getCurrentBreakpoint() != None):
-            self._cleanupBreakpoints(force=True)
+            self._cleanupBreakpoints()
             self.platformContinue()
             self.platformSendBreak()
             self.platformWait()
@@ -1517,11 +1517,9 @@ class WindowsMixin:
                         self.fireNotifiers(vtrace.NOTIFY_BREAK)
 
                 elif excode == EXCEPTION_SINGLE_STEP:
-                    # NOTE: on win32, aparently a hardware breakpoints
-                    # come through with an EXCEPTION_SINGLE_STEP code
-                    # rather than EXCEPTION_BREAKPOINT.
+
                     if not self.checkWatchpoints():
-                        self.fireNotifiers(vtrace.NOTIFY_STEP)
+                        self._fireStep()
 
                 else:
                     if excode == 0xc0000005:

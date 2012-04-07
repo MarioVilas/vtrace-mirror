@@ -23,14 +23,14 @@ class IntelCall(envi.CallingConvention):
         """
         esp = emu.getRegister(REG_ESP)
         esp += 4 # For the saved eip
-        return struct.unpack("<%dL" % count, emu.readMemory(esp, 4*count))
+        return struct.unpack("<%dI" % count, emu.readMemory(esp, 4*count))
 
     def setReturnValue(self, emu, value, argc):
         """
         A return routine which cleans up it's stack args.
         """
         esp = emu.getRegister(REG_ESP)
-        eip = struct.unpack("<L", emu.readMemory(esp, 4))[0]
+        eip = emu.readMemoryFormat(esp, '<I')[0]
         esp += 4 # For the saved eip
         esp += (4 * argc) # Cleanup saved args
 
@@ -47,11 +47,11 @@ class Cdecl(IntelCall):
         A base non-cleanup stackarg return
         """
         esp = emu.getRegister(REG_ESP)
-        eip = struct.unpack("<L", emu.readMemory(esp, 4))[0]
+        eip = struct.unpack("<I", emu.readMemory(esp, 4))[0]
         esp += 4 # For the saved eip
 
-        emu.setRegister(REG_ESP, esp)
         emu.setRegister(REG_EAX, value)
+        emu.setStackCounter(esp)
         emu.setProgramCounter(eip)
 
 class ThisCall(StdCall):
@@ -62,17 +62,61 @@ class ThisCall(StdCall):
         esp = emu.getRegister(REG_ESP)
         esp += 4 # For the saved eip
         if count:
-            ret.extend(struct.unpack("<%dL" % count, emu.readMemory(esp, 4*count)))
+            ret.extend(struct.unpack("<%dI" % count, emu.readMemory(esp, 4*count)))
         return ret
 
     def setReturnValue(self, emu, value, argc):
         argc -= 1 # One for the ECX...
         return StdCall.setReturnValue(self, emu, value, argc)
 
+class FastCall(envi.CallingConvention):
+
+    def __init__(self, reglist):
+        self.reglist = reglist
+
+    def getCallArgs(self, emu, count):
+
+        ret = []
+        for i in xrange(count):
+            if len(self.reglist) <= i:
+                break
+            regid = self.reglist[i]
+            ret.append(emu.getRegister(regid))
+            count -= 1
+
+        if count > 0:
+            esp = emu.getRegister(REG_ESP)
+            esp += 4 # For the saved eip
+            ret.extend(struct.unpack("<%dI" % count, emu.readMemory(esp, 4*count)))
+        return ret
+
+    def setReturnValue(self, emu, value, argc):
+        esp = emu.getRegister(REG_ESP)
+        eip = emu.readMemoryFormat(esp, '<I')[0]
+        esp += 4
+
+        if argc > len(self.reglist):
+            cbytes = (argc - len(self.reglist)) * 4
+            esp += cbytes
+
+        emu.setRegister(REG_EAX, value)
+        emu.setStackCounter(esp)
+        emu.setProgramCounter(eip)
+
+class MsFastCall(FastCall):
+    def __init__(self):
+        FastCall.__init__(self, (REG_ECX, REG_EDX))
+
+class BFastCall(FastCall):
+    def __init__(self):
+        FastCall.__init__(self, (REG_EAX, REG_EDX, REG_ECX))
+
 # Pre-make these and use the same instances for speed
 stdcall = StdCall()
 thiscall = ThisCall()
 cdecl = Cdecl()
+msfastcall = MsFastCall()
+bfastcall = BFastCall()
 
 class i386Module(envi.ArchitectureModule):
 
@@ -80,10 +124,11 @@ class i386Module(envi.ArchitectureModule):
         envi.ArchitectureModule.__init__(self, "i386")
         self._arch_dis = i386Disasm()
         # Add our known calling conventions
-        self.addCallingConvention("stdcall", stdcall)
-        self.addCallingConvention("thiscall", thiscall)
-        self.addCallingConvention("cdecl", cdecl)
-
+        self.addCallingConvention('stdcall', stdcall)
+        self.addCallingConvention('thiscall', thiscall)
+        self.addCallingConvention('cdecl', cdecl)
+        self.addCallingConvention('msfastcall', msfastcall)
+        self.addCallingConvention('bfastcall', bfastcall)
 
     def archGetRegCtx(self):
         return i386RegisterContext()

@@ -97,8 +97,6 @@ class ReconBreak(vt_breakpoints.Breakpoint):
             argstr = '(%s)' % ', '.join(argrep)
             print 'RECON: %.4d 0x%.8x %s%s' % (thid, savedeip, self._symname, argstr)
 
-        trace.runAgain()
-
 def addReconBreak(trace, symname, reconfmt):
     if trace.getMeta('recon_hits') == None:
         trace.setMeta('recon_hits', [])

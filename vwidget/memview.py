@@ -65,6 +65,7 @@ class MemoryView(vw_views.VTextView, e_canvas.MemoryCanvas):
 
         self.registerHotKey(KEYCODE_esc, self.goback)
 
+    @idlethread
     def setColorMap(self, map):
         oldmap = None
         if self.colormap != None:
@@ -80,7 +81,8 @@ class MemoryView(vw_views.VTextView, e_canvas.MemoryCanvas):
         if self.colormap:
             for va,color in self.colormap.items():
                 tag = self.getVaTag(va)
-                tag.set_property("background", color)
+                tag.set_property('background', color)
+                tag.set_property('foreground', 'black')
 
     def registerHotKey(self, keycode, callback, args=(), kwargs={}):
         self.hotkeys[keycode] = (callback,args,kwargs)
