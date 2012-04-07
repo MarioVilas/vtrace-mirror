@@ -8,17 +8,44 @@ import envi.memory as e_mem
 
 class CodeFlowContext(object):
 
-    def __init__(self, mem, opcallback=None, funccallback=None, tablecallback=None):
+    '''
+    A CodeFlowContext is used for code-flow (not linear) based disassembly
+    for an envi MemoryObject (which is responsible for knowing the implementation
+    of parseOpcode().  The CodeFlowContext will optionally notify several callback
+    handlers for different events which occur during disassembly:
+
+    self._cb_opcode(va, op, branches) - called for every newly parsed opcode
+        NOTE: _cb_opcode must return the desired branches for continued flow
+
+    self._cb_function(fva, metadict) - called once for every function
+
+    self._cb_branchtable(tabva, destva) - called for switch tables
+
+    '''
+    def __init__(self, mem):
 
         self._funcs = {}
-        self._func_list = []
         self._entries = {}
         self._mem = mem
         self._opdone = {}
 
-        self.opcallback = opcallback
-        self.funccallback = funccallback
-        self.tablecallback = tablecallback
+    def _cb_opcode(self, va, op, branches):
+        '''
+        Extend CodeFlowContext and implement this method to recieve
+        a callback for every newly discovered opcode.
+        '''
+        return branches
+
+    def _cb_function(self, fva, fmeta):
+        '''
+        Extend CodeFlowContext and implement this method to recieve
+        a callback for every newly discovered function.  Additionally,
+        metadata about the function may be stored in the fmeta dict.
+        '''
+        pass
+
+    def _cb_branchtable(self, tabva, destva):
+        pass
 
     def getCallsFrom(self, fva):
         return self._funcs.get(fva)
@@ -33,7 +60,6 @@ class CodeFlowContext(object):
             return
 
         self._funcs[fva] = calls_from
-        self._func_list.append(fva)
 
     def addCodeFlow(self, va, persist=False, exptable=True):
         '''
@@ -66,12 +92,9 @@ class CodeFlowContext(object):
                 # FIXME code block breakage...
                 continue
 
-            # If we have an op creation callback, call it...
-            if self.opcallback: self.opcallback(va, op)
-
-            #print 'OP: 0x%.8x %s' % (va, repr(op))
             branches = op.getBranches()
-            #print 'BRANCHES',branches
+            # The opcode callback may filter branches...
+            branches = self._cb_opcode(va, op, branches)
 
             while len(branches):
 
@@ -88,8 +111,8 @@ class CodeFlowContext(object):
                         bdest = self._mem.readMemoryFormat(ptrbase, '<P')[0]
                         tabdone = {}
                         while self._mem.isValidPointer(bdest):
-                            if self.tablecallback:
-                                self.tablecallback(ptrbase, bdest)
+
+                            self._cb_branchtable(ptrbase, bdest)
 
                             if not tabdone.get(bdest):
                                 tabdone[bdest] = True
@@ -103,6 +126,7 @@ class CodeFlowContext(object):
                 # FIXME handle conditionals here for block boundary detection!
 
                 if bflags & envi.BR_DEREF:
+
                     if not self._mem.probeMemory(bva, 1, e_mem.MM_READ):
                         continue
 
@@ -129,11 +153,13 @@ class CodeFlowContext(object):
 
         path = []
 
+        # Check if this is already a known function.
         if self._funcs.get(va) != None:
             return
 
         self._funcs[va] = True
 
+        # Check if we have disassembled a loop
         if va in pth:
             return
 
@@ -146,9 +172,8 @@ class CodeFlowContext(object):
 
         pth.pop()
 
-        self._func_list.append(va)
-
-        if self.funccallback: self.funccallback(va, {'CallsFrom':calls_from})
+        # Finally, notify the callback of a new function
+        self._cb_function(va, {'CallsFrom':calls_from})
 
     def addEntryPoint(self, va):
         '''

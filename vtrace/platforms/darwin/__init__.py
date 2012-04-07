@@ -16,7 +16,6 @@ import vtrace.archs.amd64 as v_amd64
 import vtrace.platforms.base as v_base
 import vtrace.platforms.posix as v_posix
 
-#addrof = ctypes.addressof
 addrof = ctypes.pointer
 
 # The OSX ptrace defines...
@@ -325,6 +324,8 @@ MACH_MSG_TYPE_MAKE_SEND      = 20    # Must hold receive rights
 MACH_MSG_TYPE_MAKE_SEND_ONCE = 21    # Must hold receive rights
 MACH_MSG_TYPE_COPY_RECEIVE   = 22    # Must hold receive rights
 
+size_t            = ctypes.c_ulong
+
 mach_port_t       = ctypes.c_uint32
 mach_port_name_t  = ctypes.c_uint32
 mach_port_right_t = ctypes.c_uint32
@@ -485,15 +486,35 @@ class vm_region_basic_info_64(ctypes.Structure):
 print 'vm_region_basic_info_64',ctypes.sizeof(vm_region_basic_info_64)
 VM_REGION_BASIC_INFO_COUNT_64 = ctypes.sizeof(vm_region_basic_info_64) / 4
 
-mach_helper = ctypes.CDLL('./darwin_mach.dylib')
+#mach_helper = ctypes.CDLL('./darwin_mach.dylib')
+
+#
+# These are used by the machhelper library code
+#
+class DarwinDebugCtx(ctypes.Structure):
+    _fields_ = [
+        ('dbgtask', mach_port_t),
+        ('task',    mach_port_t),
+        ('portset', mach_port_name_t),
+        ('excport', mach_port_name_t),
+        ('msgin',   ctypes.c_void_p),
+        ('msgout',  ctypes.c_void_p),
+    ]
 
 class ProcessListEntry(ctypes.Structure):
     _fields_ = [
         ('pid', ctypes.c_uint),
         ('name', ctypes.c_char * 17),
     ]
-mach_helper.platformPs.restype = ctypes.POINTER(ProcessListEntry)
 
+darwindir = os.path.dirname(__file__)
+machhelp_path = os.path.join(darwindir, 'machhelper.dylib')
+machhelper = ctypes.CDLL(machhelp_path)
+
+#machhelper.initDebugContext.restype = ctypes.c_uint32
+#machhelper.initDebugContext.argtypes = (ctypes.POINTER(DarwinDebugCtx), ctypes.c_uint32)
+
+machhelper.platformPs.restype = ctypes.POINTER(ProcessListEntry)
 
 ####################################################################
     
@@ -502,50 +523,33 @@ class DarwinMixin(v_posix.PosixMixin, v_posix.PtraceMixin):
     def __init__(self):
         v_posix.PosixMixin.__init__(self)
         v_posix.PtraceMixin.__init__(self)
+
         self.libc = ctypes.CDLL(c_util.find_library('c'))
         self.myport = self.libc.mach_task_self()
 
         self.libc.mach_port_allocate.argtypes = [ipc_space_t, mach_port_right_t, ctypes.POINTER(mach_port_name_t)]
         self.libc.mach_port_allocate.restype = kern_return_t
 
+        self.libc.mach_vm_read.argtypes = [ mach_port_t, size_t, size_t, ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(ctypes.c_uint32)]
+        self.libc.mach_vm_read.restype = kern_return_t
+        #FIXME mach_port_insert_right
+
         self.portset = self.newMachPort(MACH_PORT_RIGHT_PORT_SET)
-        print 'CONSTRUCTED'
         self.excport = self.newMachRWPort()
         self.addPortToSet(self.excport)
-
-    def NOTplatformPs(self):
-        ctl = SysctlType()
-        ctl.one = CTL_KERN
-        ctl.two = KERN_PROC
-        ctl.three = KERN_PROC_ALL
-
-        size = ctypes.c_uint32()
-        self.libc.sysctl(addrof(ctl), 3, None, addrof(size), None, 0)
-        count = size.value / ctypes.sizeof(kinfo_proc)
-        buf = (kinfo_proc * count)()
-        self.libc.sysctl(addrof(ctl), 3, buf,  addrof(size), None, 0)
-        ret = []
-        for i in range(count):
-            pid = buf[i].kp_proc.p_pid
-            if pid == 0: # Skip the crazy kernel things...
-                continue
-            name = buf[i].kp_proc.p_comm
-            ret.append((pid,name))
-        ret.reverse()
-        return ret
 
     def platformPs(self):
 
         ret = []
-        y = mach_helper.platformPs()
+        y = machhelper.platformPs()
         i = 0
         while y[i].pid != 0xffffffff:
             ret.append((y[i].pid, y[i].name))
             i += 1
 
         # FIXME free!
+        ret.reverse()
         return ret
-
 
     def platformParseBinary(self, filename, baseaddr, normname):
         pass
@@ -585,8 +589,6 @@ class DarwinMixin(v_posix.PosixMixin, v_posix.PtraceMixin):
 
     def platformGetMaps(self):
 
-        #mach_helper.platformGetMaps(self.task)
-
         maps = []
         address = ctypes.c_ulong(0)
         mapsize = ctypes.c_ulong(0)
@@ -595,6 +597,7 @@ class DarwinMixin(v_posix.PosixMixin, v_posix.PtraceMixin):
         info    = vm_region_basic_info_64()
 
         while True:
+
             r = self.libc.mach_vm_region(self.task, addrof(address),
                                    addrof(mapsize), VM_REGION_BASIC_INFO_64,
                                    addrof(info), addrof(count),
@@ -626,22 +629,30 @@ class DarwinMixin(v_posix.PosixMixin, v_posix.PtraceMixin):
 
         return maps
                                    
-    def platformProcessEvent(self, exc):
+    def platformProcessEvent(self, event):
         """
         Handle a mach exception message
         """
+        threadid, excode, codes = event
+
         # Set the thread that signaled.
-        self.setMeta('ThreadId', exc.thread.name)
-        self.setMeta('MachException', exc)
+        self.setMeta('ThreadId', threadid)
+        self.setMeta('StoppedThreadId', threadid)
 
-        excode = exc.exception
+        self.setMeta('MachException', event)
+
         if excode == EXC_SOFTWARE:
-            if exc.codeCnt != 2:
-                raise Exception('EXC_SOFTWARE with codeCnt != 2: %d' % exc.codeCnt)
-            if exc.codes[0] != EXC_SOFT_SIGNAL:
-                raise Exception('codes[0] != EXC_SOFT_SIGNAL: %.8x' % exc.codes[0])
+            print 'exc_software'
 
-            sig = exc.codes[1]
+            if len(codes) != 2:
+                raise Exception('EXC_SOFTWARE with codeCnt != 2: %d' % len(codes))
+
+            if codes[0] != EXC_SOFT_SIGNAL:
+                raise Exception('codes[0] != EXC_SOFT_SIGNAL: %.8x' % codes[0])
+
+            sig = codes[1]
+            print 'SOFT SIG',sig
+
             if sig == signal.SIGTRAP:
                 # FIXME I think we can catch these!
                 # Traps on posix systems are a little complicated
@@ -662,27 +673,33 @@ class DarwinMixin(v_posix.PosixMixin, v_posix.PtraceMixin):
                     self._fireSignal(sig)
 
             elif sig == signal.SIGSTOP:
+                # We get a regular POSIX stop signal on attach
                 self.handleAttach()
 
             else:
                 self._fireSignal(sig)
 
         elif excode == EXC_BAD_ACCESS:
-            print 'Bad Access:',repr([hex(x) for x in [exc.codes[i] for i in range(exc.codeCnt)]])
-            self.fireNotifiers(vtrace.NOTIFY_SIGNAL)
+            print 'exc_bad_access',repr([hex(x) for x in codes ])
+            self._fireSignal(0)
 
         elif excode == EXC_CRASH:
-            print 'Crash:',repr([hex(x) for x in [exc.codes[i] for i in range(exc.codeCnt)]])
-            self.setMeta('ExitCode', -1)
-            self.fireNotifiers(vtrace.NOTIFY_EXIT)
+            print 'exc_crash'
+            print 'Crash:',repr([hex(x) for x in codes])
+            self._fireExit(0xffffffff)
+
+        elif excode == EXC_BREAKPOINT:
+            print 'exc_breakpoint',codes
+            self._fireSignal(0) # FIXME
 
         else:
             print 'Unprocessed Exception Type: %d' % excode
-            self.fireNotifiers(vrtrace.NOTIFY_SIGNAL)
+            self.fireNotifiers(vtrace.NOTIFY_SIGNAL)
 
         return
 
     def platformAttach(self, pid):
+        print 'CLASSIC',machhelper.is_pid_classic(pid)
         self.task = self.taskForPid(pid)
         self.setExceptionPort()
         if v_posix.ptrace(PT_ATTACHEXC, pid, 0, 0) != 0:
@@ -719,7 +736,8 @@ class DarwinMixin(v_posix.PosixMixin, v_posix.PtraceMixin):
 
     def setExceptionPort(self):
         # Set the target task's exception port to our excport
-        r = self.libc.task_set_exception_ports(self.task, EXC_MASK_ALL, self.excport,
+        #r = self.libc.task_set_exception_ports(self.task, EXC_MASK_ALL, self.excport,
+        r = self.libc.task_set_exception_ports(self.task, EXC_MASK_SOFTWARE, self.excport,
                                                EXCEPTION_DEFAULT, THREAD_STATE_NONE)
         if r != 0:
             raise Exception('task_set_exception_ports failed: 0x%.8x' % r)
@@ -753,6 +771,12 @@ class DarwinMixin(v_posix.PosixMixin, v_posix.PtraceMixin):
         exc = None
         while exc == None:
             exc = self._getNextExc()
+            print 'EXC',exc
+
+        print 'EXC THREAD',exc.thread.name
+
+        self.setMeta('ThreadId', exc.thread.name)
+        self.setMeta('StoppedThreadId', exc.thread.name)
         #e2 = self._getNextExc(timeout=0)
         #if e2 != None:
         #print "ALSO GOT",e2
@@ -764,13 +788,18 @@ class DarwinMixin(v_posix.PosixMixin, v_posix.PtraceMixin):
         while os.waitpid(-1, os.WNOHANG) != (0,0):
             pass
 
+        # NOTE We must extract *all* needed info from the event here!
+        codes = [exc.codes[i] for i in range(exc.codeCnt)]
+        ret = (exc.thread.name, exc.exception, codes)
+
         res = self.buildExcResp(exc)
 
         x = self.libc.mach_msg(addrof(res), MACH_SEND_MSG, ctypes.sizeof(res),0,MACH_MSG_TIMEOUT_NONE,MACH_PORT_NULL)
         if x != 0:
             raise Exception('mach_msg MACH_SEND_MSG failed: 0x%.8x' % (x,))
 
-        return exc
+        return ret
+        #return exc
 
     def buildExcResp(self, exc):
         # This is from straight reversing exc_server from libc...
@@ -791,9 +820,19 @@ class DarwinMixin(v_posix.PosixMixin, v_posix.PtraceMixin):
         print 'exc_server',self.libc.exc_server(ctypes.pointer(exc), ctypes.pointer(exc))
         return exc
 
+    def platformStepi(self):
+        self.stepping = True
+        tid = self.getMeta("ThreadId", 0)
+        if v_posix.ptrace(v_posix.PT_STEP, self.pid, 1, 0) != 0:
+            raise Exception("ERROR ptrace failed!")
+        self.libc.task_resume(self.task)
 
     def platformContinue(self):
         sig = self.getCurrentSignal()
+        if sig == None:
+            sig = 0
+        print 'PT_THUPDATE',v_posix.ptrace(PT_THUPDATE, self.pid, self.getMeta('StoppedThreadId'), sig)
+        v_posix.ptrace(PT_CONTINUE, self.pid, 1, sig)
         self.libc.task_resume(self.task)
 
     def platformDetach(self):

@@ -199,7 +199,7 @@ class VS_VERSIONINFO:
         mysize, valsize, valtype = struct.unpack('<HHH', bytes[xoffset:xoffset+6])
         xoffset += 6
         xoffset, sigstr = self._eatStringAndAlign(bytes, xoffset)
-        if sigstr != 'StringFileInfo':
+        if sigstr not in ('VarFileInfo','StringFileInfo'):
             raise Exception('Invalid StringFileInfo Key!: %s' % repr(sigstr))
         xmax = offset + mysize
         while xoffset < xmax:

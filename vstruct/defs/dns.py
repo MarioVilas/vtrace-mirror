@@ -33,9 +33,21 @@ class DnsName(vstruct.VArray):
     def __init__(self):
         vstruct.VStruct.__init__(self)
 
+    def getFullName(self, dnspkt):
+        r = []
+        for fname,fobj in self.vsGetFields():
+            if fobj.length == 0xc0:
+                newn = DnsName()
+                # FIXME redundant parsing...
+                newn.vsParse(dnspkt, ord(fobj.namepart))
+                r.append( newn.getFullName(dnspkt) )
+            else:
+                r.append(fobj.namepart)
+        return '.'.join(r)
+
     def vsParse(self, bytes, offset=0):
         self.vsClearFields()
-        while True:
+        while offset < len(bytes):
             np = DnsNamePart()
             offset = np.vsParse(bytes, offset=offset)
             self.vsAddElement(np)
@@ -82,7 +94,7 @@ class DnsPacket(vstruct.VStruct):
 
     def __init__(self):
         vstruct.VStruct.__init__(self)
-        self.length   = v_uint16(bigend=True)
+        #self.length   = v_uint16(bigend=True)
         self.transid  = v_uint16(bigend=True)
         self.flags    = v_uint16(bigend=True)
         self.ques_cnt = v_uint16(bigend=True)
@@ -105,5 +117,5 @@ class DnsPacket(vstruct.VStruct):
         self.records.authns = DnsAnswerArray( self.auth_cnt )
 
     def pcb_addt_cnt(self):
-        self.records.addtl = DnsAnswerArray( self.auth_cnt )
+        self.records.addtl = DnsAnswerArray( self.addt_cnt )
 

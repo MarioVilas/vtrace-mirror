@@ -884,6 +884,7 @@ class i386Disasm:
 
                     else:
                         osize, oper = ameth(bytes, offset, tsize, prefixes)
+
                 except struct.error, e:
                     # Catch struct unpack errors due to insufficient data length
                     raise envi.InvalidInstruction(bytes=bytes[startoff:startoff+16])

@@ -240,6 +240,8 @@ if __name__ == '__main__':
     osminor = p.IMAGE_NT_HEADERS.OptionalHeader.MinorOperatingSystemVersion
     machine = p.IMAGE_NT_HEADERS.FileHeader.Machine
 
+    vsver = p.getVS_VERSIONINFO()
+
     archname = PE.machine_names.get(machine)
 
     parser = vt_win32.Win32SymbolParser(0xffffffff, sys.argv[1], baseaddr)
@@ -251,5 +253,11 @@ if __name__ == '__main__':
 
     print '# Version: %d.%d' % (osmajor, osminor)
     print '# Architecture: %s' % archname
+    if vsver != None:
+        keys = vsver.getVersionKeys()
+        keys.sort()
+        for k in keys:
+            val = vsver.getVersionValue(k).encode('ascii','ignore')
+            print '# %s: %s' % (k,val)
     print builder.genVStructPyCode()
 

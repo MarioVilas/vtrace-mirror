@@ -223,7 +223,7 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
 
         for name in dir(signal):
             if name[:3] == "SIG" and "_" not in name:
-                self.siglookup[name] = eval("signal.%s"%name)
+                self.siglookup[name] = getattr(signal, name)
         
     def getSignal(self, sig):
         """
@@ -236,7 +236,8 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
 
     def getExpressionLocals(self):
         r = vtrace.VtraceExpressionLocals(self.trace)
-        r["db"] = self
+        r['db'] = self
+        r['vprint'] = self.vprint
         return r
 
     def reprPointer(self, address):
