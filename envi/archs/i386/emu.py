@@ -493,10 +493,13 @@ class IntelEmulator(i386Module, i386RegisterContext, envi.Emulator):
         return val
 
     def i_clc(self, op):
-        self.setFlag(EFLAGS_CF, 0)
+        self.setFlag(EFLAGS_CF, False)
 
     def i_cld(self, op):
-        self.setFlag(EFLAGS_DF, 0)
+        self.setFlag(EFLAGS_DF, False)
+
+    def i_cli(self, op):
+        self.setFlag(EFLAGS_IF, False)
 
     # We include all the possible CMOVcc names just in case somebody
     # gets hinkey with the disassembler.
@@ -1576,4 +1579,7 @@ class IntelEmulator(i386Module, i386RegisterContext, envi.Emulator):
         self.setFlag(EFLAGS_ZF, not ret)
         self.setFlag(EFLAGS_PF, e_bits.is_parity_byte(ret))
         self.setFlag(EFLAGS_AF, False) # Undefined but actually cleared on amd64 X2
+
+    def i_pxor(self, op):
+        return self.i_xor(op)
 

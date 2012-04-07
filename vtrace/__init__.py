@@ -822,6 +822,12 @@ class Trace(e_mem.IMemory, e_reg.RegisterContext, e_resolv.SymbolResolver, objec
         """
         return self.running
 
+    def isRemote(self):
+        '''
+        Returns True if the trace is a CobraProxy object to a trace on another system
+        '''
+        return False
+
     def enableAutoContinue(self, event):
         """
         Put the tracer object in to AutoContinue mode

@@ -48,6 +48,9 @@ class RemoteTrace(cobra.CobraProxy):
         cobra.CobraProxy.__init__(self, *args, **kwargs)
         self.__dict__['_remote_released'] = False
 
+    def isRemote(self):
+        return True
+
     def buildNewTrace(self):
         return getRemoteTrace()
 

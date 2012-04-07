@@ -8,7 +8,7 @@ import envi.memory as e_mem
 
 class CodeFlowContext(object):
 
-    def __init__(self, mem, opcallback=None, funccallback=None):
+    def __init__(self, mem, opcallback=None, funccallback=None, tablecallback=None):
 
         self._funcs = {}
         self._func_list = []
@@ -18,6 +18,7 @@ class CodeFlowContext(object):
 
         self.opcallback = opcallback
         self.funccallback = funccallback
+        self.tablecallback = tablecallback
 
     def getCallsFrom(self, fva):
         return self._funcs.get(fva)
@@ -34,12 +35,13 @@ class CodeFlowContext(object):
         self._funcs[fva] = calls_from
         self._func_list.append(fva)
 
-    def addCodeFlow(self, va, exptable=True, persist=False):
+    def addCodeFlow(self, va, persist=False, exptable=True):
         '''
         Do code flow disassembly from the specified address.  Returnes a list
         of the procedural branch targets discovered during code flow...
 
         Set persist=True to store 'opdone' and never disassemble the same thing twice
+        Set exptable=True to expand branch tables in this phase
         '''
 
         opdone = self._opdone
@@ -69,6 +71,7 @@ class CodeFlowContext(object):
 
             #print 'OP: 0x%.8x %s' % (va, repr(op))
             branches = op.getBranches()
+            #print 'BRANCHES',branches
 
             while len(branches):
 
@@ -85,6 +88,8 @@ class CodeFlowContext(object):
                         bdest = self._mem.readMemoryFormat(ptrbase, '<P')[0]
                         tabdone = {}
                         while self._mem.isValidPointer(bdest):
+                            if self.tablecallback:
+                                self.tablecallback(ptrbase, bdest)
 
                             if not tabdone.get(bdest):
                                 tabdone[bdest] = True

@@ -209,8 +209,6 @@ class RegisterContext:
 
     def getRegisterNames(self):
         """
-        This is *not* the same as the envi.ArchitectureModule API for this
-        because we may be talking about a particular subset of the register space.
         """
         return self._rctx_names.keys()
 
@@ -265,19 +263,10 @@ class RegisterContext:
         Return the current value of the specified register index.
         """
         ridx = index & 0xffff
-        if ridx == index:
-            return self._rctx_vals[ridx]
-
-        offset = (index >> 24) & 0xff
-        width  = (index >> 16) & 0xff
-
-        mask = (2**width)-1
-
-        rval = self._rctx_vals[ridx]
-        if offset != 0:
-            rval >>= offset
-
-        return rval & mask
+        value = self._rctx_vals[ridx]
+        if ridx != index:
+            value = self._xlateToMetaReg(index, value)
+        return value
 
     def getMetaRegInfo(self, index):
         '''
@@ -298,19 +287,29 @@ class RegisterContext:
         mask = (2**width)-1
         return ridx, offset, mask
 
-    def setRegister(self, index, value):
-        """
-        Set a register value by index.
-        """
-        self._rctx_dirty = True
-
+    def _xlateToMetaReg(self, index, value):
+        '''
+        Translate a register value to the meta register value
+        (used when getting a meta register)
+        '''
         ridx = index & 0xffff
-        if ridx == index:
-            self._rctx_vals[ridx] = (value & self._rctx_masks[ridx])
-            return
+        offset = (index >> 24) & 0xff
+        width  = (index >> 16) & 0xff
 
-        # If we get here, it's a meta register index.
-        # NOTE: offset/width are in bits...
+        mask = (2**width)-1
+
+        if offset != 0:
+            value >>= offset
+
+        return value & mask
+
+
+    def _xlateToNativeReg(self, index, value):
+        '''
+        Translate a register value to the native register value
+        (used when setting a meta register)
+        '''
+        ridx = index & 0xffff
         offset = (index >> 24) & 0xff
         width  = (index >> 16) & 0xff
 
@@ -330,7 +329,23 @@ class RegisterContext:
         if offset:
             value <<= offset
 
-        self._rctx_vals[ridx] = (curval & finalmask) | value
+        #NOTE value is first for object stuff in symboliks
+        return value | (curval & finalmask)
+
+    def setRegister(self, index, value):
+        """
+        Set a register value by index.
+        """
+        self._rctx_dirty = True
+
+        ridx = index & 0xffff
+
+        # If it's a meta register index, lets mask it into
+        # the real thing...
+        if ridx != index:
+            value = self._xlateToNativeReg(index, value)
+
+        self._rctx_vals[ridx] = (value & self._rctx_masks[ridx])
 
 def addLocalEnums(l, regdef):
     """

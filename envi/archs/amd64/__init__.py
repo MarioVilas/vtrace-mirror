@@ -297,7 +297,7 @@ class Amd64Disasm(e_i386.i386Disasm):
 
     # NOTE: Technically, the REX must be the *last* prefix specified
 
-    def _dis_calc_tsize(self, opertype, addrtype, prefixes):
+    def _dis_calc_tsize(self, opertype, prefixes):
         """
         Use the oper type and prefixes to decide on the tsize for
         the operand.

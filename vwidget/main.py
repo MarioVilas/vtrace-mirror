@@ -64,3 +64,10 @@ def main():
     gtk.gdk.threads_enter()
     gtk.main()
     gtk.gdk.threads_leave()
+
+def doiterations():
+    gtk.gdk.threads_enter()
+    while gtk.events_pending():
+        gtk.main_iteration(False)
+    gtk.gdk.threads_leave()
+

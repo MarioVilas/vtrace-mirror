@@ -681,6 +681,19 @@ class IMAGEHLP_MODULE64(Structure):
             ("TypeInfo", c_ulong),
             ]
 
+class IMAGEHLP_STACK_FRAME(Structure):
+    _fields_ = [
+        ('InstructionOffset',     QWORD),
+        ('ReturnOffset',          QWORD),
+        ('FrameOffset',           QWORD),
+        ('StackOffset',           QWORD),
+        ('BackingStoreOffset',    QWORD),
+        ('FuncTableEntry',        QWORD),
+        ('Params',                QWORD*4),
+        ('Reserved',              QWORD*5),
+        ('Virtual',               BOOL),
+        ('Reserved2',             DWORD),
+    ]
 
 IMAGE_DIRECTORY_ENTRY_EXPORT          =0   # Export Directory
 IMAGE_DIRECTORY_ENTRY_IMPORT          =1   # Import Directory
@@ -931,6 +944,8 @@ if sys.platform == "win32":
         dbghelp.SymLoadModule64.argtypes = [HANDLE, HANDLE, c_char_p, c_char_p, QWORD, DWORD]
         dbghelp.SymLoadModule64.restype = QWORD
         dbghelp.SymGetModuleInfo64.argtypes = [HANDLE, QWORD, POINTER(IMAGEHLP_MODULE64)]
+        dbghelp.SymSetContext.restype = BOOL
+        dbghelp.SymSetContext.argtypes = [ HANDLE, POINTER(IMAGEHLP_STACK_FRAME), LPVOID ]
         dbghelp.SymGetModuleInfo64.restype = BOOL
         dbghelp.SymEnumSymbols.argtypes = [HANDLE, QWORD, c_char_p, SYMCALLBACK, LPVOID]
         dbghelp.SymEnumSymbols.restype = BOOL
@@ -1777,6 +1792,7 @@ class Win32SymbolParser:
         self.symopts = (SYMOPT_UNDNAME | SYMOPT_NO_PROMPTS | SYMOPT_NO_CPP)
         self._sym_types = {}
         self._sym_enums = {}
+        self._sym_locals = {}
 
     def printSymbolInfo(self, info):
         # Just a helper function for "reversing" how dbghelp works
@@ -1918,6 +1934,13 @@ class Win32SymbolParser:
             elif ktag == SymTagBaseType:
                 pass
 
+            elif ktag == SymTagFunctionType:
+                # Function pointer types...
+                pass
+
+            elif ktag == SymTagNull:
+                pass
+
             else:
                 print '%s:%s Unknown Type Tag: %d' % (name, kidname, ktag)
 
@@ -1953,16 +1976,11 @@ class Win32SymbolParser:
 
     def symEnumCallback(self, psym, size, ctx):
         sym = psym.contents
-        #tidx = self.symGetTypeBase(sym.TypeIndex)
-        tidx = self.symGetTypeType(sym.TypeIndex)
-        symtag = self.symGetTypeTag(tidx)
-        #if symtag == SymTagFunction:
-        flags = sym.Flags
-        if symtag == SymTagFunction:
-            flags |= SYMFLAG_FUNCTION
-        self.symFromAddr(sym.Address)
 
-        self.symbols.append((sym.Name, int(sym.Address), int(sym.Size), flags))
+        if sym.Tag == SymTagFunction:
+            sym.Flags |= SYMFLAG_FUNCTION
+
+        self.symbols.append((sym.Name, int(sym.Address), int(sym.Size), sym.Flags))
         return True
 
     def symFromAddr(self, address):
@@ -1974,18 +1992,17 @@ class Win32SymbolParser:
         return si
 
     def symInit(self):
+
             dbghelp.SymInitialize(self.phandle, self.sympath, False)
             dbghelp.SymSetOptions(self.symopts)
-
 
             x = dbghelp.SymLoadModule64(self.phandle,
                         0, 
                         self.filename,
                         None,
                         self.loadbase,
-                        0)
+                        os.path.getsize(self.filename))
 
-            # FIXME why don't we pull symbols down to the local store?
 
             # This is for debugging which pdb got loaded
             #imghlp = IMAGEHLP_MODULE64()
@@ -1995,6 +2012,35 @@ class Win32SymbolParser:
 
     def symCleanup(self):
         dbghelp.SymCleanup(self.phandle)
+
+    def symLocalCallback(self, psym, size, ctx):
+        sym = psym.contents
+        address = c_int32(sym.Address).value
+        self._cur_locs.append( (sym.Name, address, sym.Size, sym.Flags) )
+
+        return True
+
+    def parseArgs(self):
+
+        for name, addr, size, flags in self.symbols:
+
+            si = self.symFromAddr(addr)
+            if si.Tag != SymTagFunction:
+                continue
+
+            self._cur_locs = []
+
+            sframe = IMAGEHLP_STACK_FRAME()
+            sframe.InstructionOffset = addr
+            dbghelp.SymSetContext(self.phandle, pointer(sframe), 0)
+            dbghelp.SymEnumSymbols(self.phandle,
+                        0,
+                        None,
+                        SYMCALLBACK(self.symLocalCallback),
+                        0)
+
+            if len(self._cur_locs):
+                self._sym_locals[addr] = self._cur_locs
 
     def parse(self):
         try:
@@ -2008,6 +2054,7 @@ class Win32SymbolParser:
                         NULL)
 
             self.parseTypes()
+            #self.parseArgs()
 
             self.symCleanup()
 

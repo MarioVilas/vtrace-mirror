@@ -568,6 +568,7 @@ class Emulator(e_reg.RegisterContext, e_mem.IMemory):
 
         Usage: getCallArgs(3, "stdcall") -> (0, 32, 0xf00)
         """
+        # use _arch_call_convs assuming we are an ArchitectureModule
         c = self._arch_call_convs.get(cc, None)
         if c == None:
             raise UnknownCallingConvention(cc)
@@ -597,6 +598,13 @@ class CallingConvention:
 
     def getCallArgs(self, emu, count):
         pass
+
+    # If you want your arch to use symbolik emulation...
+    def getSymbolikArgs(self, emu, argv):
+        raise Exception('getSymbolikArgs() not in %s' % self.__class__.__name__)
+
+    def setSymbolikReturn(self, emu, sym, argv):
+        raise Exception('setSymbolikReturn() not in %s' % self.__class__.__name__)
 
 # NOTE: This mapping is needed because of inconsistancies
 # in how different compilers and versions of python embed

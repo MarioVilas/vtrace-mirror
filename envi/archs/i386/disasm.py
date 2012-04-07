@@ -155,7 +155,14 @@ class i386RegOper(envi.RegisterOper):
         return True
 
 # For opcodes which need their immediate extended on print
-sextend = [opcode86.INS_ADD, opcode86.INS_SUB, opcode86.INS_AND, opcode86.INS_OR]
+sextend = [
+    opcode86.INS_ADD,
+    opcode86.INS_SUB,
+    opcode86.INS_AND,
+    opcode86.INS_OR,
+    opcode86.INS_CMP,
+    opcode86.INS_TEST,
+]
 
 class i386ImmOper(envi.ImmedOper):
     """
@@ -248,6 +255,7 @@ class i386RegMemOper(envi.DerefOper):
         self.reg = reg
         self.tsize = tsize
         self.disp = disp
+        self._is_deref = True
 
     def repr(self, op):
         r = self._dis_regctx.getRegisterName(self.reg)
@@ -271,8 +279,8 @@ class i386RegMemOper(envi.DerefOper):
         return base + rval + self.disp
 
     def isDeref(self):
-        #FIXME check for lea and probably need to hand in opcode
-        return True
+        # The disassembler may reach in and set this (if lea...)
+        return self._is_deref
 
     def render(self, mcanv, op, idx):
         mcanv.addNameText(sizenames[self.tsize])
@@ -364,6 +372,7 @@ class i386SibOper(envi.DerefOper):
         self.scale = scale
         self.tsize = tsize
         self.disp = disp
+        self._is_deref = True
 
     def __eq__(self, other):
         if not isinstance(other, i386SibOper):
@@ -381,6 +390,9 @@ class i386SibOper(envi.DerefOper):
         if other.tsize != self.tsize:
             return False
         return True
+
+    def isDeref(self):
+        return self._is_deref
 
     def repr(self, op):
 
@@ -743,7 +755,7 @@ class i386Disasm:
         return (size, scale, index, base, imm)
 
 
-    def _dis_calc_tsize(self, opertype, addrtype, prefixes):
+    def _dis_calc_tsize(self, opertype, prefixes):
         """
         Use the oper type and prefixes to decide on the tsize for
         the operand.
@@ -846,35 +858,39 @@ class i386Disasm:
             # Pull out the operand description from the table
             operflags = opdesc[i]
             opertype = operflags & opcode86.OPTYPE_MASK
-            addrtype = operflags & opcode86.ADDRMETH_MASK
+            addrmeth = operflags & opcode86.ADDRMETH_MASK
 
             # If there are no more operands, break out of the loop!
             if operflags == 0:
                 break
 
-            #print "ADDRTYPE: %.8x OPERTYPE: %.8x" % (addrtype, opertype)
+            #print "ADDRTYPE: %.8x OPERTYPE: %.8x" % (addrmeth, opertype)
 
-            tsize = self._dis_calc_tsize(opertype, addrtype, prefixes)
+            tsize = self._dis_calc_tsize(opertype, prefixes)
 
-            #print hex(opertype),hex(addrtype)
+            #print hex(opertype),hex(addrmeth)
 
 
-            # If addrtype is zero, we have operands embedded in the opcode
-            if addrtype == 0:
+            # If addrmeth is zero, we have operands embedded in the opcode
+            if addrmeth == 0:
                 osize = 0
                 oper = self.ameth_0(operflags, opdesc[5+i], tsize, prefixes)
 
             else:
-                #print "ADDRTYPE",hex(addrtype)
-                ameth = self._dis_amethods[addrtype >> 16]
+                #print "ADDRTYPE",hex(addrmeth)
+                ameth = self._dis_amethods[addrmeth >> 16]
                 #print "AMETH",ameth
                 if ameth == None:
-                    raise Exception("Implement Addressing Method 0x%.8x" % addrtype)
+                    raise Exception("Implement Addressing Method 0x%.8x" % addrmeth)
 
                 # NOTE: Depending on your addrmethod you may get beginning of operands, or offset
                 try:
-                    if addrtype == opcode86.ADDRMETH_I or addrtype == opcode86.ADDRMETH_J:
+                    if addrmeth == opcode86.ADDRMETH_I or addrmeth == opcode86.ADDRMETH_J:
                         osize, oper = ameth(bytes, offset+operoffset, tsize, prefixes)
+                        #if operflags & opcode86.OP_SIGNED and oper.tsize != tsize:
+                        #if oper.tsize == 1 and operflags & opcode86.OP_SIGNED:
+                            #oper.imm = e_bits.sign_extend(oper.imm, oper.tsize, 4)
+                            #oper.tsize = 4
                     else:
                         osize, oper = ameth(bytes, offset, tsize, prefixes)
                 except struct.error, e:
@@ -892,6 +908,10 @@ class i386Disasm:
 
         if priv_lookup.get(mnem, False):
             iflags |= envi.IF_PRIV
+
+        # Lea will have a reg-mem/sib operand with _is_deref True, but should be false
+        if optype == opcode86.INS_LEA:
+            operands[1]._is_deref = False
 
         ret = i386Opcode(va, optype, mnem, prefixes, (offset-startoff)+operoffset, operands, iflags)
 

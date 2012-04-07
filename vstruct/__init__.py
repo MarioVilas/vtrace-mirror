@@ -95,6 +95,13 @@ class VStruct(vs_prims.v_base):
             self._vs_values[name] ^= value
         return self
 
+    def vsClearFields(self):
+        '''
+        Clear all fields from the current vstruct object.  This may be useful
+        in specialized parsers which populate their structure on vsParse()
+        '''
+        self.__init__()
+
     def vsAddField(self, name, value):
         if not isVstructType(value):
             raise Exception("Added fields MUST be vstruct types!")

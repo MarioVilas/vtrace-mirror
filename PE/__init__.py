@@ -319,25 +319,28 @@ class PE(object):
         if sec == None:
             return ()
         ret = []
-        bytes = self.readAtRva(sec.VirtualAddress, sec.VirtualSize)
-        while len(bytes):
+        rbytes = self.readAtRva(sec.VirtualAddress, sec.VirtualSize)
+        while len(rbytes):
             f = vs_pe.IMAGE_RUNTIME_FUNCTION_ENTRY()
-            f.vsParse(bytes)
-            bytes = bytes[len(f):]
+            f.vsParse(rbytes)
+            rbytes = rbytes[len(f):]
             ret.append(f)
         return ret
 
     def getDllName(self):
+        '''
+        Return the "dll name" from the Name field of the IMAGE_EXPORT_DIRECTORY
+        if one is present.  If not, return None.
+        '''
         if self.IMAGE_EXPORT_DIRECTORY != None:
-            ordoff = self.rvaToOffset(self.IMAGE_EXPORT_DIRECTORY.AddressOfOrdinals)
-            ordsize = 2 * self.IMAGE_EXPORT_DIRECTORY.NumberOfNames
-            return self.readAtOffset(ordoff + ordsize, 32).split("\x00", 1)[0]
+            rawname = self.readAtRva(self.IMAGE_EXPORT_DIRECTORY.Name, 32)
+            return rawname.split('\x00')[0]
         return None
 
     def getImports(self):
         """
         Return the list of import tuples for this PE.  The tuples
-        are in the format (rva, name).
+        are in the format (rva, libname, funcname).
         """
         return self.imports
 
@@ -384,10 +387,13 @@ class PE(object):
 
     def readStructAtOffset(self, offset, structname):
         s = vstruct.getStructure(structname)
-        bytes = self.readAtOffset(offset, len(s))
+        sbytes = self.readAtOffset(offset, len(s))
         #print "%s: %s" % (structname, bytes.encode('hex'))
-        s.vsParse(bytes)
+        s.vsParse(sbytes)
         return s
+
+    def getDataDirectory(self, idx):
+        return self.IMAGE_NT_HEADERS.OptionalHeader.DataDirectory[idx]
 
     def getResourceDef(self, rtype, name_id):
         '''
@@ -482,8 +488,8 @@ class PE(object):
 
     def readRvaFormat(self, fmt, rva):
         size = struct.calcsize(fmt)
-        bytes = self.readAtRva(rva, size)
-        return struct.unpack(fmt, bytes)
+        fbytes = self.readAtRva(rva, size)
+        return struct.unpack(fmt, fbytes)
 
     def readAtRva(self, rva, size):
         offset = self.rvaToOffset(rva)
@@ -502,7 +508,7 @@ class PE(object):
 
     def parseLoadConfig(self):
         self.IMAGE_LOAD_CONFIG = None
-        cdir = self.IMAGE_NT_HEADERS.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG]
+        cdir = self.getDataDirectory(IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG)
         rva = cdir.VirtualAddress
         if rva != 0:
             self.IMAGE_LOAD_CONFIG = self.readStructAtRva(rva, "pe.IMAGE_LOAD_CONFIG_DIRECTORY")
@@ -512,11 +518,15 @@ class PE(object):
         if self.psize == 8:
             fmt = "<Q"
         return struct.unpack(fmt, self.readAtOffset(off, self.psize))[0]
+
+    def readPointerAtRva(self, rva):
+        off = self.rvaToOffset(rva)
+        return self.readPointerAtOffset(off)
         
     def parseImports(self):
         self.imports = []
 
-        idir = self.IMAGE_NT_HEADERS.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT]
+        idir = self.getDataDirectory(IMAGE_DIRECTORY_ENTRY_IMPORT)
         poff = self.rvaToOffset(idir.VirtualAddress)
 
         if poff == 0:
@@ -527,26 +537,30 @@ class PE(object):
         x.vsParse(self.readAtOffset(poff, isize))
         while x.Name != 0:
 
-            liboff = self.rvaToOffset(x.Name)
-            libname = self.readAtOffset(liboff, 256).split("\x00")[0]
+            libname = self.readAtRva(x.Name, 256).split("\x00")[0]
 
             idx = 0
-            noff = self.rvaToOffset(x.OriginalFirstThunk)
-            aoff = self.rvaToOffset(x.FirstThunk)
+
+            imp_by_name = x.OriginalFirstThunk
+            if imp_by_name == 0:
+                imp_by_name = x.FirstThunk
 
             while True:
-                ava = self.readPointerAtOffset(aoff+(self.psize*idx))
-                if ava == 0:
+
+                arrayoff = self.psize * idx
+
+                ibn_rva = self.readPointerAtRva(imp_by_name+arrayoff)
+                if ibn_rva == 0:
                     break
 
-                nva = self.readPointerAtOffset(noff+(self.psize*idx))
-                if nva & self.high_bit_mask:
-                    name = ordlookup.ordLookup(libname, nva & 0x7fffffff)
-                else:
-                    nameoff = self.rvaToOffset(nva) + 2 # Skip the short "hint"
-                    name = self.readAtOffset(nameoff, 256).split("\x00")[0]
+                if ibn_rva & self.high_bit_mask:
+                    funcname = ordlookup.ordLookup(libname, ibn_rva & 0x7fffffff)
 
-                self.imports.append((x.FirstThunk+(idx*self.psize),libname,name))
+                else:
+                    ibn = self.readStructAtRva(ibn_rva, 'pe.IMAGE_IMPORT_BY_NAME')
+                    funcname = ibn.Name
+
+                self.imports.append((x.FirstThunk+arrayoff,libname,funcname))
 
                 idx += 1
                 
@@ -561,7 +575,7 @@ class PE(object):
 
     def parseRelocations(self):
         self.relocations = []
-        edir = self.IMAGE_NT_HEADERS.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC]
+        edir = self.getDataDirectory(IMAGE_DIRECTORY_ENTRY_BASERELOC)
         rva = edir.VirtualAddress
         rsize = edir.Size
 
@@ -600,7 +614,7 @@ class PE(object):
         self.forwarders = []
         self.IMAGE_EXPORT_DIRECTORY = None
 
-        edir = self.IMAGE_NT_HEADERS.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT]
+        edir = self.getDataDirectory(IMAGE_DIRECTORY_ENTRY_EXPORT)
         poff = self.rvaToOffset(edir.VirtualAddress)
 
         if poff == 0: # No exports...

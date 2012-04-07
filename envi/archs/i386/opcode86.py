@@ -149,6 +149,7 @@ INS_MOV    =     INS_LOAD | 0x01
 INS_MOVCC  =             INS_LOAD | 0x02
 INS_XCHG   =             INS_LOAD | 0x03
 INS_XCHGCC =     INS_LOAD | 0x04
+INS_LEA    =     INS_LOAD | 0x05
                                                                                 
 INS_STRCMP  =    INS_ARRAY | 0x01
 INS_STRLOAD =    INS_ARRAY | 0x02
@@ -394,7 +395,7 @@ tbl32_Main = [
 ( 0, INS_MOV, ADDRMETH_G | OPTYPE_b | OP_W, ADDRMETH_E | OPTYPE_b | OP_R, ARG_NONE, cpu_80386, "mov", 0, 0, 0),  
 ( 0, INS_MOV, ADDRMETH_G | OPTYPE_v | OP_W, ADDRMETH_E | OPTYPE_v | OP_R, ARG_NONE, cpu_80386, "mov", 0, 0, 0),  
 ( 0, INS_MOV, ADDRMETH_E | OPTYPE_w | OP_W, ADDRMETH_S | OPTYPE_w | OP_R, ARG_NONE, cpu_80386, "mov", 0, 0, 0),  
-( 0, INS_MOV, ADDRMETH_G | OPTYPE_v | OP_W, ADDRMETH_M | OPTYPE_z | OP_R, ARG_NONE, cpu_80386, "lea", 0, 0, 0),  
+( 0, INS_LEA, ADDRMETH_G | OPTYPE_v | OP_W, ADDRMETH_M | OPTYPE_z | OP_R, ARG_NONE, cpu_80386, "lea", 0, 0, 0),  
 ( 0, INS_MOV, ADDRMETH_S | OPTYPE_w | OP_W, ADDRMETH_E | OPTYPE_w | OP_R, ARG_NONE, cpu_80386, "mov", 0, 0, 0),  
 ( 0, INS_POP, ADDRMETH_E | OPTYPE_v | OP_W, ARG_NONE, ARG_NONE, cpu_80386, "pop", 0, 0, 0),  
 (0, INS_NOP, ARG_NONE, ARG_NONE, ARG_NONE, cpu_80386, "nop", 0, 0, 0),  

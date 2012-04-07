@@ -123,6 +123,7 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
         self.arch = envi.getArchModule(arch)
         self.difftracks = {}
         self.waitlib = None
+        self.bpcmds = {}
 
         self.windows_jit_event = None
 
@@ -211,6 +212,7 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
         self.trace = oldtrace.buildNewTrace()
         oldtrace.release()
 
+        self.bpcmds = {}
         self.manageTrace(self.trace)
         return self.trace
 
@@ -326,6 +328,10 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
             bp = trace.getCurrentBreakpoint()
             if bp:
                 self.vprint("Thread: %d Hit Break: %s" % (tid, repr(bp)))
+                cmdstr = self.bpcmds.get(bp.id, None)
+                if cmdstr != None:
+                    self.onecmd(cmdstr)
+
             else:
                 self.vprint("Thread: %d NOTIFY_BREAK" % tid)
 
@@ -789,9 +795,7 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
                 if pc == taddr:
                     break
 
-                obytes = t.readMemory(pc, 16)
-                # FIXME unified parseOpcode!
-                op = t.arch.makeOpcode(obytes, va=pc)
+                op = t.parseOpcode(pc)
 
                 sym = t.getSymByAddr(pc)
 
@@ -1269,7 +1273,7 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
     def do_bp(self, line):
         """
         Show, add,  and enable/disable breakpoints
-        USAGE: bp [-d <addr>] [-a <addr>] [-o <addr>] [[-c pycode] <address> ...]
+        USAGE: bp [-d <addr>] [-a <addr>] [-o <addr>] [[-c pycode] <address> [vdb cmds]]
         -C - Clear All Breakpoints
         -c "py code" - Set the breakpoint code to the given python string
         -d <id> - Disable Breakpoint
@@ -1281,7 +1285,11 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
         -W perms:size - Set a hardware Watchpoint with perms/size (ie -W rw:4)
         -f - Make added breakpoints from this command into "FastBreaks"
         -S <libname>:<regex> - Add bp's to all matching funcs in <libname>
+
         <address>... - Create Breakpoint
+
+        [vdb cmds].. - (optional) vdb cli comand to run on BP hit (seperate
+                       multiple commands with ;; )
 
         NOTE: -c adds python code to the breakpoint.  The python code will
             be run with the following objects mapped into it's namespace
@@ -1318,10 +1326,12 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
                 fastbreak = True
 
             elif opt == "-r":
+                self.bpcmds.pop(eval(optarg), None)
                 self.trace.removeBreakpoint(eval(optarg))
 
             elif opt == "-C":
                 for bp in self.trace.getBreakpoints():
+                    self.bpcmds.pop(bp.id, None)
                     self.trace.removeBreakpoint(bp.id)
 
             elif opt == "-d":
@@ -1364,19 +1374,29 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
                     self.vprint('Invalid Regular Expression: %s' % regex)
                     return
 
-        for arg in args:
+        cmdstr = None
+        if len(args) > 1:
+            cmdstr = ' '.join(args[1:])
+
+        if len(args) >= 1:
+            arg = args[0]
+
             if wpargs != None:
                 size = int(wpargs[1])
                 bp = vtrace.Watchpoint(None, expression=arg, size=size, perms=wpargs[0])
             else:
                 bp = vtrace.Breakpoint(None, expression=arg)
+
             bp.setBreakpointCode(pycode)
             bp.fastbreak = fastbreak
-            self.trace.addBreakpoint(bp)
+            bpid = self.trace.addBreakpoint(bp)
+            if cmdstr:
+                self.bpcmds[bpid] = cmdstr.replace(';;', '&&')
 
         self.vprint(" [ Breakpoints ]")
         for bp in self.trace.getBreakpoints():
-            self.vprint("%s enabled: %s" % (bp, bp.isEnabled()))
+            cmdstr = self.bpcmds.get(bp.id, '')
+            self.vprint("%s enabled: %s %s" % (bp, bp.isEnabled(), cmdstr))
 
     def do_fds(self, args):
         """
