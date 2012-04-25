@@ -187,6 +187,7 @@ class Graph:
             self.edge_by_to[toid] = ylist
         xlist.append(e)
         ylist.append(e)
+        return eid
 
     def delEdge(self, eid):
         '''

@@ -6,8 +6,6 @@ Cobra's built in clustering framework
 import gc
 import sys
 import time
-import cobra
-import dcode
 import Queue
 import struct
 import socket
@@ -15,6 +13,12 @@ import urllib2
 import traceback
 import threading
 import subprocess
+import multiprocessing
+
+import cobra
+import dcode
+
+queen_port   = 32124
 
 cluster_port = 32123
 cluster_ip = "224.69.69.69"
@@ -142,6 +146,7 @@ class VerboseCallback(ClusterCallback):
 import collections
 
 class ClusterServer:
+
     def __init__(self, name, maxsize=None, docode=False, bindsrc="", cobrad=None):
         """
         The cluster server is the core of the code that manages work units.
@@ -154,6 +159,7 @@ class ClusterServer:
         """
         self.go = True
         self.name = name
+        self.queen = None   # Do we have a cluster queen?
         self.nextwid = 0
         self.inprog = {}
         self.maxsize = maxsize
@@ -182,6 +188,9 @@ class ClusterServer:
         thr = threading.Thread(target=self.timerThread)
         thr.setDaemon(True)
         thr.start()
+
+    def setClusterQueen(self, queenhost):
+        self.queen = cobra.CobraProxy('cobra://%s:%d/ClusterQueen' % (queenhost, queen_port))
 
     def __touchWork(self, workid):
         # Used to both validate an inprog workid *and*
@@ -215,19 +224,26 @@ class ClusterServer:
     def announceWork(self):
         """
         Announce to our multicast cluster peers that we have work
-        to do!
+        to do! (Or use a queen to proxy to them...)
         """
-        buf = "cobra:%s:%s:%d" % (self.name, self.cobraname, self.cobrad.port)
-        self.sendsock.sendto(buf, (cluster_ip, cluster_port))
+        if self.queen:
+            self.queen.proxyAnnounceWork(self.name, self.cobraname, self.cobrad.port)
+
+        else:
+            buf = "cobra:%s:%s:%d" % (self.name, self.cobraname, self.cobrad.port)
+            self.sendsock.sendto(buf, (cluster_ip, cluster_port))
 
     def runServer(self, firethread=False):
+
         if firethread:
             thr = threading.Thread(target=self.runServer)
             thr.setDaemon(True)
             thr.start()
+
         else:
             self.cobrad.fireThread()
             while self.go:
+
                 if len(self.queue):
                     self.announceWork()
 
@@ -391,7 +407,7 @@ class ClusterClient:
     docode will enable code sharing with the server
     """
 
-    def __init__(self, name, maxwidth=4, docode=False):
+    def __init__(self, name, maxwidth=multiprocessing.cpu_count(), docode=False):
         self.go = True
         self.name = name
         self.width = 0
@@ -417,15 +433,21 @@ class ClusterClient:
             if self.width >= self.maxwidth:
                 continue
 
+            server, svrport = sockaddr
+
             if not buf.startswith("cobra"):
                 continue
 
             info = buf.split(":")
-            if len(info) != 4:
+
+            ilen = len(info)
+            if ilen == 4:
+                cc,name,cobject,portstr = info
+            elif ilen == 5:
+                cc,name,cobject,portstr,server = info
+            else:
                 continue
 
-            server, svrport = sockaddr
-            cc,name,cobject,portstr = info
             if (self.name != name) and (self.name != "*"):
                 continue
 
@@ -447,6 +469,27 @@ class ClusterClient:
             sub.wait()
         finally:
             self.width -= 1
+
+class ClusterQueen:
+
+    def __init__(self, ifip, recast=True):
+
+        # Setup our transmission socket
+        self.sendsock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sendsock.bind((ifip, 0))
+
+        # FIXME TODO make her optionally a multicast listener that re-broadcasts
+        # to her subjects...
+
+    def proxyAnnounceWork(self, name, cobraname, port):
+        """
+        Send out a multicast announcement to our subjects to go help
+        a cluster server.
+        """
+        # Get the host IP from the connection information
+        host, x = cobra.getCallerInfo()
+        buf = "cobra:%s:%s:%d:%s" % (name, cobraname, port, host)
+        self.sendsock.sendto(buf, (cluster_ip, cluster_port))
 
 def getHostPortFromUri(uri):
     """

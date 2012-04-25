@@ -32,7 +32,7 @@ if __name__ == "__main__":
             keys = vs.getVersionKeys()
             keys.sort()
             for k in keys:
-                val = vs.getVersionValue(k).encode('ascii','ignore')
+                val = vs.getVersionValue(k)
                 print '%s: %s' % (k, val)
 
         #if vs != None:

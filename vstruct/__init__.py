@@ -73,7 +73,8 @@ class VStruct(vs_prims.v_base):
         '''
         Parse from the given file like object as input.
         '''
-        for fname, fobj in self.vsGetFields():
+        for fname in self._vs_fields:
+            fobj = self._vs_values.get(fname)
             fobj.vsParseFd(fd)
             callback = getattr(self, 'pcb_%s' % fname, None)
             if callback != None:
@@ -93,7 +94,9 @@ class VStruct(vs_prims.v_base):
         field is set by the parser.
         
         """
-        for fname, fobj in self.vsGetFields():
+        # In order for callbacks to change fields, we can't use vsGetFields()
+        for fname in self._vs_fields:
+            fobj = self._vs_values.get(fname)
             offset = fobj.vsParse(sbytes, offset=offset)
             callback = getattr(self, 'pcb_%s' % fname, None)
             if callback != None:
@@ -257,15 +260,17 @@ class VStruct(vs_prims.v_base):
         ret = []
         if top:
             ret.append((offset, indent, self._vs_name, self))
+        off = offset
         indent += 1
         for fname in self._vs_fields:
             x = self._vs_values.get(fname)
-            off = offset + self.vsGetOffset(fname)
+            #off = offset + self.vsGetOffset(fname)
             if isinstance(x, VStruct):
                 ret.append((off, indent, fname, x))
                 ret.extend(x.vsGetPrintInfo(offset=off, indent=indent, top=False))
             else:
                 ret.append((off, indent, fname, x))
+            off += len(x)
         return ret
 
     def __len__(self):
@@ -342,6 +347,55 @@ class VArray(VStruct):
         return self.vsGetField("%d" % index)
 
     #FIXME slice asignment
+
+class VUnion(VStruct):
+
+    def vsEmit(self):
+        raise Exception('VUnion is only for parse right now!')
+
+    def vsParse(self, sbytes, offset=0):
+        """
+        For all the primitives contained within, allow them
+        an opportunity to parse the given data and return the
+        total offset...
+
+        Any method named pcb_<FieldName> will be called back when the specified
+        field is set by the parser.
+        
+        """
+        # In order for callbacks to change fields, we can't use vsGetFields()
+        ret = offset
+        for fname in self._vs_fields:
+            fobj = self._vs_values.get(fname)
+            ret = max(offset, fobj.vsParse(sbytes, offset=offset))
+            callback = getattr(self, 'pcb_%s' % fname, None)
+            if callback != None:
+                callback()
+            cblist = self._vs_pcallbacks.get(fname)
+            if cblist != None:
+                for callback in cblist:
+                    callback(self)
+        return ret
+
+    def __len__(self):
+        ret = 0
+        for fname, fobj in self.vsGetFields():
+            ret = max(ret, len(fobj))
+        return ret
+
+    def vsGetPrintInfo(self, offset=0, indent=0, top=True):
+        ret = []
+        if top:
+            ret.append((offset, indent, self._vs_name, self))
+        indent += 1
+        for fname in self._vs_fields:
+            x = self._vs_values.get(fname)
+            if isinstance(x, VStruct):
+                ret.append((offset, indent, fname, x))
+                ret.extend(x.vsGetPrintInfo(offset=offset, indent=indent, top=False))
+            else:
+                ret.append((offset, indent, fname, x))
+        return ret
 
 def resolve(impmod, nameparts):
     """

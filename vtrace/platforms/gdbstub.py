@@ -11,6 +11,7 @@ import tempfile
 import PE
 import vdb
 import envi
+import envi.bits as e_bits
 import envi.resolver as e_resolv
 import vtrace
 
@@ -120,8 +121,6 @@ class KeBugCheckBreak(vtrace.Breakpoint):
         savedpc, exccode = trace.readMemoryFormat(sp, '<PP')
         trace._fireSignal(exccode)
 
-bigmask = 0xffffffffffffffff
-
 class GdbStubMixin(e_registers.RegisterContext):
 
     def __init__(self):
@@ -130,6 +129,8 @@ class GdbStubMixin(e_registers.RegisterContext):
         self.stepping = False
         self.attaching = False
         self.breaking = False
+
+        self.bigmask = e_bits.u_maxes[ self.getPointerSize() ]
 
         aname = self.getMeta('Architecture')
         self._addArchNamespace(aname)
@@ -341,8 +342,11 @@ class GdbStubMixin(e_registers.RegisterContext):
                     kpcr = self.getStruct('nt.KPCR', fsbase)
                     kver = self.getStruct('nt.DBGKD_GET_VERSION64', kpcr.KdVersionBlock)
 
-                    kernbase = kver.KernBase & bigmask
-                    modlist = kver.PsLoadedModuleList & bigmask
+                    #print kpcr.tree()
+                    #print kver.tree()
+
+                    kernbase = kver.KernBase & self.bigmask
+                    modlist = kver.PsLoadedModuleList & self.bigmask
 
                     self.setVariable('PsLoadedModuleList', modlist)
                     self.setVariable('KernelBase', kernbase)
@@ -356,9 +360,9 @@ class GdbStubMixin(e_registers.RegisterContext):
                     while ldr_entry != modlist:
                         ldte = self.getStruct('nt.LDR_DATA_TABLE_ENTRY', ldr_entry)
                         dllname = self.readMemory(ldte.FullDllName.Buffer, ldte.FullDllName.Length).decode('utf-16le')
-                        dllbase = ldte.DllBase & bigmask
+                        dllbase = ldte.DllBase & self.bigmask
                         self.addLibraryBase(dllname, dllbase, always=True)
-                        ldr_entry = ldte.InLoadOrderLinks.Flink & bigmask
+                        ldr_entry = ldte.InLoadOrderLinks.Flink & self.bigmask
 
                     try:
                         self.addBreakpoint(KeBugCheckBreak('nt.KeBugCheck'))
@@ -445,8 +449,8 @@ class GdbStubMixin(e_registers.RegisterContext):
         kpcr = self.getStruct('nt.KPCR', kpcr)
         kver = self.getStruct('nt.DBGKD_GET_VERSION64', kpcr.KdVersionBlock)
 
-        kernbase = kver.KernBase & bigmask
-        modlist = kver.PsLoadedModuleList & bigmask
+        kernbase = kver.KernBase & self.bigmask
+        modlist = kver.PsLoadedModuleList & self.bigmask
 
         self.setVariable('PsLoadedModuleList', modlist)
         self.setVariable('KernelBase', kernbase)
@@ -460,9 +464,9 @@ class GdbStubMixin(e_registers.RegisterContext):
         while ldr_entry != modlist:
             ldte = self.getStruct('nt.LDR_DATA_TABLE_ENTRY', ldr_entry)
             dllname = self.readMemory(ldte.FullDllName.Buffer, ldte.FullDllName.Length).decode('utf-16le')
-            dllbase = ldte.DllBase & bigmask
+            dllbase = ldte.DllBase & self.bigmask
             self.addLibraryBase(dllname, dllbase, always=True)
-            ldr_entry = ldte.InLoadOrderLinks.Flink & bigmask
+            ldr_entry = ldte.InLoadOrderLinks.Flink & self.bigmask
 
         try:
             self.addBreakpoint(KeBugCheckBreak('nt.KeBugCheck'))
@@ -631,7 +635,6 @@ class GdbStubMixin(e_registers.RegisterContext):
         self._sendPkt(cmd)
         return self._recvPkt()
 
-
     def _sendPkt(self, cmd):
         #print 'SEND: ->%s<-' % cmd
         self.sock.sendall(pkt(cmd))
@@ -725,8 +728,9 @@ class GdbStubTrace(
 
     def _activateBreak(self, bp):
         # For now, we don't support watchpoints...
-        addr = bp.resolveAddress(self)
-        self._cmdTransact('Z%d,%x,%x' % (GDB_BP_SOFTWARE,addr,1))
+        if not bp.active:
+            addr = bp.resolveAddress(self)
+            self._cmdTransact('Z%d,%x,%x' % (GDB_BP_SOFTWARE,addr,1))
 
     def _cleanupBreakpoints(self, force=False):
         '''
@@ -739,6 +743,7 @@ class GdbStubTrace(
             # an inactive bp
             if force or not bp.fastbreak:
                 self._cmdTransact('z%d,%x,%x' % (GDB_BP_SOFTWARE,bp.getAddress(),1))
+                bp.active = False
                 #bp.deactivate(self)
 
     def checkBreakpoints(self):

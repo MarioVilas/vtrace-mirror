@@ -73,6 +73,7 @@ class CodeFlowContext(object):
         opdone = self._opdone
         if not persist:
             opdone = {}
+
         calls_from = {}
         optodo = [va, ]
 
@@ -139,9 +140,12 @@ class CodeFlowContext(object):
 
                     # Record that the current code flow has a call from it
                     # to the branch target...
+
                     # FIXME intel hack, call 0, pop reg for geteip...
                     if bva != va + len(op):
                         calls_from[bva] = True
+                        # We only go up to procedural branches, not across
+                        continue
 
                 if not opdone.get(bva):
                     optodo.append(bva)

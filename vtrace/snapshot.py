@@ -69,6 +69,7 @@ class TraceSnapshot(
         #for fname in self.getNormalizedLibNames():
             #subres = e_resolv.FileSymbol(fname, 
 
+        self.running = False
         self.attached = True
         # So that we pickle
         self.bplock = None

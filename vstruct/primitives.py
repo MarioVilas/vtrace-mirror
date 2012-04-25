@@ -365,6 +365,42 @@ class v_str(v_prim):
         b = self._vs_value[:size]
         self._vs_value = b.ljust(size, '\x00')
 
+class v_zstr(v_prim):
+    '''
+    A string placeholder class which will automagically return
+    up to a null terminator dynamically.
+    '''
+
+    _vs_builder = True
+
+    def __init__(self, val=''):
+        v_prim.__init__(self)
+        self._vs_value = val + '\x00'
+        self._vs_length = len(self._vs_value)
+        self._vs_align = 1
+
+    def vsParse(self, fbytes, offset=0):
+        nulloff = fbytes.find('\x00', offset)
+        if nulloff == -1:
+            raise Exception('v_zstr found no NULL terminator!')
+
+        nulloff += 1 # *include* the null
+        self._vs_value = fbytes[offset : nulloff]
+        self._vs_len = len(self._vs_value)
+        return nulloff
+
+    def vsEmit(self):
+        return self._vs_value
+
+    def vsGetValue(self):
+        return self._vs_value[:-1]
+
+    def vsSetValue(self, val):
+        self._vs_value = val + '\x00'
+
+    def vsSetLength(self, size):
+        raise Exception('Cannot vsSetLength on v_zstr! (its dynamic)')
+
 class v_wstr(v_str):
     '''
     Unicode variant of the above string class
