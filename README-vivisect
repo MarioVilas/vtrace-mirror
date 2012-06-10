@@ -1,0 +1,110 @@
+
+WARNING: This is *NOT* for public distribution. Check with
+Invisigoth for details!!1!1one!
+
+==== Intro ===========================================
+
+Oh hai! I got you a programatic binary analysis framework but
+I eated it.
+
+Features:
+ * Simple/fast python API for trying out crazy analysis ideas
+ * Complete emulation pass with annotation
+ * Import emulation to allow emu state tracking
+ * Analysis of Elf/PE/binaryblob formats (Mach-O to come soon)
+ * Support for easy to implement and batch run analysis module interface
+ * Support for more than one binary file loaded in one workspace
+ * Colaborative real-time client/server mode
+ * Reasonably decent GUI (mostly for viewing) results
+ * Support for running on windows/linux/mac
+ * Windows symbol server support (when run on win32)
+ * Bulk analysis mode which goes nice and fast (w/o GUI)
+
+Bugs:
+ No doubt are numerous...  Binaries that cause the problem are the most
+ helpful thing.  Contact invisigoth with/for details.
+
+==== Basic Use =======================================
+
+The command "python vivbin" may be used to start vivisect.
+Check out the usage with -? to see additional options.
+
+Opening a binary:
+wootbox$ python vivbin foo.dll
+
+(NOTE: You must use File->Save to save your progress)
+(DOUBLE SECRET NOTE: or vw.saveWorkspace() from the interactive py dialog)
+
+Generating a workspace in bulk mode:
+wootbox$ python vivbin -B foo.dll
+
+Opening a saved workspace:
+wootbox$ python vivbin -w foo.dll.viv
+
+Loading an additional binary into an existing workspace (w/o GUI):
+wootbox$ python vivbin -B -w foo.dll.viv bar.dll
+
+Loading a binary blob into a workspace (shellcode/etc...):
+wootbox$ python vivbin -p blob -O blob:arch:i386 -O blob:baseaddr:0x000a0000 foo.bin
+
+Running an external analysis module from the CLI on the
+foo.dll workspace:
+
+wootbox$ ls
+<nom nom nom>
+crazyidea.py
+foo.dll.viv
+vivbin
+
+wootbox$ python vivbin -M crazyidea -w foo.dll.viv
+
+The python module crazyidea.py must implement an
+"analyze" method which expects to simply take the
+workspace as an argument.
+
+NOTE: Windows symbol support! Use _NT_SYMBOL_PATH just like windbg.
+      Once the workspace is parsed, you won't need access to the
+      symbol store anymore (and can even move the viv file to *nix
+      and such).
+
+==== API =============================================
+
+Most of the vivisect API intended for external use is documented
+in the VivWorkspace object's pydoc documentation.
+
+==== Workspace Server ================================
+
+Vivisect may be used as a colaborative reversing toy by starting
+the vivisect server with -S.  This will allow clients (using -R)
+to connect in and request that a process be started to serve
+a particular workspace (which already exists) on the server.
+
+Assuming you are using regular viv files as your storage backing,
+the workspaces will be requested by file name from the client.
+
+For example:
+
+server$ ls
+<nom nom nom>
+kernel32.dll.viv
+vivbin
+
+server$ python vivbin -S
+
+Then as many clients as you like may use:
+
+wootbox$ python vivbin -R <server> -w kernel32.dll.viv
+
+Client will see eachother's changes in real-time and may
+quit at any time.  Using File->Save will request that
+the server save the workspace progress thus far.
+
+There are still known issues with getting a server to cleanly
+shutdown...  For now, connect a workspace and File-Save then
+kill off the python intpreter running the workspace manually...
+:P
+
+==== Greets ==========================================
+
+Blackhats everywhere...
+

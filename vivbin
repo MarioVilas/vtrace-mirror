@@ -1,0 +1,211 @@
+#!python
+
+import os
+import imp
+import sys
+import time
+import getopt
+import inspect
+import cProfile
+import threading
+import traceback
+
+import vivisect
+import vivisect.cli as viv_cli
+import vivisect.server as viv_server
+import vivisect.profile as viv_profile
+
+def printGarbage():
+    d = {}
+    import gc
+    import code
+    for o in gc.get_objects():
+        name = None
+        if hasattr(o, "__class__"):
+            name = o.__class__.__name__
+        elif hasattr(o, "__name__"):
+            name = o.__name__
+        else:
+            name = str(o)
+        x = d.get(name, 0)
+        d[name] = x+1
+
+def usage():
+    print "Usage: vivbin [options] <files...>"
+    print "\t-M <bulkmod>  Run the file listed as an analysis module in non-gui mode and exit"
+    print "\t-A Do *not* do an initial auto-analysis pass"
+    print "\t-B Bulk mode. Do *not* start the gui, just load, analyze and save"
+    print "\t-C Output vivisect performace profiling (cProfile) info."
+    # FIXME
+    #print "\t-C CLI mode. load/analyze and give back a prompt."
+    print "\t-O <secname>:<optname>:<optval> Use the CLI to set a config option"
+    print "\t-p <parser> Manually specify the parser module (pe/elf/blob/...)"
+    print "\t-P Generate a profile (impemu) for a workspace."
+    print "\t-s <storage_name> Specify a storage module by name."
+    print "\t-S Server Mode (start a workspace server)"
+    print "\t-v verbose mode"
+    print "\t-V Add file version (if available) to save file name"
+    print "\t-w <workspace_name> Specify the given workspace by name"
+    sys.exit(0)
+
+def main():
+    global vw
+    # If we just want a workspace, we could use this.
+    #vw = vivisect.VivWorkspace()
+    vw = viv_cli.VivCli()
+
+    addver = False
+    modname = None
+    bulk = False
+    doanalyze = True
+    profile = False
+    server = False
+    vwname = None
+    verbose = False
+    parsemod = None
+    cprof = False
+
+    try:
+        # FIXME optparse!
+        opts,args = getopt.getopt(sys.argv[1:], "ABCM:vO:Pp:Sw:V")
+    except:
+        usage()
+
+    for opt,optarg in opts:
+
+        if opt == "-A":
+            doanalyze = False
+
+        elif opt == "-B":
+            bulk = True
+
+        elif opt == "-M":
+            bulk = True
+            modname = optarg
+
+        elif opt == "-v":
+            verbose = True
+
+        elif opt == "-O":
+
+            x = optarg.split(":")
+            if len(x) != 3:
+                usage()
+
+            secname, optname, value = x
+            vw.setOption(secname, optname, value)
+
+        elif opt == "-P":
+            profile = True
+
+        elif opt == "-p":
+            parsemod = optarg
+
+        elif opt == "-S":
+            server = True
+
+        elif opt == "-s":
+            vw.setMeta("StorageModule", optarg)
+
+        elif opt == "-w":
+            vwname = optarg
+
+        elif opt == "-C":
+            cprof = True
+
+        elif opt == '-V':
+            addver = True
+
+    vw.verbose = verbose
+
+    # If we are a server, go do that right away
+    if server:
+        # We are the main server
+        print "Running Vivisect Main Server"
+        return viv_server.runMainServer()
+
+    # If a workspace is specified, load it up!
+    if vwname != None:
+        start = time.time()
+        if cprof:
+            cProfile.run('vw.loadWorkspace("%s")' % vwname)
+        else:
+            vw.loadWorkspace(vwname)
+        end = time.time()
+        print 'WORKSPACE LOADING TIME: %s' % (end-start)
+
+    # If we're not gonna load files, no analyze
+    if len(args) == 0:
+        doanalyze = False
+
+    # Load in any additional files...
+    fnames = []
+    for fname in args:
+        if fname.endswith(".viv"):
+            print "You must specify -w <wsname> to load a workspace!"
+            sys.exit(0)
+
+        start = time.time()
+        basename = vw.loadFromFile(fname, fmtname=parsemod)
+        fnames.append(basename)
+        end = time.time()
+        print 'BINARY LOADING TIME: %s' % (end-start)
+
+    if addver:
+        ver = vw.getFileMeta(fnames[0], 'Version')
+        if ver != None:
+            storbase = '%s_%s.viv' % (fnames[0], ver)
+            dirname = os.path.dirname(vw.getMeta('StorageName',''))
+            storname = os.path.join(dirname, storbase)
+            vw.setMeta('StorageName', storname)
+            print 'Setting StorageName: %s' % storname
+
+    if bulk:
+        if doanalyze:
+            if cprof:
+                cProfile.run("vw.analyze()")
+            else:
+                start = time.time()
+                vw.analyze()
+                end = time.time()
+                print "ANALYSIS TIME: %s" % (end-start)
+
+        if modname != None:
+            module = imp.load_module("custom_analysis", file(modname, "rb"), modname, ('.py', 'U', 1))
+            module.analyze(vw)
+
+        print "Saving workspace: %s" % (vw.getMeta('StorageName'))
+
+        vw.saveWorkspace()
+
+    elif profile:
+        if doanalyze:
+            vw.analyze()
+
+        viv_profile.genProfile(vw)
+ 
+    else:
+
+        import vivisect.qt.main as viv_qt_main
+
+        # If we are interactive, lets turn on extended output...
+        vw.verbose = True
+
+        if doanalyze and len(args):
+            t = threading.Thread(target=vw.analyze, args=())
+            t.setDaemon(True)
+            t.start()
+
+        viv_qt_main.main(vw)
+
+if __name__ == "__main__":
+    try:
+        # psyco makes disasm much faster (2-3X)
+        import psyco
+        #psyco.log()
+        psyco.full()
+    except ImportError:
+        pass
+
+    main()
+

@@ -1,0 +1,79 @@
+'''
+A special app for using a remote Vivisect server.
+'''
+import os
+import sys
+import time
+import optparse
+
+import cobra
+import cobra.dcode
+
+vivport = 0x4074
+
+if __name__ == '__main__':
+
+    usage = 'python vivclient [options] [ <serverip> | <wsip> <wsport> ]'
+
+    parser = optparse.OptionParser(usage=usage)
+    parser.add_option('-L', '--list', dest='servlist', action='store_true', default=False, help='List workspaces available on <serverip>')
+    parser.add_option('-w', '--workspace', dest='workspace', default=None, help='Startup and connect to <workspace> on <serverip>')
+
+    options, argv = parser.parse_args()
+
+    if options.servlist:
+        print 'Connecting to: %s : %d' % (argv[0], vivport)
+        svr = cobra.CobraProxy('cobra://%s:%d/VivServer' % (argv[0], vivport))
+        print 'Retrieving workspace list: (name, status, port)'
+        for wsname, wsport, wsstatus in svr.listWorkspaces():
+            print '%32s %10s %s' % (wsname, wsstatus, wsport)
+        sys.exit(0)
+
+    if options.workspace:
+        print 'Requesting %s from server %s' % (options.workspace, argv[0])
+        svr = cobra.CobraProxy('cobra://%s:%d/VivServer' % (argv[0], vivport))
+        port = svr.startWorkspace(options.workspace)
+        argv = (argv[0], str(port))
+
+    if len(argv) != 2:
+        print usage
+        print 'Not enough arguments...'
+        sys.exit(0)
+
+    host, portstr = argv
+    port = int(portstr)
+
+    # This crazyness makes sure we import only from the server
+    # who is sharing the workspace...  (dcode sucks his code
+    # over the wire during import)
+
+    sys.path.remove(os.getcwd())
+    cobra.dcode.enableDcodeClient()
+    cobra.dcode.addDcodeServer(host, port)
+
+    try:
+        import vivisect
+        import vivisect.cli as viv_cli
+        import vivisect.server as viv_server
+        import vivisect.qt.main as viv_qt_main
+    except ImportError, e:
+        print 'Dcode Import Failure: Is the host/port right?'
+        sys.exit(1)
+
+    vw = viv_cli.VivCli()
+    print 'sections',repr(vw.config.sections())
+
+    print 'Connecting to workspace on: %s : %d' % (host, port)
+    remotevw = viv_server.connectToWorkspace(host,port)
+
+    print 'Importing from remote workspace...'
+    start = time.time()
+    vw.initWorkspaceClient(remotevw)
+    total = time.time() - start
+    print 'Remote import complete! (%d seconds)' % total
+
+    # If we are interactive, lets turn on extended output...
+    vw.verbose = True
+
+    viv_qt_main.main(vw)
+
