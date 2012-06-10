@@ -2,7 +2,7 @@ import os
 import imp
 import traceback
 
-__all__ = ['loadExtensions','windows','i386','darwin','amd64','gdbstub','arm']
+__all__ = ['loadExtensions','windows','i386','darwin','amd64','gdbstub','arm','android']
 
 '''
 A package to contain all the extended functionality for platform specific

@@ -116,7 +116,7 @@ function vaclick(elem) {
     curva = elem;
 
     var vastr = elem.className.split("_", 2)[1];
-    vnav._jsSetCurVa(parseInt(vastr))
+    vnav._jsSetCurVa(vastr)
 }
 
 function vagoto(elem) {

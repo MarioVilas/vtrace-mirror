@@ -13,7 +13,7 @@ def main():
         usage()
 
     cname = sys.argv[1]
-    worker = c_cluster.ClusterClient(cname)
+    worker = c_cluster.ClusterClient(cname, docode=True)
     worker.processWork()
 
 if __name__ == '__main__':

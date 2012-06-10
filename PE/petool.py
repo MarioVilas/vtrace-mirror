@@ -1,6 +1,7 @@
 
 import os
 import sys
+import code
 
 import PE
 
@@ -46,3 +47,4 @@ if __name__ == "__main__":
             #print 'Renaming to %s' % destpath
             #os.rename(sys.argv[1], destpath)
 
+        code.interact(local=locals())

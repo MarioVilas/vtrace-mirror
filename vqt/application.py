@@ -1,4 +1,4 @@
-
+import os
 from PyQt4 import QtCore, QtGui
 
 import vqt.cli as vq_cli
@@ -50,6 +50,8 @@ class VQMainCmdWindow(QtGui.QMainWindow):
 
         self._vq_settings = QtCore.QSettings('invisigoth', application=appname, parent=self)
 
+        self._vq_histfile = os.path.join( os.path.expanduser('~'), '.%s_history' % appname)
+
         self._dock_widgets = []
         self._dock_classes = {}
 
@@ -62,11 +64,16 @@ class VQMainCmdWindow(QtGui.QMainWindow):
         self.setDockOptions(self.AnimatedDocks | self.AllowTabbedDocks)
 
         self._vq_cli = vq_cli.VQCli(cmd)
+        self._vq_cli.loadHistory(self._vq_histfile)
+
         self.setCentralWidget(self._vq_cli)
         self.vqRestoreGuiSettings(self._vq_settings)
 
     def vqAddMenuField(self, fname, callback, args=()):
         self._vq_mbar.addField(fname, callback, args=args)
+
+    def vqAddDynMenu(self, fname, callback):
+        self._vq_mbar.addDynMenu(fname, callback)
 
     def vqInitDockWidgetClasses(self):
         # apps can over-ride
@@ -131,6 +138,7 @@ class VQMainCmdWindow(QtGui.QMainWindow):
     def closeEvent(self, event):
 
         self.vqSaveGuiSettings(self._vq_settings)
+        self._vq_cli.saveHistory(self._vq_histfile)
         QtGui.QMainWindow.closeEvent(self, event)
 
     def vqRemoveDockWidget(self, widget):

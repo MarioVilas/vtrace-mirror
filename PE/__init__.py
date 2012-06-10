@@ -188,7 +188,7 @@ class VS_VERSIONINFO:
         if offmod:
             offset += (4 - offmod)
 
-        xmax = offset + min(mysize, len(bytes))
+        xmax = min(mysize, len(bytes))
         i = 0
         while offset < xmax and i < 2:
             offset = self._stringFileInfo(bytes, offset)

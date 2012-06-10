@@ -52,48 +52,14 @@ class PosixMixin:
     def platformSendBreak(self):
         self.sendSignal(signal.SIGTRAP) # FIXME maybe change to SIGSTOP
 
-    def posixLibraryLoadHack(self):
-        """
-        Posix systems don't have library load events, so
-        fake it out here... (including pre-populating the
-        entire known library bases metadata
-        """
-        # GHETTO: just look for magic based on binary
-        magix = ["\x7fELF",]
-        done = []
-        for addr,size,perms,fname in self.getMemoryMaps():
-            if fname in done:
-                continue
-            done.append(fname)
-            if perms & e_mem.MM_READ:
-                try:
-                    buf = self.readMemory(addr, 20)
-                    for m in magix:
-                        if buf.find(m) == 0:
-                            self.addLibraryBase(fname, addr)
-                            break
-                except: #FIXME why can't i read all maps?
-                    pass
-
     def platformWait(self):
         pid, status = os.waitpid(self.pid,0)
         return status
 
-    def posixCreateThreadHack(self):
-        '''
-        For systems which don't use their debug APIs to
-        generate thread creation events on startup, 
-        '''
-        initid = self.getMeta('ThreadId')
-        for tid in self.platformGetThreads().keys():
-            self.setMeta('ThreadId', tid)
-            self.fireNotifiers(vtrace.NOTIFY_CREATE_THREAD)
-        self.setMeta('ThreadId', initid)
-
     def handleAttach(self):
         self.fireNotifiers(vtrace.NOTIFY_ATTACH)
-        self.posixLibraryLoadHack()
-        self.posixCreateThreadHack()
+        self._findLibraryMaps('\x7fELF')
+        self._simpleCreateThreads()
         # We'll emulate windows here and send an additional
         # break after our library load events to make things easy
         self.runAgain(False) # Clear this, if they want BREAK to run, it will
@@ -172,7 +138,7 @@ class ElfMixin:
             Elf.STT_SECTION:e_resolv.SectionSymbol,
         }
 
-        fd = file(filename,'rb')
+        fd = self.platformOpenFile(filename)
         elf = Elf.Elf(fd)
         addbase = 0
         if not elf.isPreLinked() and elf.isSharedObject():

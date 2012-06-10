@@ -8,19 +8,18 @@ import envi.memory as e_mem
 
 import vqt.tree as vq_tree
 
-class MemoryMapModel(vq_tree.VQTreeModel):
-    columns = ('Address','Size','Perms','Filename')
-
 class VQMemoryMapView(vq_tree.VQTreeView):
+
     def __init__(self, mem, parent=None):
-        vq_tree.VQTreeView.__init__(self, parent=parent)
+        cols = ('Address','Size','Perms','Filename')
+        vq_tree.VQTreeView.__init__(self, parent=parent, cols=cols)
         self.mem = mem
-        self.setModel(MemoryMapModel(parent=self))
         self.vqLoad()
+        self.vqSizeColumns()
         self.setWindowTitle('Memory Maps')
 
     def vqLoad(self):
-        model = MemoryMapModel(parent=self)
+        model = self.model()
         for mva, msize, mperm, mfile in self.mem.getMemoryMaps():
             pstr = e_mem.reprPerms(mperm)
             model.append(('0x%.8x' % mva, msize, pstr, mfile))

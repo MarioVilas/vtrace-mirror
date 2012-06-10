@@ -188,7 +188,7 @@ class Trace(e_mem.IMemory, e_reg.RegisterContext, e_resolv.SymbolResolver, objec
             raise Exception("ERROR - Tracer must first be detached before you can execute()")
 
         pid = self.platformExec(cmdline)
-        self.justAttached(pid)
+        self._justAttached(pid)
         self.wait()
 
     def getCurrentSignal(self):
@@ -240,7 +240,7 @@ class Trace(e_mem.IMemory, e_reg.RegisterContext, e_resolv.SymbolResolver, objec
     
         try:
             self.platformAttach(pid)
-            self.justAttached(pid)
+            self._justAttached(pid)
             self.wait()
         except Exception, msg:
             raise PlatformException(str(msg))
@@ -331,6 +331,7 @@ class Trace(e_mem.IMemory, e_reg.RegisterContext, e_resolv.SymbolResolver, objec
             if self.attached:
                 self.detach()
             self._cleanupResources()
+            self.platformRelease()
 
     def getPid(self):
         """
@@ -1294,20 +1295,51 @@ class VtraceExpressionLocals(e_expr.MemoryExpressionLocals):
         """
         return self.trace.getMeta(name)
 
-def getTrace():
+def getTrace(plat=None, **kwargs):
     """
     Return a tracer object appropriate for this platform.
     This is the function you will use to get a tracer object
     with the appropriate ancestry for your host.
     ex. mytrace = vtrace.getTrace()
 
+
     NOTE: Use the release() method on the tracer once debugging
           is complete.  This releases the tracer thread and allows
           garbage collection to function correctly.
+
+    Some specialized tracers may be constructed by specifying the "plat"
+    name from one of the following list.  Additionally, each "specialized"
+    tracer may require additional kwargs (which are listed).
+
+    android - Debug android apps through adb (adb must be in your path)
+        avd=<name> (None will let adb decide)
+
+    vmware32  - Debug a 32bit VMWare target.
+        host=<host> - Where is the gdb server listening? (default 127.0.0.1)
+        port=<port> - What port (default: 8832)
+        os=<osname> - On of "Windows", "Linux" (that's all we support now...)
+
+    vmware64  - Debug a 64bit VMWare target.
+        host=<host> - Where is the gdb server listening? (default 127.0.0.1)
+        port=<port> - What port (default: 8864)
+        os=<osname> - On of "Windows", "Linux" (that's all we support now...)
+
+    Examples:
+        t = vtrace.getTrace() # A tracer for *this* os
+
+        t = vtrace.getTrace(plat='android') # The default ADB device
+
+        t = vtrace.getTrace(plat='vmware32', host='localhost', port=31337)
     """
+    # FIXME make "remote" traces use plat="remote"!
+    if plat == 'android':
+        import vtrace.platforms.android as v_android
+        return v_android.getTrace(**kwargs)
 
     if remote: #We have a remote server!
         return getRemoteTrace()
+
+    # From here down, we're trying to build a trace for *this* platform!
 
     os_name = platform.system() # Like "Linux", "Darwin","Windows"
     arch = envi.getCurrentArch()
@@ -1368,7 +1400,7 @@ def getTrace():
             #raise Exception('procmod group membership required')
         if os.getuid() != 0:
             print 'For NOW you *must* be root.  There are some crazy MACH perms...'
-            raise Exception('You must be root for now....')
+            raise Exception('You must be root for now (on OSX)....')
 
         print 'Also... the darwin port is not even REMOTELY working yet.  Solid progress though...'
 

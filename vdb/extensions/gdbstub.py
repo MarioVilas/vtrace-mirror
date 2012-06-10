@@ -12,7 +12,7 @@ def ethread(db, line):
     '''
     t = db.getTrace()
     t.requireNotRunning()
-    fsbase = t._getVmwareReg('fs')
+    fsbase = t.getVariable('fsbase')
     kpcr = t.getStruct('nt.KPCR', fsbase)
     ethraddr = kpcr.PrcbData.CurrentThread
     ethr = t.getStruct('nt.ETHREAD', ethraddr)
@@ -28,7 +28,7 @@ def eprocess(db, line):
     '''
     t = db.getTrace()
     t.requireNotRunning()
-    fsbase = t._getVmwareReg('fs')
+    fsbase = t.getVariable('fsbase')
     kpcr = t.getStruct('nt.KPCR', fsbase)
     ethraddr = kpcr.PrcbData.CurrentThread
     ethr = t.getStruct('nt.ETHREAD', ethraddr)
@@ -87,7 +87,7 @@ class GdbStubNotifier(vtrace.Notifier):
         #print 'Gdb Platform: %s' % gdbplatform
         #print 'Target Platform: %s' % targplatform
 
-        if gdbplatform == 'VMware32':
+        if gdbplatform in ('VMware32','Qemu32'):
 
             if targplatform == 'Windows':
                 self._db.registerCmdExtension(vdb_windows.aslr)
@@ -115,7 +115,7 @@ def gdbmon(db, line):
     if len(line) == 0:
         return db.do_help('gdbmon')
     t = db.getTrace()
-    t.requireNotRunning()
+    #t.requireNotRunning()
     resp = t._monitorCommand(line)
     db.vprint('gdb> %s' % line)
     db.vprint(resp)

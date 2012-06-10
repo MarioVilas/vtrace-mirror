@@ -1,4 +1,4 @@
-
+import os
 from PyQt4 import QtCore, QtGui
 
 import envi.cli as e_cli
@@ -75,12 +75,25 @@ class VQCli(QtGui.QWidget):
         #self.input.selectAll()
 
     def addHistory(self, histcmd):
-        self.history.append(histcmd)
-        self.histidx = len(self.history)
+        if histcmd:
+            self.history.append(histcmd)
+            self.histidx = len(self.history)
 
     def keyCodeUp(self,*args):
         self.useHistory(-1)
 
     def keyCodeDown(self):
         self.useHistory(1)
+
+    def loadHistory(self, filename):
+        if os.path.isfile(filename):
+            hist = file(filename, 'r').readlines()[-1000:]
+            self.history = [ x.strip() for x in hist ]
+            self.histidx = len(self.history)
+
+    def saveHistory(self, filename):
+        # Only save the last 1000 commands
+        # (gotta put a limit somewhere...)
+        histbuf = '\n'.join( self.history[-1000:] )
+        file(filename, 'w').write( histbuf )
 

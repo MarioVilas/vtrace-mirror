@@ -339,7 +339,7 @@ class EnviCli(Cmd):
                 self.canvas.addVaText("0x%.8x" % addr, addr)
                 sizestr = ("%dK" % (size/1024,)).rjust(8)
                 self.canvas.addText("%s\t%s\t%s\n" % (sizestr,pname,fname))
-            self.vprint("Total Virtual Memory: %s MB" % ((totsize/1024)/1024))
+            self.vprint("Total Virtual Memory: %.2f MB" % ((float(totsize)/1024)/1024))
 
     def do_search(self, line):
         """

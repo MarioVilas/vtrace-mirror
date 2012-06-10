@@ -100,6 +100,19 @@ class ClusterWork(object):
         self.touch()
         self.server.setWorkStatus(self.id, status)
 
+    def openSharedFile(self, filename):
+        '''
+        A helper API to open a file like object on the server.
+
+        Example:
+            fd = self.openSharedFile('/foo/bar/baz')
+            fbytes = fd.read()
+
+        NOTE: The server must use shareFileToWorkers().
+        '''
+        uri = self.server.openSharedFile( filename )
+        return cobra.CobraProxy(uri)
+
 class ClusterCallback:
     """
     Place one of these in the ClusterServer to get synchronous
@@ -159,9 +172,10 @@ class ClusterServer:
         """
         self.go = True
         self.name = name
-        self.queen = None   # Do we have a cluster queen?
+        self.queens = []
         self.nextwid = 0
         self.inprog = {}
+        self.sharedfiles = {}
         self.maxsize = maxsize
         self.queue = collections.deque()
         self.qcond = threading.Condition()
@@ -189,8 +203,43 @@ class ClusterServer:
         thr.setDaemon(True)
         thr.start()
 
-    def setClusterQueen(self, queenhost):
-        self.queen = cobra.CobraProxy('cobra://%s:%d/ClusterQueen' % (queenhost, queen_port))
+    def addClusterQueen(self, queenhost):
+        '''
+        Inform the ClusterServer about the presence of a ClusterQueen instance
+        on the given host.  When the ClusterServer begins to announce work,
+        he will do so in "infrastructure mode" and ask any set queens for help.
+        '''
+        queen = cobra.CobraProxy('cobra://%s:%d/ClusterQueen' % (queenhost, queen_port))
+        self.queens.append( queen )
+
+    def shareFileToWorkers(self, filename):
+        '''
+        Add a file to the list of files which are "shared" to worker clients.
+        This allows workers to access a file from the server.
+
+        Example:
+            s.shareFileToWorkers('/path/to/file')
+
+        NOTE: Workers may use the openSharedFile() API to access them.
+        '''
+        self.sharedfiles[filename] = True
+
+    def openSharedFile(self, filename):
+        '''
+        Return a URI for an open file decriptor for the specified filename.
+
+        NOTE: use openSharedFile() method on work unit to get back a proxy.
+        '''
+        if not self.sharedfiles.get(filename):
+            raise Exception('File %s is not shared!')
+
+        fd = file(filename, 'rb')
+
+        cname = self.cobrad.shareObject(fd, doref=True)
+        host,port = cobra.getLocalInfo()
+
+        uri = 'cobra://%s:%d/%s' % (host, port, cname)
+        return uri
 
     def __touchWork(self, workid):
         # Used to both validate an inprog workid *and*
@@ -226,8 +275,12 @@ class ClusterServer:
         Announce to our multicast cluster peers that we have work
         to do! (Or use a queen to proxy to them...)
         """
-        if self.queen:
-            self.queen.proxyAnnounceWork(self.name, self.cobraname, self.cobrad.port)
+        if self.queens:
+            for q in self.queens:
+                try:
+                    q.proxyAnnounceWork(self.name, self.cobraname, self.cobrad.port)
+                except Exception, e:
+                    print('Queen Error: %s' % e)
 
         else:
             buf = "cobra:%s:%s:%d" % (self.name, self.cobraname, self.cobrad.port)

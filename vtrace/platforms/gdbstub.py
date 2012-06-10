@@ -112,6 +112,7 @@ class GdbServerDisconnected(Exception):
     pass
 
 class KeBugCheckBreak(vtrace.Breakpoint):
+
     def __init__(self, symname):
         vtrace.Breakpoint.__init__(self, None, expression=symname)
         self.fastbreak = True
@@ -121,11 +122,367 @@ class KeBugCheckBreak(vtrace.Breakpoint):
         savedpc, exccode = trace.readMemoryFormat(sp, '<PP')
         trace._fireSignal(exccode)
 
-class GdbStubMixin(e_registers.RegisterContext):
+class GdbStubMixin:
+
+    def __init__(self, host=None, port=None):
+        self._gdb_host = host
+        self._gdb_port = port
+        self._gdb_sock = None
+
+        self._gdb_filemagic = None # Tracers may use this to trigger _findLibraryMaps
+
+        # These get set by _gdbSetRegisterInfo
+        self._gdb_regfmt = ''
+        self._gdb_regsize = 0
+        self._gdb_reg_xlat = []
+        self._gdb_regnames = []
+
+        self.breaking = False
+
+    def _recvUntil(self, c):
+        ret = ''
+        while not ret.endswith(c):
+            x = self._gdb_sock.recv(1)
+            if len(x) == 0:
+                raise Exception('socket closed prematurely!')
+            ret += x
+        return ret
+
+    def _recvPkt(self):
+        b = self._gdb_sock.recv(1)
+        if len(b) == 0:
+            raise GdbServerDisconnected()
+
+        if b != '$':
+            raise Exception('Invalid Pkt Beginning! ->%s<-' % b)
+
+        bytes = self._recvUntil('#')
+        bytes = bytes[:-1]
+
+        isum = int(self._gdb_sock.recv(2), 16)
+        ssum = csum(bytes)
+        if isum != ssum:
+            raise Exception('Invalid Checksum! his: 0x%.2x ours: 0x%.2x' % (isum, ssum))
+
+        self._gdb_sock.sendall('+')
+
+        #print 'RECV: ->%s<-' % bytes
+        return bytes
+
+    def _cmdTransact(self, cmd):
+        self._sendPkt(cmd)
+        return self._recvPkt()
+
+    def _sendPkt(self, cmd):
+        #print 'SEND: ->%s<-' % cmd
+        self._gdb_sock.sendall(pkt(cmd))
+        b = self._gdb_sock.recv(1)
+        if b != '+':
+            raise Exception('Retrans! ->%s<-' % b)
+
+    def _connectSocket(self):
+        if self._gdb_sock != None:
+            self._gdb_sock.shutdown(2)
+
+        tries = 0
+        while tries < 10:
+            self._gdb_sock = socket.socket()
+            try:
+                self._gdb_sock.connect( (self._gdb_host, self._gdb_port) )
+
+                # Some gdb stubs seem to send/expect an initial '+'
+                try:
+                    self._gdb_sock.settimeout(1)
+                    self._gdb_sock.recv(1)
+                    self._gdb_sock.sendall('+')
+
+                except socket.timeout, t:
+                    pass
+
+                self._gdb_sock.settimeout(None)
+                break
+
+            except Exception, e:
+                time.sleep(0.2)
+                tries += 1
+
+    def _monitorCommand(self, cmd):
+        resp = ''
+        cmd = 'qRcmd,%s' % cmd.encode('hex')
+        pkt = self._cmdTransact(cmd)
+        while not pkt.startswith('OK'):
+            self._raiseIfError(pkt)
+            if not pkt.startswith('O'):
+                return pkt.decode('hex')
+            resp += pkt[1:].decode('hex')
+            pkt = self._recvPkt()
+        return resp
+
+    def platformAttach(self, pid):
+        self._connectSocket()
+        self.attaching = True
+        # Wait for the debug stub to stop the target
+        while True:
+            pkt = self._cmdTransact('?')
+            if len(pkt) == 0:
+                raise Exception('Attach Response Error!')
+
+            if int(pkt[1:3], 16) == 0:
+                import time
+                time.sleep(0.1)
+                self.platformSendBreak()
+                pkt = self._cmdTransact('?')
+            break
+        self._sendPkt('?')
+
+    def platformContinue(self):
+        sig = self.getCurrentSignal()
+        cmd = 'c'
+        if sig != None:
+            cmd = 'C%.2x' % sig
+        self._sendPkt(cmd)
+        #self._cmdTransact(cmd)
+
+    def platformStepi(self):
+        # FIXME by selected thread? and address?
+        #self._cmdTransact('s')
+        self._sendPkt('s')
+        self.stepping = True
+
+    def platformDetach(self):
+        if not self.running:
+            self.platformContinue()
+        self._gdb_sock.shutdown(2)
+        self._gdb_sock = None
+
+    def platformSendBreak(self):
+        '''
+        For now, the only way I know how to re-break the target
+        is to disconnect and re-connect...  TOTALLY GHETTO HACK!
+        '''
+        # If this isn't a break during attach, tell everybody we are
+        # breaking...
+        if not self.attaching:
+            self.breaking = True
+        self._gdb_sock.sendall('\x03')
+
+    def platformWait(self):
+        while True:
+            pkt = self._recvPkt()
+            if pkt.startswith('O'):
+                print 'GDBSTUB SAID: %s' % pkt[1:].decode('hex')
+                continue
+            break
+        return pkt
+
+    def platformProcessEvent(self, event):
+        #print 'EVENT ->%s<-' % event
+
+        if len(event) == 0:
+            self.setMeta('ExitCode', 0xffffffff)
+            self.fireNotifiers(vtrace.NOTIFY_EXIT)
+            self._gdb_sock.shutdown(2)
+            self._gdb_sock = None
+            return
+
+        atype = event[0]
+        signo = int(event[1:3], 16)
+
+        # Is this a thread specific signal?
+        if atype == 'T':
+
+            #print 'SIGNAL',sig
+
+            dictbytes = event[3:]
+
+            evdict = {}
+            for kvstr in dictbytes.split(';'):
+                if not kvstr: break
+                #print 'KVSTR ->%s<-' % kvstr
+                key, value = kvstr.split(':', 1)
+                evdict[key.lower()] = value
+
+            # Did we get a specific thread?
+            tidstr = evdict.get('thread')
+            if tidstr != None:
+                tid = int(tidstr, 16)
+                self.setMeta('ThreadId', tid)
+            #else:
+                #print "WE SHOULD ASK FOR THE CURRENT THREAD HERE!"
+
+        elif atype == 'S':
+            pass
+
+        elif atype in exit_types:
+
+            # Fire an exit event and GTFO!
+            self._fireExit(signo)
+            return
+
+        else:
+            print 'Unhandled Gdb Server Event: %s' % event
+
+        #if self.attaching and signo in trap_sigs:
+        if self.attaching:
+            self.attaching = False
+            #self._enumGdbTarget()
+            if self._gdb_filemagic:
+                self._findLibraryMaps(self._gdb_filemagic, always=True)
+            self._simpleCreateThreads()
+            self.runAgain(False) # Clear this, if they want BREAK to run, it will
+            self.fireNotifiers(vtrace.NOTIFY_BREAK)
+
+        elif self.breaking and signo in trap_sigs:
+            self.breaking = False
+            self.fireNotifiers(vtrace.NOTIFY_BREAK)
+
+        # Process the signal and decide what to do...
+        elif signo == SIGTRAP:
+
+            # Traps on posix systems are a little complicated
+            if self.stepping:
+                #FIXME try out was single step thing for intel
+                self.stepping = False
+                self.fireNotifiers(vtrace.NOTIFY_STEP)
+
+            elif self.checkBreakpoints():
+                return
+
+            #elif self.checkWatchpoints():
+                #return
+
+            #elif self.checkBreakpoints():
+                # It was either a known BP or a sendBreak()
+                #return
+
+            #elif self.execing:
+                ##self.execing = False
+                #self.handleAttach()
+
+            else:
+                self._fireSignal(signo)
+
+        #elif signo == signal.SIGSTOP:
+            #self.handleAttach()
+
+        else:
+            self._fireSignal(signo)
+
+    def _gdbCreateThreads(self):
+        initid = self.getMeta('ThreadId')
+        for tid in self.platformGetThreads().keys():
+            self.setMeta('ThreadId', tid)
+            self.fireNotifiers(vtrace.NOTIFY_CREATE_THREAD)
+        self.setMeta('ThreadId', initid)
+
+    def _gdbSetRegisterInfo(self, fmt, names):
+        # Used by the Trace implementations to tell the gdb
+        # stub code how to unpack the register buf
+
+        self._gdb_regfmt = fmt
+        self._gdb_regnames = names
+
+        self._gdb_reg_xlat = []
+        self._gdb_regsize = struct.calcsize(fmt)
+
+
+        for i,name in enumerate(names):
+            if name == None: # So we can skip parts of the gdb definition...
+                continue
+            j = self.getRegisterIndex(name)
+            if j != None:
+                self._gdb_reg_xlat.append( (i, j) )
+
+    def platformGetRegCtx(self, tid):
+        '''
+        Get an envi register context from the target stub.
+        '''
+        # FIXME tid!
+        regbuf = self._cmdTransact('g')
+        regbytes = self._runLengthDecode(regbuf)
+        rvals = struct.unpack(self._gdb_regfmt, regbytes[:self._gdb_regsize])
+        ctx = self.arch.archGetRegCtx()
+        for myidx, enviidx in self._gdb_reg_xlat:
+            ctx.setRegister(enviidx, rvals[myidx])
+        return ctx
+        
+    def platformSetRegCtx(self, tid, ctx):
+        '''
+        Set the target stub's register context from the envi register context
+        '''
+        # FIXME tid!
+        regbytes = self._cmdTransact('g').decode('hex')
+        regremain = regbytes[self._gdb_regsize:]
+        rvals = struct.unpack(self._gdb_regfmt, regbytes[:self._gdb_regsize])
+        rvals = list(rvals) # So we can assign to them...
+        for myidx, enviidx in self._gdb_reg_xlat:
+            rvals[myidx] = ctx.getRegister(enviidx)
+        newbytes = struct.pack(self._gdb_regfmt, rvals) + regremain
+        return self._cmdTransact('G'+newbytes.encode('hex'))
+
+    def platformGetThreads(self):
+
+        ret = {}
+
+        self._sendPkt('qfThreadInfo')
+        tbytes = self._recvPkt()
+
+        while tbytes.startswith('m'):
+
+            if tbytes.find(','):
+                for bval in tbytes[1:].split(','):
+                    ret[int(bval, 16)] = 0
+            else:
+                ret[int(tbytes[1:], 16)] = 0
+
+            self._sendPkt('qsThreadInfo')
+            tbytes = self._recvPkt()
+
+        return ret
+
+    def _raiseIfError(self, msg):
+        if msg.startswith('E'):
+            raise Exception('Error: %s' % msg)
+
+    def _runLengthDecode(self, buf):
+        # GDB RSP implements some run-length encoding to save space
+        i = buf.find('*')
+        while i != -1:
+            cnt = ord(buf[i+1]) - 29 # Run-length encoding is minus 29...
+            pad = buf[i-1] * cnt
+            buf = buf[:i] + pad + buf[i+2:]
+
+            i = buf.find('*')
+
+        return buf.decode('hex')
+
+    def platformReadMemory(self, addr, size):
+        mbytes = ''
+        offset = 0
+        while len(mbytes) < size:
+            # FIXME is this 256 problem just in the VMWare gdb stub?
+            cmd = 'm%x,%x' % (addr + offset, min(256, size-offset))
+            pkt = self._cmdTransact(cmd)
+            self._raiseIfError(pkt)
+            pbytes = self._runLengthDecode(pkt)
+            offset += len(pbytes)
+            mbytes += pbytes
+        return mbytes
+
+    def platformWriteMemory(self, addr, mbytes):
+        cmd = 'M%x,%x:%s' % (addr, len(mbytes), mbytes.encode('hex'))
+        pkt = self._cmdTransact(cmd)
+        self._raiseIfError(pkt)
+
+    def platformGetMaps(self):
+        return []
+
+# FROM HERE DOWN IS ALL CRAP THAT IS STILL GETTING SORTED OUT
+
+class GdbStubMixin_old(e_registers.RegisterContext):
 
     def __init__(self):
 
-        self.sock = None
         self.stepping = False
         self.attaching = False
         self.breaking = False
@@ -208,86 +565,8 @@ class GdbStubMixin(e_registers.RegisterContext):
             for rva, ord, name in pe.getExports():
                 self.addSymbol(e_resolv.Symbol(name, baseaddr+rva, 0, normname))
 
-    def _connectSocket(self):
-        if self.sock != None:
-            self.sock.shutdown(2)
-
-        tries = 0
-        while tries < 10:
-            self.sock = socket.socket()
-            try:
-                self.sock.connect((self.getMeta('GdbServerHost'), self.getMeta('GdbServerPort')))
-                # Some gdb stubs seem to send/expect an initial '+'
-                try:
-                    self.sock.settimeout(1)
-                    self.sock.recv(1)
-                    self.sock.sendall('+')
-                except socket.timeout, t:
-                    pass
-                self.sock.settimeout(None)
-                break
-            except Exception, e:
-                time.sleep(0.2)
-                tries += 1
-
     def platformPs(self):
         return [ (1, 'SystemProcess'), ]
-
-    def platformAttach(self, pid):
-        self._connectSocket()
-        self.attaching = True
-        # Wait for the debug stub to stop the target
-        while True:
-            pkt = self._cmdTransact('?')
-            if len(pkt) == 0:
-                raise Exception('Attach Response Error!')
-            if int(pkt[1:3], 16) == 0:
-                import time
-                time.sleep(0.1)
-                self.platformSendBreak()
-                pkt = self._cmdTransact('?')
-            break
-        self._sendPkt('?')
-
-    def platformContinue(self):
-        sig = self.getCurrentSignal()
-        cmd = 'c'
-        if sig != None:
-            cmd = 'C%.2x' % sig
-        self._sendPkt(cmd)
-        #self._cmdTransact(cmd)
-
-    def platformStepi(self):
-        # FIXME by selected thread? and address?
-        #self._cmdTransact('s')
-        self._sendPkt('s')
-        self.stepping = True
-
-    def platformDetach(self):
-        if not self.running:
-            self.platformContinue()
-        self.sock.shutdown(2)
-        self.sock = None
-
-    def platformSendBreak(self):
-        '''
-        For now, the only way I know how to re-break the target
-        is to disconnect and re-connect...  TOTALLY GHETTO HACK!
-        '''
-        # If this isn't a break during attach, tell everybody we are
-        # breaking...
-        if not self.attaching:
-            self.breaking = True
-        self.sock.sendall('\x03')
-
-    def platformWait(self):
-        while True:
-            pkt = self._recvPkt()
-            if pkt.startswith('O'):
-                print 'GDBSTUB SAID: %s' % pkt[1:].decode('hex')
-                continue
-            break
-        return pkt
 
     def _getVmwareReg(self, rname):
         '''
@@ -315,68 +594,93 @@ class GdbStubMixin(e_registers.RegisterContext):
         except Exception, e:
             return None
 
+    def _enumTargetOs(self, fsbase):
+
+        self.setVariable('fsbase', fsbase)
+
+        fs_fields = self.readMemoryFormat(fsbase, '<8I')
+
+        # Windows has a self reference in the KPCR...
+        if fs_fields[7] == fsbase:
+
+            # Use KPCR from XP for now...
+            import vstruct.defs.windows.win_5_1_i386.ntoskrnl as vs_w_ntoskrnl
+            self.vsbuilder.addVStructNamespace('nt', vs_w_ntoskrnl)
+
+            self.setMeta('GdbTargetPlatform', 'Windows')
+            self.casesens = False
+
+            kpcr = self.getStruct('nt.KPCR', fsbase)
+            kver = self.getStruct('nt.DBGKD_GET_VERSION64', kpcr.KdVersionBlock)
+
+            #print kpcr.tree()
+            #print kver.tree()
+
+            kernbase = kver.KernBase & self.bigmask
+            modlist = kver.PsLoadedModuleList & self.bigmask
+
+            self.setVariable('PsLoadedModuleList', modlist)
+            self.setVariable('KernelBase', kernbase)
+
+            self.platformParseBinary = self.platformParseBinaryPe
+
+            self.fireNotifiers(vtrace.NOTIFY_ATTACH)
+
+            self.addLibraryBase('nt', kernbase, always=True)
+            ldr_entry = self.readMemoryFormat(modlist, '<I')[0]
+            while ldr_entry != modlist:
+                ldte = self.getStruct('nt.LDR_DATA_TABLE_ENTRY', ldr_entry)
+                dllname = self.readMemory(ldte.FullDllName.Buffer, ldte.FullDllName.Length).decode('utf-16le')
+                dllbase = ldte.DllBase & self.bigmask
+                self.addLibraryBase(dllname, dllbase, always=True)
+                ldr_entry = ldte.InLoadOrderLinks.Flink & self.bigmask
+
+            try:
+                self.addBreakpoint(KeBugCheckBreak('nt.KeBugCheck'))
+            except Exception, e:
+                print 'Error Seting KeBugCheck Bp: %s' % e
+
+            try:
+                self.addBreakpoint(KeBugCheckBreak('nt.KeBugCheckEx'))
+            except Exception, e:
+                print 'Error Seting KeBugCheck Bp: %s' % e
+
+        else:
+            # FIXME enumerate non-windows OSs!
+            self.fireNotifiers(vtrace.NOTIFY_ATTACH)
+
     def _enumGdbTarget(self):
         psize = self.getPointerSize()
         vercmd = self._monitorCommand('version')
 
-        if self._monitorCommand('help').find('linuxoffsets') != -1:
+        monhelp = self._monitorCommand('help')
+
+        if monhelp.find('netdev_add') != -1:
+
+            self.setMeta('GdbPlatform', 'Qemu32')
+
+            fsbase = None
+            monreg = self._monitorCommand('info registers')
+            for line in monreg.split('\n'):
+                if not line.startswith('FS'):
+                    continue
+                parts = line.split()
+                fsbase = int(parts[2], 16)
+                break
+                
+            self._enumTargetOs(fsbase)
+            #print monreg
+            #m = re.match('FS =\w+ (\w+)', monreg, re.G)
+            #fsbase = long(m.groups()[0], 0)
+            #print 'FSBASE',hex(fsbase)
+
+        elif monhelp.find('linuxoffsets') != -1:
 
             self.setMeta('GdbPlatform', 'VMware%d' % (psize * 8))
 
             if psize == 4: # Use the fs register to get KPCR
                 fsbase = self._getVmwareReg('fs')
-                self.setVariable('fsbase', fsbase)
-
-                fs_fields = self.readMemoryFormat(fsbase, '<8I')
-
-                # Windows has a self reference in the KPCR...
-                if fs_fields[7] == fsbase:
-
-                    # Use KPCR from XP for now...
-                    import vstruct.defs.windows.win_5_1_i386.ntoskrnl as vs_w_ntoskrnl
-                    self.vsbuilder.addVStructNamespace('nt', vs_w_ntoskrnl)
-
-                    self.setMeta('GdbTargetPlatform', 'Windows')
-                    self.casesens = False
-
-                    kpcr = self.getStruct('nt.KPCR', fsbase)
-                    kver = self.getStruct('nt.DBGKD_GET_VERSION64', kpcr.KdVersionBlock)
-
-                    #print kpcr.tree()
-                    #print kver.tree()
-
-                    kernbase = kver.KernBase & self.bigmask
-                    modlist = kver.PsLoadedModuleList & self.bigmask
-
-                    self.setVariable('PsLoadedModuleList', modlist)
-                    self.setVariable('KernelBase', kernbase)
-
-                    self.platformParseBinary = self.platformParseBinaryPe
-
-                    self.fireNotifiers(vtrace.NOTIFY_ATTACH)
-
-                    self.addLibraryBase('nt', kernbase, always=True)
-                    ldr_entry = self.readMemoryFormat(modlist, '<I')[0]
-                    while ldr_entry != modlist:
-                        ldte = self.getStruct('nt.LDR_DATA_TABLE_ENTRY', ldr_entry)
-                        dllname = self.readMemory(ldte.FullDllName.Buffer, ldte.FullDllName.Length).decode('utf-16le')
-                        dllbase = ldte.DllBase & self.bigmask
-                        self.addLibraryBase(dllname, dllbase, always=True)
-                        ldr_entry = ldte.InLoadOrderLinks.Flink & self.bigmask
-
-                    try:
-                        self.addBreakpoint(KeBugCheckBreak('nt.KeBugCheck'))
-                    except Exception, e:
-                        print 'Error Seting KeBugCheck Bp: %s' % e
-
-                    try:
-                        self.addBreakpoint(KeBugCheckBreak('nt.KeBugCheckEx'))
-                    except Exception, e:
-                        print 'Error Seting KeBugCheck Bp: %s' % e
-
-                else:
-                    # FIXME enumerate non-windows OSs!
-                    self.fireNotifiers(vtrace.NOTIFY_ATTACH)
+                self._enumTargetOs(fsbase)
 
             else: # FIXME 64bit vmware!
 
@@ -443,6 +747,7 @@ class GdbStubMixin(e_registers.RegisterContext):
                     #self.addLibraryBase('nt', nt, always=True)
 
     def _initWinBase(self, kpcr):
+
         self.setMeta('GdbTargetPlatform', 'Windows')
         self.casesens = False
 
@@ -478,227 +783,6 @@ class GdbStubMixin(e_registers.RegisterContext):
         except Exception, e:
             print 'Error Seting KeBugCheck Bp: %s' % e
 
-    def platformProcessEvent(self, event):
-        #print 'EVENT ->%s<-' % event
-
-        if len(event) == 0:
-            self.setMeta('ExitCode', 0xffffffff)
-            self.fireNotifiers(vtrace.NOTIFY_EXIT)
-            self.sock.shutdown(2)
-            self.sock = None
-            return
-
-        atype = event[0]
-        signo = int(event[1:3], 16)
-
-        # Is this a thread specific signal?
-        if atype == 'T':
-
-            #print 'SIGNAL',sig
-
-            dictbytes = event[3:]
-
-            evdict = {}
-            for kvstr in dictbytes.split(';'):
-                if not kvstr: break
-                #print 'KVSTR ->%s<-' % kvstr
-                key, value = kvstr.split(':', 1)
-                evdict[key.lower()] = value
-
-            # Did we get a specific thread?
-            tidstr = evdict.get('thread')
-            if tidstr != None:
-                tid = int(tidstr, 16)
-                self.setMeta('ThreadId', tid)
-            #else:
-                #print "WE SHOULD ASK FOR THE CURRENT THREAD HERE!"
-
-        elif atype == 'S':
-            pass
-
-        elif atype in exit_types:
-
-            # Fire an exit event and GTFO!
-            self._fireExit(signo)
-            return
-
-        else:
-            print 'Unhandled Gdb Server Event: %s' % event
-
-        #if self.attaching and signo in trap_sigs:
-        if self.attaching:
-            #if signo == 0:
-                #We are attached, but he is still running! (no signal)
-                #lets send a break, and process the event!
-                #self.platformSendBreak()
-                #evt = self.platformWait()
-                #self.platformProcessEvent(evt)
-                #return
-
-            self.attaching = False
-            self._enumGdbTarget()
-            self.runAgain(False) # Clear this, if they want BREAK to run, it will
-            self.fireNotifiers(vtrace.NOTIFY_BREAK)
-
-        elif self.breaking and signo in trap_sigs:
-            self.breaking = False
-            self.fireNotifiers(vtrace.NOTIFY_BREAK)
-
-        # Process the signal and decide what to do...
-        elif signo == SIGTRAP:
-
-            # Traps on posix systems are a little complicated
-            if self.stepping:
-                #FIXME try out was single step thing for intel
-                self.stepping = False
-                self.fireNotifiers(vtrace.NOTIFY_STEP)
-
-            elif self.checkBreakpoints():
-                return
-
-            #elif self.checkWatchpoints():
-                #return
-
-            #elif self.checkBreakpoints():
-                # It was either a known BP or a sendBreak()
-                #return
-
-            #elif self.execing:
-                ##self.execing = False
-                #self.handleAttach()
-
-            else:
-                self._fireSignal(signo)
-
-        #elif signo == signal.SIGSTOP:
-            #self.handleAttach()
-
-        else:
-            self._fireSignal(signo)
-
-    def platformGetRegCtx(self, tid):
-        '''
-        Get an envi register context from the target stub.
-        '''
-        # FIXME tid!
-        regbytes = self._cmdTransact('g').decode('hex')
-        rvals = struct.unpack(self._arch_regfmt, regbytes[:self._arch_regsize])
-        ctx = self.arch.archGetRegCtx()
-        for myidx, enviidx in self._arch_reg_xlat:
-            ctx.setRegister(enviidx, rvals[myidx])
-        return ctx
-        
-    def platformSetRegCtx(self, tid, ctx):
-        '''
-        Set the target stub's register context from the envi register context
-        '''
-        # FIXME tid!
-        regbytes = self._cmdTransact('g').decode('hex')
-        regremain = regbytes[self._arch_regsize:]
-        rvals = struct.unpack(self._arch_regfmt, regbytes[:self._arch_regsize])
-        rvals = list(rvals) # So we can assign to them...
-        for myidx, enviidx in self._arch_reg_xlat:
-            rvals[myidx] = ctx.getRegister(enviidx)
-        newbytes = struct.pack(self._arch_regfmt, rvals) + regremain
-        return self._cmdTransact('G'+newbytes.encode('hex'))
-
-    def _recvUntil(self, c):
-        ret = ''
-        while not ret.endswith(c):
-            x = self.sock.recv(1)
-            if len(x) == 0:
-                raise Exception('socket closed prematurely!')
-            ret += x
-        return ret
-
-    def _recvPkt(self):
-        b = self.sock.recv(1)
-        if len(b) == 0:
-            raise GdbServerDisconnected()
-        if b != '$':
-            raise Exception('Invalid Pkt Beginning! ->%s<-' % b)
-
-        bytes = self._recvUntil('#')
-        bytes = bytes[:-1]
-
-        isum = int(self.sock.recv(2), 16)
-        ssum = csum(bytes)
-        if isum != ssum:
-            raise Exception('Invalid Checksum! his: 0x%.2x ours: 0x%.2x' % (isum, ssum))
-
-        self.sock.sendall('+')
-
-        #print 'RECV: ->%s<-' % bytes
-        return bytes
-
-    def _cmdTransact(self, cmd):
-        self._sendPkt(cmd)
-        return self._recvPkt()
-
-    def _sendPkt(self, cmd):
-        #print 'SEND: ->%s<-' % cmd
-        self.sock.sendall(pkt(cmd))
-        b = self.sock.recv(1)
-        if b != '+':
-            raise Exception('Retrans! ->%s<-' % b)
-
-    def platformGetThreads(self):
-
-        ret = {}
-
-        self._sendPkt('qfThreadInfo')
-        tbytes = self._recvPkt()
-
-        while tbytes.startswith('m'):
-
-            if tbytes.find(','):
-                for bval in tbytes[1:].split(','):
-                    ret[int(bval)] = 0
-            else:
-                ret[int(tbytes[1:])] = 0
-
-            self._sendPkt('qsThreadInfo')
-            tbytes = self._recvPkt()
-
-        return ret
-
-    def _raiseIfError(self, msg):
-        if msg.startswith('E'):
-            raise Exception('Error: %s' % msg)
-
-    def platformReadMemory(self, addr, size):
-        mbytes = ''
-        offset = 0
-        while len(mbytes) < size:
-            # FIXME is this 256 problem just in the VMWare gdb stub?
-            cmd = 'm%x,%x' % (addr + offset, min(256, size-offset))
-            pkt = self._cmdTransact(cmd)
-            self._raiseIfError(pkt)
-            #print 'GOT SOME AT',pkt
-            pbytes = pkt.decode('hex')
-            offset += len(pbytes)
-            mbytes += pbytes
-        return mbytes
-
-    def platformWriteMemory(self, addr, mbytes):
-        cmd = 'M%x,%x:%s' % (addr, len(mbytes), mbytes.encode('hex'))
-        pkt = self._cmdTransact(cmd)
-        self._raiseIfError(pkt)
-
-    def platformGetMaps(self):
-        return []
-
-    def _monitorCommand(self, cmd):
-        resp = ''
-        cmd = 'qRcmd,%s' % cmd.encode('hex')
-        pkt = self._cmdTransact(cmd)
-        while not pkt.startswith('OK'):
-            self._raiseIfError(pkt)
-            if not pkt.startswith('O'):
-                return pkt.decode('hex')
-            resp += pkt[1:].decode('hex')
-            pkt = self._recvPkt()
-        return resp
 
 GDB_BP_SOFTWARE     = 0
 GDB_BP_HARDWARE     = 1
@@ -718,6 +802,8 @@ class GdbStubTrace(
         vtrace.Trace.__init__(self, archname=archname)
         v_base.TracerBase.__init__(self)
         GdbStubMixin.__init__(self)
+
+        self._break_after_bp = False    # We break *at* the bp
 
     # FIXME this should have a cleaner abstraction to allow for stuff...
     # platformActivateBreak / Watch!
@@ -746,21 +832,6 @@ class GdbStubTrace(
                 bp.active = False
                 #bp.deactivate(self)
 
-    def checkBreakpoints(self):
-        pc = self.getProgramCounter()
-        bp = self.breakpoints.get(pc, None)
-
-        if bp:
-            self._fireBreakpoint(bp)
-            return True
-
-        if self.getMeta("ShouldBreak"):
-            self.setMeta("ShouldBreak", False)
-            self.fireNotifiers(vtrace.NOTIFY_BREAK)
-            return True
-
-        return False
-
     def _checkForBreak(self):
         """
         Check to see if we've landed on a breakpoint, and if so
@@ -773,6 +844,7 @@ class GdbStubTrace(
         # clear curbp...
         bp = self.curbp
         if bp != None and bp.isEnabled():
+            # We had to remove a check for active and a deactivate here...
             orig = self.getMode("FastStep")
             self.setMode("FastStep", True)
             self.stepi()

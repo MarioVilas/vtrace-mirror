@@ -1,3 +1,4 @@
+import socket
 
 import vstruct
 from vstruct.primitives import *
@@ -39,7 +40,7 @@ class DnsName(vstruct.VArray):
             if fobj.length == 0xc0:
                 newn = DnsName()
                 # FIXME redundant parsing...
-                newn.vsParse(dnspkt, ord(fobj.namepart))
+                newn.vsParse(dnspkt.vsEmit(), ord(fobj.namepart))
                 r.append( newn.getFullName(dnspkt) )
             else:
                 r.append(fobj.namepart)
@@ -118,4 +119,23 @@ class DnsPacket(vstruct.VStruct):
 
     def pcb_addt_cnt(self):
         self.records.addtl = DnsAnswerArray( self.addt_cnt )
+
+    def getDnsQueries(self):
+        ret = []
+        for fname, q in self.records.queries.vsGetFields():
+            qname = q.qname.getFullName(self)
+            ret.append( (q.qtype, q.qclass, q.qname.getFullName( self ) ) )
+        return ret
+
+    def getDnsAnswers(self):
+        ret = []
+        for fname, a in self.records.answers.vsGetFields():
+
+            adata = a.qdata
+            if a.qtype == DNS_TYPE_A:
+                adata = socket.inet_ntop(socket.AF_INET, adata)
+
+            ret.append( (a.qtype, a.qclass, a.qttl, a.qname.getFullName(self), adata) )
+
+        return ret
 

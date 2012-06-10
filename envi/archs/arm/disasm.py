@@ -36,8 +36,6 @@ from envi.archs.arm.regs import *
 ####################################################################
 # Parsers for the multiply family of instruction encodings
 
-
-
 class ArmDisasm:
 
     def __init__(self):

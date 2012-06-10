@@ -4,6 +4,7 @@ from envi.bits import binary
 import envi.bintree as e_btree
 
 import envi.archs.arm.disasm as arm_dis
+import envi.archs.arm.armdisasm as arm_armdis
 import envi.archs.arm.regs as arm_reg
 
 thumb_32 = [
@@ -234,15 +235,17 @@ def is_thumb32(val):
     return (bval & thumb32mask) > thumb32min
 
 
-class ThumbOpcode(arm_dis.ArmOpcode):
+class ThumbOpcode(arm_armdis.ArmOpcode):
     pass
 
-class ArmThumbDisasm(arm_dis.ArmDisasmChild):
-    def disasm(self, bytes, offset, va, trackMode=True):
-        val = struct.unpack("<L", bytes[offset:offset+2])
-        mnem, opermkr, flags = ttree.getInstr(val)
-        olist = opermkr(va, val)
+#class ArmThumbDisasm(arm_armdis.ArmDisasmChild):
 
-        op = ThumbOpcode(va, opcode, mnem, 0xe, 2, olist, flags)
-        return op
-        raise Exception("ummm. you could try Implementing disasm first... duh.")
+    #def disasm(self, bytes, offset, va, trackMode=True):
+        #val = struct.unpack("<L", bytes[offset:offset+2])
+        #mnem, opermkr, flags = ttree.getInstr(val)
+        #olist = opermkr(va, val)
+
+        #op = ThumbOpcode(va, opcode, mnem, 0xe, 2, olist, flags)
+        #return op
+        #raise Exception("ummm. you could try Implementing disasm first... duh.")
+

@@ -55,6 +55,7 @@ class TracerBase(vtrace.Notifier):
 
         # Set if we are RunForever until a thread exit...
         self._join_thread = None
+        self._break_after_bp = True     # Do we stop on the instruction *after* the bp?
 
         self.vsbuilder = vs_builder.VStructBuilder()
 
@@ -89,13 +90,8 @@ class TracerBase(vtrace.Notifier):
         self.bplock.release()
         return x
 
-    def justAttached(self, pid):
-        """
-        platformAttach() function should call this
-        immediately after a successful attach.  This does
-        any necessary initialization for a tracer to be
-        back in a clean state.
-        """
+    def _justAttached(self, pid):
+        # Used by the top level Trace after platform routines
         self.pid = pid
         self.attached = True
         self.breakpoints = {}
@@ -445,9 +441,11 @@ class TracerBase(vtrace.Notifier):
         (and it will have handled firing events for the bp)
         """
         pc = self.getProgramCounter()
-        bi = self.archGetBreakInstr()
-        bl = pc - len(bi)
-        bp = self.breakpoints.get(bl, None)
+        if self._break_after_bp:
+            bi = self.archGetBreakInstr()
+            pc -= len(bi)
+
+        bp = self.breakpoints.get(pc, None)
 
         if bp:
             addr = bp.getAddress()
@@ -566,6 +564,29 @@ class TracerBase(vtrace.Notifier):
         basename = os.path.basename(libname)
         return basename.split(".")[0].split("-")[0].lower()
 
+    def _findLibraryMaps(self, magic, always=False):
+        # A utility for platforms which lack library load
+        # notification through the operating system
+        done = {}
+        mlen = len(magic)
+
+        for addr,size,perms,fname in self.getMemoryMaps():
+
+            if not fname:
+                continue
+
+            if done.get(fname):
+                continue
+
+            try:
+
+                if self.readMemory(addr, mlen) == magic:
+                    done[fname] = True
+                    self.addLibraryBase(fname, addr, always=always)
+
+            except:
+                pass # *never* do this... except this once...
+
     def _loadBinaryNorm(self, normname):
         if not self.libloaded.get(normname, False):
             fname = self.libpaths.get(normname)
@@ -587,6 +608,17 @@ class TracerBase(vtrace.Notifier):
                 self.libloaded[normname] = True
                 return True
         return False
+
+    def _simpleCreateThreads(self):
+        '''
+        Fire a thread event for each of the current threads.
+        (for use by tracers which don't get help from the OS)
+        '''
+        initid = self.getMeta('ThreadId')
+        for tid in self.platformGetThreads().keys():
+            self.setMeta('ThreadId', tid)
+            self.fireNotifiers(vtrace.NOTIFY_CREATE_THREAD)
+        self.setMeta('ThreadId', initid)
 
 #######################################################################
 #
@@ -797,12 +829,22 @@ class TracerBase(vtrace.Notifier):
         """
         raise Exception("Platform must implement platformProcessEvent")
 
+    def platformOpenFile(self, filename):
+        # Open a file for reading
+        return file(filename, 'rb')
+
     def platformParseBinary(self, filename, baseaddr, normname):
         """
         Platforms must parse the given binary file and load any symbols
         into the internal SymbolResolver using self.addSymbol()
         """
         raise Exception("Platform must implement platformParseBinary")
+
+    def platformRelease(self):
+        '''
+        Called back on release.
+        '''
+        pass
 
 import threading
 def threadwrap(func):

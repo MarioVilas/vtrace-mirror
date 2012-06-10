@@ -14,6 +14,8 @@ from vqt.main import idlethread, idlethreadsync
 #class memhotkey:
     #def __init__(self, 
 
+KEY_BACKSPACE = 0x1000003
+
 class VQMemoryCanvas(QtWebKit.QWebView, e_memcanvas.MemoryCanvas):
 
     def __init__(self, mem, syms=None, parent=None):
@@ -141,10 +143,9 @@ class VQMemoryCanvas(QtWebKit.QWebView, e_memcanvas.MemoryCanvas):
         if self._canv_navcallback:
             self._canv_navcallback(expr)
 
-    @QtCore.pyqtSlot(long)
-    def _jsSetCurVa(self, va):
-        # A callback from javascript to let us know where is the current va
-        self._canv_curva = va
+    @QtCore.pyqtSlot(str)
+    def _jsSetCurVa(self, vastr):
+        self._canv_curva = int(str(vastr), 0)
 
     # NOTE: doing append / scroll seperately allows render to catch up
     @idlethread

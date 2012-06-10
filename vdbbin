@@ -2,7 +2,7 @@
 
 import os
 import sys
-import getopt
+import optparse
 import traceback
 import threading
 
@@ -37,97 +37,105 @@ if __name__ == "__main__":
 
     cmd = None
     pidstr = None
-    eventid = None
-    runagain = False
     gdbserver = None
 
     trace = None
 
-    try:
-        opts,args = getopt.getopt(sys.argv[1:], "e:QR:vGSp:s:c:r", ['gdb-server=',])
-    except:
-        usage()
+    parser = optparse.OptionParser(prog='vdbbin')
+    parser.add_option('-c', '--cmd', dest='command', default=None, help='Debug a fired command')
+    parser.add_option('-e', '--eventid', dest='eventid', default=None, type='int')
+    parser.add_option('-s', '--snapshot', dest='snapshot', default=None, help='Load a vtrace snapshot file')
+    parser.add_option('-S', '--server', dest='doserver', default=False, action='store_true')
+    parser.add_option('-v', '--verbose', dest='doverbose', default=False, action='store_true')
+    parser.add_option('-R', '--remote', dest='remotehost', default=None, help='Attach to remote VDB server')
+    parser.add_option('-r', '--run', dest='dorunagain', default=False, action='store_true')
+    parser.add_option('-Q', '--qt', dest='doqt', default=False, action='store_true', help='Run the QT gui')
+    parser.add_option('-p', '--process', dest='process', default=None, help='Attach to process by name or pid')
+    parser.add_option('--android', dest='doandroid', default=False, action='store_true', help='Debug Android with ADB!')
 
-    do_qt = False
-    do_gui = False
+    options, argv = parser.parse_args(sys.argv[1:])
 
-    for opt,optarg in opts:
+    #try:
+        #opts,args = getopt.getopt(sys.argv[1:], "e:QR:vGSp:s:c:r", ['gdb-server=',])
+    #except:
+        #usage()
 
-        if opt == '-R':
-            vtrace.remote = optarg
+    #do_qt = False
+    #do_gui = False
 
-        elif opt == '-Q':
-            do_qt = True
+    #for opt,optarg in opts:
 
-        elif opt == "-c":
-            cmd = optarg
+        #if opt == '-R':
+            #vtrace.remote = optarg
 
-        elif opt == '-e':
-            eventid = int(optarg)
+        #elif opt == '-Q':
+            #do_qt = True
 
-        elif opt == "-G":
-            do_gui = True
+        #elif opt == "-c":
+            #cmd = optarg
 
-        elif opt == "-s":
-            trace = vt_snap.loadSnapshot(optarg)
+        #elif opt == '-e':
+            #eventid = int(optarg)
 
-        elif opt == "-S":
-            vtrace.startVtraceServer()
+        #elif opt == "-G":
+            #do_gui = True
 
-        elif opt == "-p":
-            pidstr = optarg
+        #elif opt == "-s":
+            #trace = vt_snap.loadSnapshot(optarg)
 
-        elif opt == "-v":
-            vtrace.verbose = True
-            cobra.verbose = True
+        #elif opt == "-S":
+            #vtrace.startVtraceServer()
 
-        elif opt == '-r':
-            runagain = True
+        #elif opt == "-p":
+            #pidstr = optarg
 
-        elif opt == '--gdb-server':
-            import vtrace.platforms.gdbstub as vt_gdbstub
-            try:
-                gdbserver, gdbport, gdbarch = optarg.split(':', 2)
-                trace = vt_gdbstub.GdbStubTrace(gdbarch)
-                trace.setMeta('GdbServerHost', gdbserver)
-                trace.setMeta('GdbServerPort', int(gdbport, 0))
-            except Exception ,e:
-                usage_gdbserver()
+        #elif opt == "-v":
+            #vtrace.verbose = True
+            #cobra.verbose = True
+
+        #elif opt == '-r':
+            #runagain = True
+
+        #elif opt == '--gdb-server':
+            #import vtrace.platforms.gdbstub as vt_gdbstub
+            #try:
+                #gdbserver, gdbport, gdbarch = optarg.split(':', 2)
+                #trace = vt_gdbstub.GdbStubTrace(gdbarch)
+                #trace.setMeta('GdbServerHost', gdbserver)
+                #trace.setMeta('GdbServerPort', int(gdbport, 0))
+            #except Exception ,e:
+                #usage_gdbserver()
+
+    plat=None
+    platargs = {}
+    if options.doandroid:
+        plat = 'android'
 
     if trace == None:
-        trace = vtrace.getTrace()
+        trace = vtrace.getTrace(plat=plat, **platargs)
 
     db = vdb.Vdb(trace)
-    db.runagain = runagain
-    db.windows_jit_event = eventid
 
-    if do_gui:
-        import vwidget.main as vw_main
-        import vdb.gui
-        vw_main.mainthread()
-        vgui = vdb.gui.VdbGui(db)
+    db.runagain = options.dorunagain
+    db.windows_jit_event = options.eventid
 
-    if do_qt:
+    if options.doqt:
         import vqt.main as vq_main
         import vdb.qt.windows as v_q_windows
         vq_main.startup()
         qgui = v_q_windows.VdbWindow(db)
         qgui.show()
 
-    if pidstr != None:
-        db.do_attach(pidstr)
+    if options.process:
+        db.do_attach(options.process)
 
-    elif cmd != None:
-        trace.execute(cmd)
+    elif options.command:
+        trace.execute(options.command)
 
-    if eventid != None:
-        db.trace.setMeta('WindowsJitEvent', eventid)
+    if options.eventid:
+        db.trace.setMeta('WindowsJitEvent', options.eventid)
 
-    if do_gui:
-
-        vw_main.main()
-
-    elif do_qt:
+    if options.doqt:
         vq_main.main()
 
     else:

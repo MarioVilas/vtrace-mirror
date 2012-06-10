@@ -390,7 +390,7 @@ class CobraConnectionHandler:
         self.daemon.increfObject(oname)
         ret = {}
         for name in dir(obj):
-            if type(getattr(obj,name)) == types.MethodType:
+            if type(getattr(obj,name)) in (types.MethodType, types.BuiltinMethodType):
                 ret[name] = True
         try:
             csock.sendMessage(COBRA_HELLO, version, ret)
@@ -423,6 +423,7 @@ class CobraConnectionHandler:
             pass
 
     def handleGoodbye(self, csock, oname, obj, data):
+        if verbose: print 'GOODBYE!',oname,obj,data
         self.daemon.decrefObject(oname)
         try:
             csock.sendMessage(COBRA_GOODBYE, "", "")

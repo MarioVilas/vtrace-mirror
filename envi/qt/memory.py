@@ -36,6 +36,8 @@ class VQMemoryWindow(QtGui.QWidget):
         self.mem_history = deque()
         self.mem_canvas = self.__canvas_class__(memobj, syms=syms, parent=self)
 
+        self.mem_canvas.vqAddHotKey(e_memcanvas_qt.KEY_BACKSPACE, self._hotkey_BS)
+
         self.loadDefaultRenderers()
         self.loadRendSelect()
 
@@ -60,6 +62,12 @@ class VQMemoryWindow(QtGui.QWidget):
         self.setLayout(vbox)
         self.setWindowTitle('Mem: None')
 
+    def _hotkey_BS(self, canv, key):
+        if len(self.mem_history) >= 2:
+            hinfo = self.mem_history.popleft()
+            hinfo = self.mem_history.popleft()
+            self._histSelected( hinfo )
+
     def _histSelected(self, hinfo):
         addrexpr, sizeexpr, rendname = hinfo
         self.addr_entry.setText(addrexpr)
@@ -69,12 +77,17 @@ class VQMemoryWindow(QtGui.QWidget):
 
     def _histButtonClicked(self):
 
-        menu = vqt_menu.VQMenu('context', parent=self)
+        menu = vqt_menu.VQMenu('context', parent=self.hist_button)
         menu.splitchar = '&&&&&' # Disable splitting
         for hinfo in self.mem_history:
-            menu.addField(hinfo[0], self._histSelected, (hinfo,))
-        #menu.exec_(event.globalPos())
-        menu.exec_(self.hist_button.pos())
+            addrexpr, sizeexpr, rendname = hinfo
+            addr = self._mem_obj.parseExpression(addrexpr)
+            menustr = '0x%.8x' % addr
+            sym = self._mem_obj.getSymByAddr(addr)
+            if sym != None:
+                menustr += ' - %s' % repr(sym)
+            menu.addField(menustr, self._histSelected, (hinfo,))
+        menu.exec_(self.mapToGlobal(self.hist_button.pos()))
         return
 
     def vqMemNavSlot(self, expr, sizeexpr=None):

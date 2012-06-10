@@ -86,6 +86,7 @@ class VQTreeModel(QtCore.QAbstractItemModel):
         self.beginInsertRows(pidx, i, i)
         node = parent.append(rowdata)
         self.endInsertRows()
+        self.layoutChanged.emit()
         return node
 
     def sort(self, colnum, order=0):
@@ -173,6 +174,9 @@ class VQTreeModel(QtCore.QAbstractItemModel):
         if pitem == self.rootnode:
             return QtCore.QModelIndex()
 
+        if pitem == None:
+            return QtCore.QModelIndex()
+
         return self.createIndex(pitem.row(), 0, pitem)
 
     def rowCount(self, parent=QtCore.QModelIndex()):
@@ -188,7 +192,22 @@ class VQTreeModel(QtCore.QAbstractItemModel):
     
 class VQTreeView(QtGui.QTreeView):
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, cols=None):
         QtGui.QTreeView.__init__(self, parent=parent)
+        self.setSortingEnabled(True)
         self.setAlternatingRowColors(True)
+
+        if cols != None:
+            model = VQTreeModel(parent=self, columns=cols)
+            self.setModel( model )
+
+    def vqSizeColumns(self):
+        c = self.model().columnCount()
+        for i in xrange(c):
+            self.resizeColumnToContents(i)
+
+    def setModel(self, model):
+        model.dataChanged.connect( self.dataChanged )
+        model.rowsInserted.connect( self.rowsInserted )
+        return QtGui.QTreeView.setModel(self, model)
 

@@ -1447,15 +1447,21 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
         self.trace.setMode("RunForever", False)
         self.trace.sendBreak()
 
-    def do_meta(self, string):
+    def do_meta(self, line):
         """
         Show the metadata for the current trace.
 
         Usage: meta
         """
-        meta = self.trace.metadata
-        x = pprint.pformat(meta)
-        self.vprint(x)
+        argv = e_cli.splitargs(line)
+        if argv:
+            for name in argv:
+                mval = self.trace.getMeta(name)
+                self.vprint('%s: %r' % (name, mval))
+        else:
+            meta = self.trace.metadata
+            x = pprint.pformat(meta)
+            self.vprint(x)
 
     def do_memdiff(self, line):
         """

@@ -247,7 +247,7 @@ class ArmThumbDisasm:
 
     def disasm(self, bytes, offset, va, trackMode=True):
         val, = struct.unpack("H", bytes[offset:offset+2])
-        opcode, mnem, opermkr, flags = ttree.getInstr(val)
+        opcode, mnem, opermkr, flags = ttree.getInt(val, 16)
         olist = opermkr(va, val)
         op = ThumbOpcode(va, opcode, mnem, 0xe, 2, olist, flags)
         return op
