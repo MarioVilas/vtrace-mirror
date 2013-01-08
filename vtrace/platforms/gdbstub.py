@@ -111,6 +111,17 @@ trap_sigs = (SIGINT, SIGTRAP)
 class GdbServerDisconnected(Exception):
     pass
 
+class KeBugCheckBreak(vtrace.Breakpoint):
+
+    def __init__(self, symname):
+        vtrace.Breakpoint.__init__(self, None, expression=symname)
+        self.fastbreak = True
+
+    def notify(self, event, trace):
+        sp = trace.getStackCounter()
+        savedpc, exccode = trace.readMemoryFormat(sp, '<PP')
+        trace._fireSignal(exccode)
+
 class GdbStubMixin:
 
     def __init__(self, host=None, port=None):
@@ -124,12 +135,9 @@ class GdbStubMixin:
         self._gdb_regfmt = ''
         self._gdb_regsize = 0
         self._gdb_reg_xlat = []
-        #self._gdb_regnames = []
+        self._gdb_regnames = []
 
-        self.stepping = False
         self.breaking = False
-
-        self._gdbSetArch( self.getMeta('Architecture') )
 
     def _recvUntil(self, c):
         ret = ''
@@ -160,14 +168,6 @@ class GdbStubMixin:
 
         #print 'RECV: ->%s<-' % bytes
         return bytes
-
-    def _gdbAddMemBreak(self, addr, size):
-        resp = self._cmdTransact('Z0,%x,%x' % (addr, size))
-        self._raiseIfError( resp )
-
-    def _gdbDelMemBreak(self, addr, size):
-        resp = self._cmdTransact('z0,%x,%x' % (addr, size))
-        self._raiseIfError( resp )
 
     def _cmdTransact(self, cmd):
         self._sendPkt(cmd)
@@ -241,6 +241,7 @@ class GdbStubMixin:
         if sig != None:
             cmd = 'C%.2x' % sig
         self._sendPkt(cmd)
+        #self._cmdTransact(cmd)
 
     def platformStepi(self):
         # FIXME by selected thread? and address?
@@ -273,16 +274,6 @@ class GdbStubMixin:
                 continue
             break
         return pkt
-
-    def _gdbJustAttached(self):
-        pass
-
-    def _gdbCreateThreads(self):
-        self._simpleCreateThreads()
-
-    def _gdbLoadLibraries(self):
-        if self._gdb_filemagic:
-            self._findLibraryMaps(self._gdb_filemagic, always=True)
 
     def platformProcessEvent(self, event):
         #print 'EVENT ->%s<-' % event
@@ -334,11 +325,10 @@ class GdbStubMixin:
         #if self.attaching and signo in trap_sigs:
         if self.attaching:
             self.attaching = False
-
-            self._gdbJustAttached()
-            self._gdbLoadLibraries()
-            self._gdbCreateThreads()
-
+            #self._enumGdbTarget()
+            if self._gdb_filemagic:
+                self._findLibraryMaps(self._gdb_filemagic, always=True)
+            self._simpleCreateThreads()
             self.runAgain(False) # Clear this, if they want BREAK to run, it will
             self.fireNotifiers(vtrace.NOTIFY_BREAK)
 
@@ -378,59 +368,42 @@ class GdbStubMixin:
         else:
             self._fireSignal(signo)
 
-    #def _gdbCreateThreads(self):
-        #initid = self.getMeta('ThreadId')
-        #for tid in self.platformGetThreads().keys():
-            #self.setMeta('ThreadId', tid)
-            #self.fireNotifiers(vtrace.NOTIFY_CREATE_THREAD)
-        #self.setMeta('ThreadId', initid)
+    def _gdbCreateThreads(self):
+        initid = self.getMeta('ThreadId')
+        for tid in self.platformGetThreads().keys():
+            self.setMeta('ThreadId', tid)
+            self.fireNotifiers(vtrace.NOTIFY_CREATE_THREAD)
+        self.setMeta('ThreadId', initid)
 
-    #def _gdbSetRegisterInfo(self, fmt, names):
+    def _gdbSetRegisterInfo(self, fmt, names):
         # Used by the Trace implementations to tell the gdb
         # stub code how to unpack the register buf
 
-        #self._gdb_regfmt = fmt
-        #self._gdb_regnames = names
+        self._gdb_regfmt = fmt
+        self._gdb_regnames = names
 
-        #self._gdb_reg_xlat = []
-        #self._gdb_regsize = struct.calcsize(fmt)
+        self._gdb_reg_xlat = []
+        self._gdb_regsize = struct.calcsize(fmt)
 
 
-        #for i,name in enumerate(names):
-            #if name == None: # So we can skip parts of the gdb definition...
-                #continue
-            #j = self.getRegisterIndex(name)
-            #if j != None:
-                #self._gdb_reg_xlat.append( (i, j) )
-
-    def _gdbSetArch(self, arch):
-
-        reginfo = gdb_reg_defs.get(arch)
-        if reginfo == None:
-            raise Exception('No known register mappings for gdbstub on %s!' % arch)
-
-        regnames, regfmt = reginfo
-
-        self._gdb_regfmt = regfmt
-        self._gdb_regsize = struct.calcsize( regfmt )
-        self._gdb_regnames = regnames
+        for i,name in enumerate(names):
+            if name == None: # So we can skip parts of the gdb definition...
+                continue
+            j = self.getRegisterIndex(name)
+            if j != None:
+                self._gdb_reg_xlat.append( (i, j) )
 
     def platformGetRegCtx(self, tid):
         '''
         Get an envi register context from the target stub.
         '''
-
         # FIXME tid!
         regbuf = self._cmdTransact('g')
         regbytes = self._runLengthDecode(regbuf)
         rvals = struct.unpack(self._gdb_regfmt, regbytes[:self._gdb_regsize])
         ctx = self.arch.archGetRegCtx()
-
-        for i,regval in enumerate(rvals):
-            regname = self._gdb_regnames[i]
-            if regname != None:
-                ctx.setRegisterByName( regname, regval )
-
+        for myidx, enviidx in self._gdb_reg_xlat:
+            ctx.setRegister(enviidx, rvals[myidx])
         return ctx
         
     def platformSetRegCtx(self, tid, ctx):
@@ -486,7 +459,6 @@ class GdbStubMixin:
     def platformReadMemory(self, addr, size):
         mbytes = ''
         offset = 0
-        #print('READ: 0x%.8x (%d)' % (addr, size))
         while len(mbytes) < size:
             # FIXME is this 256 problem just in the VMWare gdb stub?
             cmd = 'm%x,%x' % (addr + offset, min(256, size-offset))
@@ -500,15 +472,9 @@ class GdbStubMixin:
     def platformWriteMemory(self, addr, mbytes):
         cmd = 'M%x,%x:%s' % (addr, len(mbytes), mbytes.encode('hex'))
         pkt = self._cmdTransact(cmd)
+        self._raiseIfError(pkt)
 
     def platformGetMaps(self):
-        # No way to enumerate these by default...
-        return []
-
-    def platformPs(self):
-        return [ (1, 'GdbStubTarget'), ]
-
-    def platformGetFds(self):
         return []
 
 # FROM HERE DOWN IS ALL CRAP THAT IS STILL GETTING SORTED OUT
@@ -669,6 +635,15 @@ class GdbStubMixin_old(e_registers.RegisterContext):
                 self.addLibraryBase(dllname, dllbase, always=True)
                 ldr_entry = ldte.InLoadOrderLinks.Flink & self.bigmask
 
+            try:
+                self.addBreakpoint(KeBugCheckBreak('nt.KeBugCheck'))
+            except Exception, e:
+                print 'Error Seting KeBugCheck Bp: %s' % e
+
+            try:
+                self.addBreakpoint(KeBugCheckBreak('nt.KeBugCheckEx'))
+            except Exception, e:
+                print 'Error Seting KeBugCheck Bp: %s' % e
 
         else:
             # FIXME enumerate non-windows OSs!
@@ -837,44 +812,44 @@ class GdbStubTrace(
     # FIXME we also need cleaner abstraction for checkBreakpoints
     # (some platforms stop *on* break and some stop *after...)
 
-    #def _activateBreak(self, bp):
-        ## For now, we don't support watchpoints...
-        #if not bp.active:
-            #addr = bp.resolveAddress(self)
-            #self._cmdTransact('Z%d,%x,%x' % (GDB_BP_SOFTWARE,addr,1))
+    def _activateBreak(self, bp):
+        # For now, we don't support watchpoints...
+        if not bp.active:
+            addr = bp.resolveAddress(self)
+            self._cmdTransact('Z%d,%x,%x' % (GDB_BP_SOFTWARE,addr,1))
 
-    #def _cleanupBreakpoints(self, force=False):
-        #'''
-        #Cleanup any non-fastbreak breakpoints.  This routine doesn't even get
-        #called in the event of mode FastBreak=True.
-        #'''
-        #self.fb_bp_done = False
-        #for bp in self.breakpoints.itervalues():
-            ## No harm in calling deactivate on
-            ## an inactive bp
-            #if force or not bp.fastbreak:
-                #self._cmdTransact('z%d,%x,%x' % (GDB_BP_SOFTWARE,bp.getAddress(),1))
-                #bp.active = False
-                ##bp.deactivate(self)
+    def _cleanupBreakpoints(self, force=False):
+        '''
+        Cleanup any non-fastbreak breakpoints.  This routine doesn't even get
+        called in the event of mode FastBreak=True.
+        '''
+        self.fb_bp_done = False
+        for bp in self.breakpoints.itervalues():
+            # No harm in calling deactivate on
+            # an inactive bp
+            if force or not bp.fastbreak:
+                self._cmdTransact('z%d,%x,%x' % (GDB_BP_SOFTWARE,bp.getAddress(),1))
+                bp.active = False
+                #bp.deactivate(self)
 
-    #def _checkForBreak(self):
-        #"""
-        #Check to see if we've landed on a breakpoint, and if so
-        #deactivate and step us past it.
-#
-        #WARNING: Unfortunatly, cause this is used immidiatly before
-        #a call to run/wait, we must block briefly even for the GUI
-        #"""
-        ## Steal a reference because the step should
-        ## clear curbp...
-        #bp = self.curbp
-        #if bp != None and bp.isEnabled():
-            ## We had to remove a check for active and a deactivate here...
-            #orig = self.getMode("FastStep")
-            #self.setMode("FastStep", True)
-            #self.stepi()
-            #self.setMode("FastStep", orig)
-            #self._activateBreak(bp)
+    def _checkForBreak(self):
+        """
+        Check to see if we've landed on a breakpoint, and if so
+        deactivate and step us past it.
+
+        WARNING: Unfortunatly, cause this is used immidiatly before
+        a call to run/wait, we must block briefly even for the GUI
+        """
+        # Steal a reference because the step should
+        # clear curbp...
+        bp = self.curbp
+        if bp != None and bp.isEnabled():
+            # We had to remove a check for active and a deactivate here...
+            orig = self.getMode("FastStep")
+            self.setMode("FastStep", True)
+            self.stepi()
+            self.setMode("FastStep", orig)
+            self._activateBreak(bp)
 
     def buildNewTrace(self):
         arch = self.getMeta('Architecture')

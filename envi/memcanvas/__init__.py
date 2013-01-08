@@ -334,24 +334,19 @@ class MemoryCanvas:
         try:
             maxva = va + size
             while va < maxva:
-
                 if not self.mem.isValidPointer( va ):
                     va += 1
                     continue
-
                 self._beginRenderVa(va)
-                try:
-                    rsize = rend.render(self, va)
-                    self._canv_rendvas.append((va,rsize))
-                    self._endRenderVa(va)
-                    va += rsize
-                except Exception, e:
-                    self.addText("\nRender Exception At %s: %s\n" % (hex(va),e))
-                    self._endRenderVa(va)
-                    break
+                rsize = rend.render(self, va)
+                self._canv_rendvas.append((va,rsize))
+                self._endRenderVa(va)
+                va += rsize
 
         except Exception, e:
-            self.addText("\nException At %s: %s\n" % (hex(va),e))
+            s = traceback.format_exc()
+            print s
+            self.addText("\nException At %s: %s\n" % (hex(va),s))
 
         # Canvas callback for render completion (or error...)
         self._endRenderMemory(va, size, rend)

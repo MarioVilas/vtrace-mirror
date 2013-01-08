@@ -203,8 +203,6 @@ INS_SZCONV  =    INS_OTHER | 0x03        #/* convert size of operand */
 OP_R=         0x001    
 OP_W=         0x002 
 OP_X=         0x004  
-OP_64AUTO=    0x008     # operand is in 64bit mode with amd64!
-
 OP_UNK=       0x000  
 OP_REG=       0x100   
 OP_IMM=       0x200  
@@ -2202,9 +2200,9 @@ tbl32_FE = [
 tbl32_FF = [
 ( 0, INS_INC, ADDRMETH_E | OPTYPE_v | OP_W, ARG_NONE, ARG_NONE, cpu_80386, "inc", 0, 0, 0),  
 ( 0, INS_DEC, ADDRMETH_E | OPTYPE_v | OP_W, ARG_NONE, ARG_NONE, cpu_80386, "dec", 0, 0, 0),  
-( 0, INS_CALL, ADDRMETH_E | OPTYPE_v | OP_X | OP_64AUTO , ARG_NONE, ARG_NONE, cpu_80386, "call", 0, 0, 0),  
+( 0, INS_CALL, ADDRMETH_E | OPTYPE_v | OP_X, ARG_NONE, ARG_NONE, cpu_80386, "call", 0, 0, 0),  
 ( 0, INS_CALL, ADDRMETH_E | OPTYPE_p | OP_X, ARG_NONE, ARG_NONE, cpu_80386, "call", 0, 0, 0),  
-( 0, INS_BRANCH, ADDRMETH_E | OPTYPE_v | OP_X | OP_64AUTO, ARG_NONE, ARG_NONE, cpu_80386, "jmp", 0, 0, 0),  # on amd64 this is jmp rnx
+( 0, INS_BRANCH, ADDRMETH_E | OPTYPE_v | OP_X, ARG_NONE, ARG_NONE, cpu_80386, "jmp", 0, 0, 0),  
 ( 0, INS_BRANCH, ADDRMETH_E | OPTYPE_p | OP_X, ARG_NONE, ARG_NONE, cpu_80386, "jmp", 0, 0, 0),  
 ( 0, INS_PUSH, ADDRMETH_E | OPTYPE_v | OP_R, ARG_NONE, ARG_NONE, cpu_80386, "push", 0, 0, 0),  
 (0, 0, ARG_NONE, ARG_NONE, ARG_NONE, 0, 0, 0, 0, 0   ) 
@@ -3085,6 +3083,6 @@ prefix_table = {
 #MODRM_EA =  1
 #MODRM_reg=  0
 ADDRMETH_MASK =     0x00FF0000
-OPTYPE_MASK   =     0xFF000000
+OPTYPE_MASK   =     0xFF000000L
 OPFLAGS_MASK  =     0x0000FFFF
 

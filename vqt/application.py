@@ -50,8 +50,8 @@ class VQMainCmdWindow(QtGui.QMainWindow):
         self._vq_appname = appname
 
         self._vq_settings = QtCore.QSettings('invisigoth', application=appname, parent=self)
+
         self._vq_histfile = os.path.join( os.path.expanduser('~'), '.%s_history' % appname)
-        self._vq_hotfuncs = {}
 
         self._dock_widgets = []
         self._dock_classes = {}

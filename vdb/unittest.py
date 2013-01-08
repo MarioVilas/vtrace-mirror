@@ -5,10 +5,8 @@ import vdb.testmods
 import vdb.testmods.regtest as v_t_regtest
 import vdb.testmods.writemem as v_t_writemem
 import vdb.testmods.basictest as v_t_basictest
-import vdb.testmods.breaktest as v_t_breaktest
 import vdb.testmods.attachtest as v_t_attachtest
 import vdb.testmods.threadtest as v_t_threadtest
-import vdb.testmods.stalkertest as v_t_stalkertest
 import vdb.testmods.execthreadtest as v_t_execthreadtest
 
 tests = [
@@ -19,8 +17,6 @@ tests = [
     v_t_writemem.WriteMemTest(),
     v_t_threadtest.ThreadTest(),
     v_t_execthreadtest.ExecThreadTest(),
-    v_t_breaktest.BreakpointTest(),
-    v_t_stalkertest.StalkerTest(),
 ]
 
 def main():
