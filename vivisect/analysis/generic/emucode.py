@@ -25,10 +25,18 @@ class watcher(viv_imp.EmulationMonitor):
         self.badop = vw.arch.makeOpcode("\x00\x00\x00\x00\x00")
         self.tryva = tryva
         self.hasret = False
+        self.mndist = {}
+        self.insn_count = 0
 
     def looksgood(self):
         if not self.hasret:
             return False
+
+        # if there is 1 mnem that makes up over 50% of all instructions then flag it as invalid
+        for mnem, count in self.mndist.items():
+            if round(float( float(count) / float(self.insn_count)), 3) >= .50:
+                return False
+
         return True
 
     def prehook(self, emu, op, eip):
@@ -56,6 +64,9 @@ class watcher(viv_imp.EmulationMonitor):
             va, size, ltype, linfo = loc
             if ltype != vivisect.LOC_OP:
                 raise Exception("HIT %d AT %.8x" % (ltype, va))
+        cnt = self.mndist.get(op.mnem, 0)
+        self.mndist[ op.mnem ] = cnt+1
+        self.insn_count += 1
 
         # FIXME do we need a way to terminate emulation here?
 
@@ -93,7 +104,10 @@ def analyze(vw):
         if len(docode) == 0:
             break
 
+        docode.sort()
         for va in docode:
+            if vw.getLocation(va) != None:
+                continue
             vw.makeFunction(va)
             vasetrows.append((va,))
 

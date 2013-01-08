@@ -37,6 +37,7 @@ class VStruct(vs_prims.v_base):
         self._vs_field_align = False # To toggle visual studio style packing
         self._vs_padnum = 0
         self._vs_pcallbacks = {}
+        self._vs_fastfields = None
 
     def vsAddParseCallback(self, fieldname, callback):
         '''
@@ -84,7 +85,7 @@ class VStruct(vs_prims.v_base):
                 for callback in cblist:
                     callback(self)
 
-    def vsParse(self, sbytes, offset=0):
+    def vsParse(self, sbytes, offset=0, fast=False):
         """
         For all the primitives contained within, allow them
         an opportunity to parse the given data and return the
@@ -92,8 +93,30 @@ class VStruct(vs_prims.v_base):
 
         Any method named pcb_<FieldName> will be called back when the specified
         field is set by the parser.
-        
+
+        the "fast" option enables fastparse which will *not* call any callbacks
+        can may not be compatible with some structure defs.  ( eg mixed endian )
         """
+        if fast:
+            if self._vs_fastfields == None:
+                fields = self.vsGetFastParseFields()
+                self._vs_fastfields = fields
+                fmt = ''.join([ f._vs_fmt for f in fields ])
+                endian = '<'
+                if fmt.find('>') != -1:
+                    endian = '>'
+                # Strip all in-band endian specifiers
+                fmt = fmt.replace('<','')
+                fmt = fmt.replace('>','')
+
+                self._vs_fastfmt = endian + fmt
+                self._vs_fastlen = struct.calcsize( self._vs_fastfmt )
+
+            values = struct.unpack_from( self._vs_fastfmt, sbytes, offset )
+            # Ephemeral list comprehension for speed
+            [ self._vs_fastfields[i].vsSetValue( values[i] ) for i in xrange(len(values)) ]
+            return offset + self._vs_fastlen
+
         # In order for callbacks to change fields, we can't use vsGetFields()
         for fname in self._vs_fields:
             fobj = self._vs_values.get(fname)
@@ -106,6 +129,16 @@ class VStruct(vs_prims.v_base):
                 for callback in cblist:
                     callback(self)
         return offset
+
+    def vsGetFastParseFields(self):
+        fields = []
+        for fname in self._vs_fields:
+            fobj = self._vs_values.get(fname)
+            if fobj.vsIsPrim():
+                fields.append( fobj )
+                continue
+            fields.extend( fobj.vsGetFastParseFields() )
+        return fields
 
     def vsEmit(self):
         """
@@ -307,9 +340,7 @@ class VStruct(vs_prims.v_base):
 
     def __iter__(self):
         # Our iteration returns name,field pairs
-        ret = []
-        for name in self._vs_fields:
-            ret.append((name, self._vs_values.get(name)))
+        ret = [ (name, self._vs_values.get(name)) for name in self._vs_fields ]
         return iter(ret)
 
     def __repr__(self):
@@ -342,6 +373,10 @@ class VArray(VStruct):
         """
         idx = len(self._vs_fields)
         self.vsAddField("%d" % idx, elem)
+
+    def vsAddElements(self, count, eclass):
+        for i in xrange( count ):
+            self.vsAddElement( eclass() )
 
     def __getitem__(self, index):
         return self.vsGetField("%d" % index)

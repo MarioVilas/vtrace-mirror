@@ -299,16 +299,7 @@ class Trace(e_mem.IMemory, e_reg.RegisterContext, e_resolv.SymbolResolver, objec
         """
         self.requireAttached()
         self.requireNotExited()
-        # kill may require that we continue
-        # the process before it gets processed,
-        # so we'll try to run the process until it
-        # exits due to the kill
-        self.setMode("RunForever", True) # Forever actually means util exit
-        if self.isRunning():
-            self.platformKill()
-        else:
-            self.platformKill()
-            self.run()
+        self.platformKill()
 
     def detach(self):
         """
@@ -1355,6 +1346,13 @@ def getTrace(plat=None, **kwargs):
 
         elif arch == "i386":
             return v_linux.Linuxi386Trace()
+
+        # Keep separate just in case
+        elif arch == "armv7l":
+            return v_linux.LinuxArmTrace()
+
+        elif arch == "armv6l":
+            return v_linux.LinuxArmTrace()
 
         else:
             raise Exception("Sorry, no linux support for %s" % arch)

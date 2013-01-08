@@ -238,7 +238,8 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
         return self.trace.parseExpression(exprstr)
 
     def getExpressionLocals(self):
-        r = vtrace.VtraceExpressionLocals(self.trace)
+        trace = vdb.VdbTrace(self)
+        r = vtrace.VtraceExpressionLocals(trace)
         r['db'] = self
         r['vprint'] = self.vprint
         return r
@@ -773,6 +774,20 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
             final.append(("%12s:0x%.8x (%d)" % (r,val,val)))
         self.columnize(final)
 
+    def complete_reg(self, text, line, bigidx, endidx):
+
+        if '=' in line:
+            return []
+
+        regs = self.trace.getRegisters().keys()
+        if not text:
+            return regs
+
+        if text in regs:
+            return [ text + '=' ]
+
+        return [ i for i in regs if i.startswith(text) ]
+
     def do_stepi(self, line):
         """
         Single step the target tracer.
@@ -1191,6 +1206,17 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
 
         self.vprint("Attaching to %d" % pid)
         self.newTrace().attach(pid)
+
+    def complete_attach(self, text, line, begidx, endidx):
+        procs = self.trace.ps()
+        pidlist = [ str(x) for x,y in procs ]
+        proclist = [ y for x,y in procs ]
+        if not text:
+            return proclist
+        if text.isdigit():
+            return [ i for i in pidlist if i.startswith(text) ]
+
+        return [ i for i in proclist if i.find(text) != -1 ]
 
     def do_autocont(self, line):
         """
@@ -1786,3 +1812,9 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
         vtrace.remote = line
         # FIXME how do we re-init the debugger?
 
+    # Some helper functions for tab completion
+    def _complete_libname(self, text, line, begidx, endidx):
+        libnames = self.trace.getNormalizedLibNames()
+        if not text:
+            return libnames
+        return [ i for i in libnames if i.startswith( text ) ]

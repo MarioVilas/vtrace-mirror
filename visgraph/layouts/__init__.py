@@ -21,6 +21,15 @@ def center_pos(ninfo):
 
 class GraphLayout:
 
+    '''
+    A graph layout uses several graph meta properties and node properties
+    to communicate with a renderer which is expected to display the graph:
+
+    size = ( width, height )    - Set by the renderer
+    position = ( x, y )         - Set by the layout
+    repr = <display text>       - A fallback for what to display on a node
+    '''
+
     def __init__(self, graph):
         self.graph = graph
 
@@ -39,22 +48,7 @@ class GraphLayout:
         '''
         rend.setNodeSizes(self.graph)
         self.layoutGraph()
-
         width, height = self.getLayoutSize()
-        rend.beginRender(width, height)
+        self.graph.setMeta('size', (width, height) )
 
-        # Render each of the nodes (except ghost nodes...)
-        for nid,ninfo in self.graph.getNodes():
-            if ninfo.get('ghost'):
-                continue
-            xpos, ypos = ninfo.get('position')
-            rend.renderNode(nid, ninfo, xpos, ypos)
-
-        # Render the edges
-        for eid, fromid, toid, einfo in self.graph.getEdges():
-            points = einfo.get('edge_points')
-            if points != None:
-                rend.renderEdge(eid, einfo, points)
-
-        rend.endRender()
-
+        rend.renderGraph()

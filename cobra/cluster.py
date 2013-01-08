@@ -65,6 +65,8 @@ class ClusterWork(object):
             return False
         if self.touchtime == None:
             return False
+        if self.endtime != 0:
+            return False
         return (self.touchtime + self.timeout) < time.time()
 
     def work(self):
@@ -578,6 +580,7 @@ def workThread(server, work):
 
 def runAndWaitWork(server, work):
 
+    work.touch()
     thr = threading.Thread(target=workThread, args=(server, work))
     thr.setDaemon(True)
     thr.start()

@@ -15,7 +15,7 @@ class SymbolikFunctionEmulator(vsym_emulator.SymbolikEmulator):
         self.cconvs = {}
         self.cconv = None   # This will be set by setupFunctionCall
 
-        self.apimod = self.getApiModule()
+        #self.apimod = self.getApiModule()
         self.funchooks = {}
 
     def setupFunctionCall(self, fva, args=None):
@@ -89,27 +89,25 @@ class SymbolikFunctionEmulator(vsym_emulator.SymbolikEmulator):
                 # First of all, if the name of the function has a callback
                 funccb = self.getFunctionCallback(fname)
                 if funccb != None:
-                    fret = funccb(self, *symargs)
+                    fret = funccb(self, fname, symargs)
 
                 # Next highest priority is "thunks" where there is a callback
                 elif thunk != None:
                     funccb = self.getFunctionCallback(thunk)
                     if funccb != None:
-                        fret = funccb(self, *symargs)
+                        fret = funccb(self, thunk, symargs)
 
         else:
 
             funcname = str(funcsym)     # Not necissarily the name but...
 
-            # Lets fall back on the hope that the "well known APIs" stuff has a definition
-            # for this function....
-            if self.apimod != None:
-
-                impapi = self.apimod.getImportApi(funcname)
-                if impapi != None:
-                    apiname, ccname, argv = impapi
-                    cconv = self.getCallingConvention(ccname)
-
+            # Attempt to use import api definitions...
+            apidef = self._sym_vw.getImpApi( funcname )
+            if apidef:
+                #( 'int', None, 'stdcall', 'wininet.FindFirstUrlCacheContainerW', (('int', None), ('void *', 'ptr'), ('int', None), ('int', None)) ),
+                rt,rn,cc,fn,argv = apidef
+                cconv = self.getCallingConvention( cc )
+                
             # If we managed to get a calling convention *and* argument def...
             if cconv != None and argv != None:
                 symargs = cconv.getSymbolikArgs(self, argv, update=True)
@@ -117,7 +115,7 @@ class SymbolikFunctionEmulator(vsym_emulator.SymbolikEmulator):
             # Give the function callback a shot...
             funccb = self.getFunctionCallback(funcname)
             if funccb != None:
-                fret = funccb(self, *symargs)
+                fret = funccb(self, funcname, symargs)
 
         # If we have a calling convention here, set the return state
         if cconv != None:
@@ -178,12 +176,12 @@ class SymbolikFunctionEmulator(vsym_emulator.SymbolikEmulator):
 
     ##### Methods to be implemented by arch specific extenders.... ##################
 
-    def getApiModule(self):
-        '''
-        Architecture extenders may implement this to return an API
-        module which knows about import calling types.
-        '''
-        return None
+    #def getApiModule(self):
+        #'''
+        #Architecture extenders may implement this to return an API
+        #module which knows about import calling types.
+        #'''
+        #return None
 
     def isLocalMemory(self, symaddr, solvedval=None):
         '''
@@ -260,6 +258,31 @@ class SymbolikAnalysisContext:
 
         return g
 
+    def _oposet_cons(self, c1, c2):
+
+        c1v1 = c1._v1.solve()
+        c1v2 = c1._v2.solve()
+
+        c2v1 = c2._v1.solve()
+        c2v2 = c2._v2.solve()
+
+        if c1v1 == c2v1 and c1v2 == c2v2 and c1.revclass == c2.__class__:
+            return True
+
+        if c1v1 == c2v2 and c1v2 == c2v1 and c1.__class__ == c2.__class__:
+            return True
+
+        return False
+
+    def _isSat(self, oldcons, newcons):
+        # Just detect *super* obvious constraint failures for now...
+        for con in newcons:
+            if [ c1 for c1 in newcons if self._oposet_cons( c1, con ) ]:
+                return False
+            if [ c1 for c1 in oldcons if self._oposet_cons( c1, con ) ]:
+                return False
+        return True
+
     def getSymbolikPaths(self, fva, args=None, func_callbacks=None):
         '''
         For each path through the function, run all symbolik
@@ -267,9 +290,15 @@ class SymbolikAnalysisContext:
         emu, effects tuples...
         '''
         graph = self.getSymbolikGraph(fva)
+
+        if args == None:
+            argdef = self.vw.getFunctionArgs( fva )
+            args = [ Arg(i,width=self.vw.psize) for i in xrange(len(argdef)) ]
+
         #fva = graph.getMeta('fva')  # put in place by buildFunctionGraph...
         for path in viv_graph.getCodePaths(graph):
 
+            skippath = False
             #emu = sym_emulator.SymbolikEmulator(vw)
             emu = self.getFunctionEmulator(fva, args=args)
             if func_callbacks != None:
@@ -277,6 +306,8 @@ class SymbolikAnalysisContext:
                     emu.addFunctionCallback(fname, funccb)
 
             patheffects = []
+            pathconstraints = []
+
             for node,edge in path:
                 # This is the edge that *got us here* so it has to
                 # be processed first!
@@ -286,13 +317,33 @@ class SymbolikAnalysisContext:
                     [ c.reduce() for c in constraints ]
                     #print 'EDGE GOT CONSTRAINTS',[ str(c) for c in constraints]
                     # FIXME check if constraints are discrete, and possibly skip path!
+
+                    # If any of the constraints are discrete and false we skip the path
+                    discs = [ c.cons.prove() for c in constraints if c.cons.isDiscrete() ]
+                    if not all( discs ): # emtpy discs is True...
+                        #print('SKIP: %s %s' % (repr(discs),[str(c) for c in constraints ]))
+                        skippath = True
+                        break
+                    
+
+                    cons = [ c.cons for c in constraints ]
+                    if not self._isSat( pathconstraints , cons):
+                        #print('NON SAT: 0x%.8x %s %s' % (node, [ str(c) for c in pathconstraints ], [ str(c) for c in cons ] ))
+                        skippath = True
+                        break
+
                     patheffects.extend(constraints)
+                    pathconstraints.extend( cons )
+
+                if skippath:
+                    break
 
                 effects = graph.getNodeInfo(node, 'symbolik_effects', ())
                 effects = emu.applyEffects(effects)
                 patheffects.extend(effects)
 
-            yield emu, patheffects
+            if not skippath:
+                yield emu, patheffects
 
     def getSymbolikOutputs(self, fva, args=None):
         '''
@@ -305,6 +356,9 @@ class SymbolikAnalysisContext:
             functions called (with args)
             output registers modified
         '''
+        if args == None:
+            argdef = self.vw.getFunctionArgs( fva )
+            args = [ Arg(i,width=self.vw.psize) for i in xrange(len(argdef)) ]
 
         for emu, effects in self.getSymbolikPaths(fva, args):
 

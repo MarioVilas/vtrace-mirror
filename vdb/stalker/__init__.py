@@ -11,7 +11,7 @@ import envi.codeflow as e_codeflow
 class StalkerCodeFlow(e_codeflow.CodeFlowContext):
 
     def __init__(self, trace):
-        e_codeflow.CodeFlowContext.__init__(self, trace)
+        e_codeflow.CodeFlowContext.__init__(self, trace, persist=True, recurse=False)
         self.trace = trace
         self.setupBreakLists(None)
 
@@ -100,7 +100,7 @@ class StalkerBreak(vtrace.Breakpoint):
             trace.setMeta('StalkerCodeFlow', cf)
 
         cf.setupBreakLists(self.mymap)
-        cf.addCodeFlow(self.address, persist=True)
+        cf.addCodeFlow(self.address)
 
         for va in cf.bplist:
             if breaks.get(va):

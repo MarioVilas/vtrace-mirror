@@ -315,18 +315,15 @@ class FreeBSDMixin:
 
     @v_base.threadwrap
     def platformWait(self):
-        status = v_posix.PosixMixin.platformWait(self)
+        pid,status = v_posix.PosixMixin.platformWait(self)
         # Get the thread id from the ptrace interface
 
         info = PTRACE_LWPINFO()
         size = ctypes.sizeof(info)
         if v_posix.ptrace(PT_LWPINFO, self.pid, ctypes.addressof(info), size) == 0:
-            self.setMeta("ThreadId", info.pl_lwpid)
-        else:
-            #FIXME this is because posix wait is linux specific and broke
-            self.setMeta("ThreadId", self.pid)
+            pid = info.pl_lwpid
 
-        return status
+        return pid,status
 
     @v_base.threadwrap
     def platformStepi(self):

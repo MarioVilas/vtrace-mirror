@@ -3,19 +3,21 @@ import sys
 
 # Add the contrib directories to our python path
 contribdir = os.path.dirname( __file__ )
-for contrib in os.listdir( contribdir ):
+if os.path.isdir( contribdir ):
 
-    contpath = os.path.join( contribdir, contrib )
+    for contrib in os.listdir( contribdir ):
 
-    if not os.path.isdir( contpath ):
-        if contrib.endswith('.egg'):
-            sys.path.insert(0, contpath)
+        contpath = os.path.join( contribdir, contrib )
 
-        continue
+        if not os.path.isdir( contpath ):
+            if contrib.endswith('.egg'):
+                sys.path.insert(0, contpath)
 
-    if contrib.startswith('.'):
-        continue
+            continue
 
-    #sys.path.append( contpath )
-    sys.path.insert(0, contpath)
+        if contrib.startswith('.'):
+            continue
+
+        #sys.path.append( contpath )
+        sys.path.insert(0, contpath)
 

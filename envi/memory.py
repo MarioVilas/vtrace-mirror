@@ -66,7 +66,7 @@ class IMemory:
             self.imem_psize = archmod.getPointerSize()
 
     def getPointerSize(self):
-        return self.imem_arch.getPointerSize()
+        return self.imem_psize
 
     def readMemory(self, va, size):
         """

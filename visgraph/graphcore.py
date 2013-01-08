@@ -156,6 +156,9 @@ class Graph:
         '''
         return self.nodes.items()
 
+    def getNodeCount(self):
+        return len(self.nodes)
+
     def hasNode(self, nodeid):
         '''
         Check if a given node is present within the graph.
@@ -236,6 +239,7 @@ class Graph:
         nodes = self.getNodes()
         done = {}
         while len(nodes):
+
             nid, ninfo = nodes.pop()
             if done.get(nid):
                 continue
@@ -249,7 +253,7 @@ class Graph:
 
                 done[gnid] = True
 
-                if not g.getNode(gnid):
+                if not g.hasNode(gnid):
                     g.addNode(nodeid=gnid, ninfo=gninfo)
 
                 for eid,n1,n2,einfo in self.getRefsFrom(gnid):
@@ -394,7 +398,7 @@ class HierarchicalGraph(Graph):
         # NOTE: This will also set the 'weight' property on the nodes
         '''
         weights = {}
-        todo = [ (r, []) for r in self.getRootNodes() ]
+        todo = [ (r, {}) for r in self.getRootNodes() ]
         while len(todo):
 
             nid, path = todo.pop()
@@ -402,13 +406,13 @@ class HierarchicalGraph(Graph):
             cweight = weights.get(nid, 0)
             weights[nid] = max(cweight, len(path))
 
-            path.append(nid)
+            path[nid] = True
 
             for eid, fromid, toid, einfo in self.getRefsFrom(nid):
                 if weights.get(toid, -1) >= len(path):
                     continue
-                if toid not in path:
-                    todo.append((toid, list(path)))
+                if not path.get(toid):
+                    todo.append((toid, dict(path)))
 
         for nid,weight in weights.items():
             self.setNodeInfo(nid, 'weight', weight)

@@ -32,7 +32,6 @@ class mach_o(vstruct.VStruct):
             strtab = strbytes.split('\x00')
             #print strtab
             offset = vs.symoff
-            print 'NSYMS:',vs.nsyms
             for i in xrange(vs.nsyms):
                 n = nlist() # FIXME 64!
                 offset = n.vsParse(self._raw_bytes, offset)
@@ -61,7 +60,7 @@ class mach_o(vstruct.VStruct):
         ret = []
         for fname, vs in self.load_commands:
             if vs.cmd != LC_SEGMENT:
-                print hex(vs.cmd),hex(vs.cmdsize) # 2, 5, b, e
+                #print hex(vs.cmd),hex(vs.cmdsize) # 2, 5, b, e
                 continue
             # Slice the segment bytes from raw bytes
             fbytes = self._raw_bytes[ vs.fileoff: vs.fileoff + vs.filesize ]

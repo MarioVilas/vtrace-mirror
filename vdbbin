@@ -33,7 +33,7 @@ def usage_gdbserver():
     print ''
     sys.exit(0)
 
-if __name__ == "__main__":
+def main():
 
     cmd = None
     pidstr = None
@@ -55,64 +55,15 @@ if __name__ == "__main__":
 
     options, argv = parser.parse_args(sys.argv[1:])
 
-    #try:
-        #opts,args = getopt.getopt(sys.argv[1:], "e:QR:vGSp:s:c:r", ['gdb-server=',])
-    #except:
-        #usage()
-
-    #do_qt = False
-    #do_gui = False
-
-    #for opt,optarg in opts:
-
-        #if opt == '-R':
-            #vtrace.remote = optarg
-
-        #elif opt == '-Q':
-            #do_qt = True
-
-        #elif opt == "-c":
-            #cmd = optarg
-
-        #elif opt == '-e':
-            #eventid = int(optarg)
-
-        #elif opt == "-G":
-            #do_gui = True
-
-        #elif opt == "-s":
-            #trace = vt_snap.loadSnapshot(optarg)
-
-        #elif opt == "-S":
-            #vtrace.startVtraceServer()
-
-        #elif opt == "-p":
-            #pidstr = optarg
-
-        #elif opt == "-v":
-            #vtrace.verbose = True
-            #cobra.verbose = True
-
-        #elif opt == '-r':
-            #runagain = True
-
-        #elif opt == '--gdb-server':
-            #import vtrace.platforms.gdbstub as vt_gdbstub
-            #try:
-                #gdbserver, gdbport, gdbarch = optarg.split(':', 2)
-                #trace = vt_gdbstub.GdbStubTrace(gdbarch)
-                #trace.setMeta('GdbServerHost', gdbserver)
-                #trace.setMeta('GdbServerPort', int(gdbport, 0))
-            #except Exception ,e:
-                #usage_gdbserver()
-
     # Handle some options before we even create a trace.
     vtrace.remote = options.remotehost # None by default
 
     plat=None
     platargs = {}
     if options.doandroid:
-        plat = 'android'
+        import vdb.tools.android as v_utils_android
+        v_utils_android.runVdbOnDroid()
+        return
 
     if options.snapshot:
         print('Loading process snapshot...')
@@ -165,4 +116,7 @@ if __name__ == "__main__":
 
             except:
                 traceback.print_exc()
+
+if __name__ == "__main__":
+    sys.exit(main())
 

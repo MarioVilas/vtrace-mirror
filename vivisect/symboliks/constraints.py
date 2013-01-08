@@ -37,6 +37,26 @@ class Constraint:
     def __str__(self):
         return '%s %s %s' % (str(self._v1), self.operstr, str(self._v2))
 
+    def __eq__(self, con):
+        '''
+        Is this constraint the same as some other?
+        '''
+        if not isinstance(con, Constraint):
+            return False
+
+        c1v1 = self._v1.solve()
+        c1v2 = self._v2.solve()
+        c2v1 = con._v1.solve()
+        c2v2 = con._v2.solve()
+
+        if c1v1 == c2v1 and c1v2 == c2v2 and self.__class__ == con.__class__:
+            return True
+
+        if c1v1 == c2v2 and c1v2 == c2v1 and self.__class__ == con.revclass:
+            return True
+
+        return False
+
     def reverse(self):
         if self.revclass == None:
             raise Exception('Constraints Must Define revclass!')
@@ -54,7 +74,7 @@ class Constraint:
 
     def prove(self, emu=None):
         v1 = self._v1.solve(emu=emu)
-        v2 = self._v1.solve(emu=emu)
+        v2 = self._v2.solve(emu=emu)
         return self.testTruth(v1, v2)
 
     def solve(self, emu=None):

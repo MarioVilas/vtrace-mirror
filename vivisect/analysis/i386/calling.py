@@ -45,6 +45,9 @@ class AnalysisMonitor(viv_imp.EmulationMonitor):
 
         self.operrefs = []
 
+        self.badop = vw.arch.makeOpcode("\x00\x00\x00\x00\x00")
+        self.visited = {}
+
         # for stack debugging
         #self.startesp = 0
 
@@ -53,11 +56,15 @@ class AnalysisMonitor(viv_imp.EmulationMonitor):
         viv_imp.EmulationMonitor.logAnomaly(self, eip, msg)
 
     def prehook(self, emu, op, starteip):
+        if op == self.badop:
+            raise Exception("Hit known BADOP at 0x%.8x %s" % (starteip, repr(op) ))
 
         # The other hooks use these
         self.starteip = starteip
         self.iscall = (op.opcode == opcode86.INS_CALL)
         self.mndist[op.mnem] = True
+
+        self.visited[starteip] = True
 
         if not self.onceop.get(starteip):
             self.onceop[starteip] = True
@@ -87,6 +94,11 @@ class AnalysisMonitor(viv_imp.EmulationMonitor):
         # Under the intel specific assumption that only one operand may
         # be a memory access, check if the last thing in the readlog
         # is from our startva, and if it accesses an arg.
+
+        bVisited = True 
+        if not self.visited.get(endeip, False):
+            self.visited[endeip] = True
+            bVisited = False
 
         # Check the readlog for stack accesses
 
@@ -139,6 +151,9 @@ class AnalysisMonitor(viv_imp.EmulationMonitor):
             if (not self.vw.isFunction(endeip) and
                 self.vw.isExecutable(endeip) and
                 endeip != (op.va + len(op))):
+                
+                if bVisited:
+                    return
 
                 try:
 

@@ -93,9 +93,10 @@ class DnsAnswerArray(vstruct.VArray):
 
 class DnsPacket(vstruct.VStruct):
 
-    def __init__(self):
+    def __init__(self, tcpdns=False):
         vstruct.VStruct.__init__(self)
-        #self.length   = v_uint16(bigend=True)
+        if tcpdns:
+            self.length   = v_uint16(bigend=True)
         self.transid  = v_uint16(bigend=True)
         self.flags    = v_uint16(bigend=True)
         self.ques_cnt = v_uint16(bigend=True)

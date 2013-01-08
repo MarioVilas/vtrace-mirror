@@ -15,6 +15,15 @@ from vqt.main import idlethread, idlethreadsync
     #def __init__(self, 
 
 KEY_BACKSPACE = 0x1000003
+#KEY_SHIFT     = 0x1000020
+#KEY_CTRL      = 0x1000022
+
+#KMASK_CTRL  = 0x100
+#KMASK_SHIFT = 0x200
+
+QMOD_CTRL   = 0x10000000
+QMOD_SHIFT  = 0x02000000
+
 
 class VQMemoryCanvas(QtWebKit.QWebView, e_memcanvas.MemoryCanvas):
 
@@ -35,11 +44,27 @@ class VQMemoryCanvas(QtWebKit.QWebView, e_memcanvas.MemoryCanvas):
         self.page().mainFrame().addToJavaScriptWindowObject('vnav', self)
 
     def keyPressEvent(self, event):
+
         key = event.key()
         txt = str(event.text())
         #print 'KEY',hex(key),repr(txt)
 
-        handler = self._canv_hotkeys.get(txt)
+        mods = int(event.modifiers())
+
+        keytxt = ''
+        if key < 255:
+
+            keytxt = chr(key).lower()
+
+            if mods & QMOD_SHIFT:
+                keytxt = keytxt.upper()
+
+            if mods & QMOD_CTRL:
+                keytxt = 'ctrl+' + keytxt
+
+        #print 'KEYTXT: %s' % keytxt
+
+        handler = self._canv_hotkeys.get(keytxt)
         if handler == None:
             handler = self._canv_hotkeys.get(key)
 

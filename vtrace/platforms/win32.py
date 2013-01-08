@@ -1943,6 +1943,8 @@ class Win32SymbolParser:
             elif ktag == SymTagArrayType:
                 atype = self.symGetTypeType(ktype)
                 asize = self.symGetTypeLength(atype)
+                if asize == 0:
+                    continue # on 0 length array, skip it
                 kcount = ksize / asize
 
                 # Now, we setup our *child* to be the type
@@ -1970,7 +1972,8 @@ class Win32SymbolParser:
                 pass
 
             else:
-                print '%s:%s Unknown Type Tag: %d' % (name, kidname, ktag)
+                pass
+                #print '%s:%s Unknown Type Tag: %d' % (name, kidname, ktag)
 
             kids.append((kidname, kidoff, ksize, ktypename, kflags, kcount))
 

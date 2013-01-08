@@ -51,7 +51,9 @@ class ETHERII(vstruct.VStruct):
         self.srcmac     = v_bytes(size=6)
         self.etype      = v_uint16(bigend=True)
 
-    def vsParse(self, sbytes, offset=0):
+    def vsParse(self, sbytes, offset=0, fast=False):
+        if fast:
+            return vstruct.VStruct.vsParse(self, sbytes, offset=offset, fast=fast)
         # If we end up with a vlan tag, reparse
         ret = vstruct.VStruct.vsParse(self, sbytes, offset=offset)
         if self.etype == ETH_P_VLAN:
@@ -59,6 +61,12 @@ class ETHERII(vstruct.VStruct):
             self.vsInsertField('vlan', v_uint16(bigend=True), 'etype')
             ret = vstruct.VStruct.vsParse(self, sbytes, offset=offset)
         return ret
+
+class ETHERIIVLAN(ETHERII):
+    def __init__(self):
+        ETHERII.__init__(self)
+        self.vsInsertField('vtag', v_uint16(bigend=True), 'etype')
+        self.vsInsertField('vlan', v_uint16(bigend=True), 'etype')
 
 class IPv4(vstruct.VStruct):
     def __init__(self):

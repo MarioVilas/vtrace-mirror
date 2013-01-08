@@ -1,6 +1,7 @@
 
 import os
 import PE
+import vstruct
 import vivisect
 import vivisect.parsers as v_parsers
 from vivisect.const import *
@@ -108,13 +109,28 @@ def loadPeIntoWorkspace(vw, pe, filename=None):
     vw.addVaSet("Library Loads", (("Address", int),("Library", str)))
 
     # Tell vivisect about ntdll functions that don't exit...
-    vw.addNonExiter("ntdll.RtlExitUserThread")
-    vw.addNonExiter("kernel32.ExitProcess")
-    vw.addNonExiter("kernel32.ExitThread")
-    vw.addNonExiter("kernel32.FatalExit")
+    vw.addNoReturnApi("ntdll.RtlExitUserThread")
+    vw.addNoReturnApi("kernel32.ExitProcess")
+    vw.addNoReturnApi("kernel32.ExitThread")
+    vw.addNoReturnApi("kernel32.FatalExit")
+    vw.addNoReturnApi("msvcrt._CxxThrowException")
+
+    # SizeOfHeaders spoofable...
+    curr_offset = pe.IMAGE_DOS_HEADER.e_lfanew + len(pe.IMAGE_NT_HEADERS) 
+    
+    secsize = len(vstruct.getStructure("pe.IMAGE_SECTION_HEADER"))
+    
+    sec_offset = pe.IMAGE_DOS_HEADER.e_lfanew + 4 + len(pe.IMAGE_NT_HEADERS.FileHeader) +  pe.IMAGE_NT_HEADERS.FileHeader.SizeOfOptionalHeader 
+    
+    if sec_offset != curr_offset:
+        header_size = sec_offset + pe.IMAGE_NT_HEADERS.FileHeader.NumberOfSections * secsize
+    else:
+        header_size = pe.IMAGE_DOS_HEADER.e_lfanew + len(pe.IMAGE_NT_HEADERS) + pe.IMAGE_NT_HEADERS.FileHeader.NumberOfSections * secsize
 
     # Add the first page mapped in from the PE header.
-    header = pe.readAtOffset(0, pe.IMAGE_NT_HEADERS.OptionalHeader.SizeOfHeaders)
+    header = pe.readAtOffset(0, header_size)
+
+
     secalign = pe.IMAGE_NT_HEADERS.OptionalHeader.SectionAlignment
 
     subsys_majver = pe.IMAGE_NT_HEADERS.OptionalHeader.MajorSubsystemVersion
@@ -140,10 +156,23 @@ def loadPeIntoWorkspace(vw, pe, filename=None):
 
     vw.makeStructure(ifhdr_va + len(ifstruct), "pe.IMAGE_OPTIONAL_HEADER")
 
+
+    # get resource data directory
+    ddir = pe.getDataDirectory(PE.IMAGE_DIRECTORY_ENTRY_RESOURCE)
+            
     for sec in pe.sections:
         mapflags = 0
 
         chars = sec.Characteristics
+        if chars & PE.IMAGE_SCN_MEM_READ:
+            mapflags |= e_mem.MM_READ
+            # RP - BUG FIX read is equiv to EXEC if subsystem is not win7
+            # This check marks basically everything executable... Which isn't false. But lets be a little smarter..    
+            if subsys_majver < 6:
+                # if the rsrc section data dir is valid.. and we parsed it lets ass u me its not EXEC.. otherwise tag it and bag it
+                if not pe.ResourceRoot or sec.VirtualAddress != ddir.VirtualAddress:
+                    mapflags |= e_mem.MM_EXEC
+
         if chars & PE.IMAGE_SCN_MEM_READ:
             mapflags |= e_mem.MM_READ
         if chars & PE.IMAGE_SCN_MEM_WRITE:
@@ -173,10 +202,23 @@ def loadPeIntoWorkspace(vw, pe, filename=None):
         if subsys_majver < 6 and mapflags & e_mem.MM_READ:
             mapflags |= e_mem.MM_EXEC
 
+        if sec.VirtualSize == 0 or sec.SizeOfRawData == 0:
+            continue
+        
+        # if SizeOfRawData is greater than VirtualSize we'll end up using VS in our read..
+        if sec.SizeOfRawData < sec.VirtualSize:
+            if sec.SizeOfRawData > pe.filesize: 
+                continue
+    
+        plen = sec.VirtualSize - sec.SizeOfRawData          
+    
         try:
+            # According to http://code.google.com/p/corkami/wiki/PE#section_table if SizeOfRawData is larger than VirtualSize, VS is used..
+            readsize = sec.SizeOfRawData if sec.SizeOfRawData < sec.VirtualSize else sec.VirtualSize
+
             secoff = pe.rvaToOffset(secrva)
-            secbytes = pe.readAtOffset(secoff, secfsize)
-            secbytes += "\x00" * (secvsize - secfsize)
+            secbytes = pe.readAtOffset(secoff, readsize)
+            secbytes += "\x00" * plen
             vw.addMemoryMap(secbase, mapflags, fname, secbytes)
             vw.addSegment(secbase, len(secbytes), secname, fname)
         except Exception, e:
@@ -189,7 +231,8 @@ def loadPeIntoWorkspace(vw, pe, filename=None):
         vw.addRelocation(rva+baseaddr, vivisect.RTYPE_BASERELOC)
 
     for rva, lname, iname in pe.getImports():
-        vw.makeImport(rva+baseaddr, lname, iname)
+        if vw.probeMemory(rva+baseaddr, 4, e_mem.MM_READ):
+            vw.makeImport(rva+baseaddr, lname, iname)
 
     exports = pe.getExports()
     for rva, ord, name in exports:
@@ -220,11 +263,18 @@ def loadPeIntoWorkspace(vw, pe, filename=None):
         if va != 0:
             vw.makeName(va, "%s.SEHandlerTable" % fname)
             count = pe.IMAGE_LOAD_CONFIG.SEHandlerCount
-            # Just cheat and use the workspace with memory maps in it already
-            for h in vw.readMemoryFormat(va, "<%dP" % count):
-                sehva = baseaddr + h
-                vw.addEntryPoint(sehva)
-                #vw.hintFunction(sehva, meta={'SafeSEH':True})
+            # RP BUG FIX - sanity check the count
+            if count * 4 < pe.filesize and vw.isValidPointer(va):
+                # XXX - CHEAP HACK for some reason we have binaries still thorwing issues.. 
+                
+                try:
+                    # Just cheat and use the workspace with memory maps in it already
+                    for h in vw.readMemoryFormat(va, "<%dP" % count):
+                        sehva = baseaddr + h
+                        vw.addEntryPoint(sehva)
+                        #vw.hintFunction(sehva, meta={'SafeSEH':True})
+                except:
+                    vw.vprint("SEHandlerTable parse error")
 
     # Last but not least, see if we have symbol support and use it if we do
     if vt_win32.dbghelp:
@@ -252,6 +302,12 @@ def loadPeIntoWorkspace(vw, pe, filename=None):
         # Also, lets set the locals/args name hints if we found any
         vw.setFileMeta(fname, 'PELocalHints', s._sym_locals)
 
+    # if it has an EXCEPTION directory parse if it has the pdata
+    edir = pe.getDataDirectory(PE.IMAGE_DIRECTORY_ENTRY_EXCEPTION)
+    
+    if not edir.VirtualAddress:
+        return fname
+
     # Parse up the new amd64 .pdata section used by new
     # fangled exception unwinding.
     sec = pe.getSectionByName('.pdata')
@@ -260,6 +316,8 @@ def loadPeIntoWorkspace(vw, pe, filename=None):
         vamax = va + sec.VirtualSize
         while va < vamax:
             f = vw.makeStructure(va, 'pe.IMAGE_RUNTIME_FUNCTION_ENTRY')
+            if not vw.isValidPointer(baseaddr + f.UnwindInfoAddress):
+                break
             fva = f.BeginAddress + baseaddr
             b = vw.readMemoryFormat(baseaddr + f.UnwindInfoAddress, '<B')[0]
             ver = b & 0x7

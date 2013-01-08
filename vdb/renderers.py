@@ -117,6 +117,7 @@ class DerefRenderer(e_canvas.MemoryRenderer):
         #if sym != None:
             #pstr = repr(sym)
 
+        mcanv.addText(" %s: " % str(va - mcanv._canv_beginva).ljust(5))
         mcanv.addVaText(vastr, va=va)
         mcanv.addText(" %s: " % vareg)
         if isptr:

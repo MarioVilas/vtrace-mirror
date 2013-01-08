@@ -13,6 +13,7 @@ import ole32
 import msvcr71
 import ws2_32
 import wsock32
+import wininet
 
 #oleaut32
 #shlwapi

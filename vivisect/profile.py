@@ -53,9 +53,10 @@ def genProfile(vw, tofile=None):
         # Merge what we have with existing import emu stuff by precedence
         impfunc = vw.getImpEmuFunc("%s.%s" % (efname, ename))
 
-        if not isinstance(impfunc, v_emufunc.WrapperFunc):
+        if not isinstance(impfunc, v_emufunc.WrapperFunc) and impfunc != None:
 
             changes = False
+            print impfunc
 
             newargc = len(alist)
             final_args = [v_impmagic.Unknown for i in range(newargc)]

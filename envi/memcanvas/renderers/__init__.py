@@ -23,11 +23,11 @@ class ByteRend(e_canvas.MemoryRenderer):
         self.packfmt = self.fmtbase + (self.__class__.__fmt_char__ * cnt)
 
     def render(self, mcanv, va):
-        bytes = mcanv.mem.readMemory(va, 16)
+        bytes = mcanv.mem.readMemory(va, 16).ljust(16, '\x00')
         self.rendVa(mcanv, va)
         mcanv.addText("  ")
 
-        for val in mcanv.mem.readMemoryFormat(va, self.packfmt):
+        for val in struct.unpack(self.packfmt, bytes):
             bstr = self.dispfmt % val
             if mcanv.mem.isValidPointer(val):
                 mcanv.addVaText(bstr, val)

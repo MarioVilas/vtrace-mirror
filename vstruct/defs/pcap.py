@@ -35,7 +35,7 @@ def iterPcapFile(fd, reuse=False):
 
     h = PCAP_FILE_HEADER()
     b = fd.read(len(h))
-    h.vsParse(b)
+    h.vsParse(b, fast=True)
 
     linktype = h.linktype
 
@@ -59,7 +59,7 @@ def iterPcapFile(fd, reuse=False):
         if len(hdr) != pktsize:
             break
 
-        pkt.vsParse(hdr)
+        pkt.vsParse(hdr, fast=True)
 
         b = fd.read(pkt.caplen)
 
@@ -70,13 +70,16 @@ def iterPcapFile(fd, reuse=False):
             if len(b) < eIIsize:
                 continue
 
-            eII.vsParse(b, 0)
+            eII.vsParse(b, 0, fast=True)
 
             # No support for non-ip protocol yet...
             if eII.etype != vs_inet.ETH_P_IP:
                 continue
 
-            offset += len(eII)
+            offset += eIIsize
+
+            if eII.etype == vs_inet.ETH_P_VLAN:
+                offset +=  4
 
         elif linktype == PCAP_LINKTYPE_RAW:
             pass
@@ -85,7 +88,7 @@ def iterPcapFile(fd, reuse=False):
         if not reuse:
             ipv4 = vs_inet.IPv4()
 
-        ipv4.vsParse(b, offset)
+        ipv4.vsParse(b, offset, fast=True)
 
         # Make b *only* the IP datagram bytes...
         b = b[offset:offset+ipv4.totlen]
@@ -102,7 +105,7 @@ def iterPcapFile(fd, reuse=False):
             if not reuse:
                 tcp_hdr = vs_inet.TCP()
 
-            tcp_hdr.vsParse(b, offset)
+            tcp_hdr.vsParse(b, offset, fast=True)
             offset += len(tcp_hdr)
             pdata = b[offset:]
 
@@ -116,7 +119,7 @@ def iterPcapFile(fd, reuse=False):
             if not reuse:
                 udp_hdr = vs_inet.UDP()
 
-            udp_hdr.vsParse(b, offset)
+            udp_hdr.vsParse(b, offset, fast=True)
             offset += len(udp_hdr)
             pdata = b[offset:]
 

@@ -160,8 +160,8 @@ class TracerBase(vtrace.Notifier):
         """
         if self.getMode("NonBlocking"):
             e_threads.firethread(self._doWait)()
-        else:
-            self._doWait()
+            return
+        self._doWait()
 
     def _doWait(self):
         doit = True

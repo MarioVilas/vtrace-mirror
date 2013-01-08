@@ -43,5 +43,28 @@ class GraphRenderer:
         Render an edge in the graph by drawing lines between all the listed
         points (as (x,y) tuples...)
         '''
-        raise Exception('%s must implement renderNode!' % self.__class__.__name__)
+        raise Exception('%s must implement renderEdge!' % self.__class__.__name__)
+
+    def renderGraph(self):
+
+        graph = self._vg_graph
+
+        width, height = graph.getMeta('size',(800,600))
+        self.beginRender(width, height)
+
+        # Render each of the nodes (except ghost nodes...)
+        for nid,ninfo in graph.getNodes():
+            if ninfo.get('ghost'):
+                continue
+            xpos, ypos = ninfo.get('position')
+            self.renderNode(nid, ninfo, xpos, ypos)
+
+        # Render the edges
+        for eid, fromid, toid, einfo in graph.getEdges():
+            points = einfo.get('edge_points')
+            if points != None:
+                self.renderEdge(eid, einfo, points)
+
+        self.endRender()
+
 

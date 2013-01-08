@@ -107,3 +107,39 @@ v.vsParse('\x01BA')
 test(v, '014241')
 print v.tree()
 
+# ==============================================================
+v = vstruct.VStruct()
+v.float4 = v_float()
+v.float8 = v_double()
+
+v.float4 = 99.3
+v.float8 = -400.2
+test(v, '9a99c64233333333330379c0')
+print v.tree()
+
+# ==============================================================
+v = vstruct.VStruct()
+v.x = v_uint8()
+v.y = v_str(size=4)
+v.z = v_uint32()
+
+v.vsParse('BAAAAABCD', fast=True)
+
+assert( v.x == 0x42 )
+assert( v.y == 'AAAA' )
+assert( v.z == 0x44434241 )
+print('Fast Parse: PASS!')
+
+# ==============================================================
+v = vstruct.VStruct()
+v.x = v_uint8()
+v.y = v_str(size=4)
+v.z = v_uint32(bigend=True)
+
+v.vsParse('BAAAAABCD', fast=True)
+
+assert( v.x == 0x42 )
+assert( v.y == 'AAAA' )
+assert( v.z == 0x41424344 )
+print('Fast Parse (bigend): PASS!')
+
