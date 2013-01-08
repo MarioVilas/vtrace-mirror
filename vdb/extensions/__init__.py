@@ -1,6 +1,9 @@
 import os
 import imp
+import sys
 import traceback
+
+import vdb.ext
 
 __all__ = ['loadExtensions','windows','i386','darwin','amd64','gdbstub','arm','android']
 
@@ -38,8 +41,11 @@ def loadExtensions(vdb, trace):
                 if not fname.endswith('.py'):
                     continue
 
+                modname = os.path.splitext( fname )[0]
+
                 # Build code objects from the module files
-                mod = imp.new_module('vdb_ext')
+                mod = imp.new_module('vdb.ext.%s' % modname)
+                sys.modules['vdb.ext.%s' % modname] = mod
                 filepath = os.path.join(dirname, fname)
                 filebytes = file( filepath, 'r' ).read()
                 mod.__file__ = filepath

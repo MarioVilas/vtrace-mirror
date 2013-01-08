@@ -5,6 +5,7 @@ from PyQt4 import QtCore, QtGui
 
 import vdb
 import vtrace
+import vtrace.breakpoints as vt_breaks
 
 #import vqt.cli as vq_cli
 import vqt.main as vq_main
@@ -15,9 +16,43 @@ import vtrace.qt as vtrace_qt
 
 import envi.qt as envi_qt
 import envi.qt.memory as e_mem_qt
+import envi.qt.memcanvas as e_qt_canvas
 
+from vqt.common import *
+
+class VdbMemoryCanvas(e_qt_canvas.VQMemoryCanvas):
+
+    # We get self.db set by our memory window smash...
+
+    def contextMenuEvent(self, event):
+
+        va = self._canv_curva
+        if va == None:
+            return
+
+        menu = QtGui.QMenu()
+
+        menu.addAction('Run To Here', ACT( self._menuRunToHere, va))
+        menu.addAction('Add Breakpoint', ACT( self._menuAddBreak, va))
+
+        menu.exec_(event.globalPos())
+
+    def _menuAddBreak(self, va):
+        t = self.db.getTrace()
+        bpid = t.addBreakByAddr(va)
+        bp = t.getBreakpoint(bpid)
+        self.db._print_bp(bp)
+
+    def _menuRunToHere(self, va):
+        t = self.db.getTrace()
+        bp = vt_breaks.StopAndRemoveBreak(va)
+        t.addBreakpoint(bp)
+        t.setMode('RunForever', True)
+        t.run()
 
 class VdbMemoryWindow(e_mem_qt.VQMemoryWindow, vtrace.Notifier):
+
+    __canvas_class__ = VdbMemoryCanvas
 
     def __init__(self, db, parent=None):
         t = vdb.VdbTrace(db)
@@ -27,6 +62,8 @@ class VdbMemoryWindow(e_mem_qt.VQMemoryWindow, vtrace.Notifier):
         self._db.registerNotifier(vtrace.NOTIFY_ALL, self)
         for rname in db.canvas.getRendererNames():
             self.mem_canvas.addRenderer(rname, db.canvas.getRenderer(rname))
+
+        self.mem_canvas.db = db
 
         self.loadRendSelect()
 

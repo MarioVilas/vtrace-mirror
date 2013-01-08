@@ -130,7 +130,7 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
         self.runagain = False           # A one-time thing for the cli
         self.windows_jit_event = None
 
-        # We hangn on to an opcode renderer instance
+        # We hang on to an opcode renderer instance
         self.opcoderend = None
 
         # If a VdbGui instance is present it will set this.
@@ -392,8 +392,10 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
             self.vprint("\nKnown Structures (from %s):" % line)
             plist = self.trace.getStructNames(namespace=line)
 
+        plist.sort()
         for n in plist:
             self.vprint(str(n))
+
         self.vprint("\n")
 
     def do_dis(self, line):
@@ -798,15 +800,17 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
         -C <count> - Step <count> instructions
         -R         - Step to return from this function
         -V         - Show operand values during single step (verbose!)
+        -U         - Remainder of args is "step until" expression (stop on True)
 
         """
         t = self.trace
         argv = e_cli.splitargs(line)
         try:
-            opts,args = getopt(argv, "A:BC:RV")
+            opts,args = getopt(argv, "A:BC:RVU")
         except Exception, e:
             return self.do_help("stepi")
 
+        until = None
         count = None
         taddr = None
         toret = False
@@ -814,6 +818,7 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
         showop = False
 
         for opt, optarg in opts:
+
             if opt == '-A':
                 taddr = t.parseExpression(optarg)
 
@@ -829,8 +834,12 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
             elif opt == '-V':
                 showop = True
 
+            elif opt == '-U':
+                until = ' '.join(args)
+
         if ( count == None 
              and taddr == None
+             and until == None
              and toret == False 
              and tobrn == False):
             count = 1
@@ -879,6 +888,9 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
                 tid = t.getCurrentThread()
 
                 t.stepi()
+
+                if until and t.parseExpression(until):
+                    break
 
                 # If we get an event from a different thread, get out!
                 if t.getCurrentThread() != tid:
@@ -976,8 +988,14 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
         if self.gui != None:
             self.vprint('Gui already running!')
             return
-        import vdb.gui
-        vdb.gui.main(self)
+
+        import vqt.main as vq_main
+        import vdb.qt.windows as v_q_windows
+        import vqt.colors as vq_colors
+
+        vq_main.startup()
+        qgui = v_q_windows.VdbWindow(self)
+        qgui.show()
 
     def do_waitlib(self, line):
         '''
@@ -1489,8 +1507,11 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
 
         self.vprint(" [ Breakpoints ]")
         for bp in self.trace.getBreakpoints():
-            cmdstr = self.bpcmds.get(bp.id, '')
-            self.vprint("%s enabled: %s fast: %s %s" % (bp, bp.isEnabled(), bp.fastbreak, cmdstr))
+            self._print_bp(bp)
+
+    def _print_bp(self, bp):
+        cmdstr = self.bpcmds.get(bp.id, '')
+        self.vprint("%s enabled: %s fast: %s %s" % (bp, bp.isEnabled(), bp.fastbreak, cmdstr))
 
     def do_fds(self, args):
         """

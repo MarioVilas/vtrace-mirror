@@ -107,7 +107,7 @@ class Amd64Disasm(e_i386.i386Disasm):
 
     # NOTE: Technically, the REX must be the *last* prefix specified
 
-    def _dis_calc_tsize(self, opertype, prefixes):
+    def _dis_calc_tsize(self, opertype, prefixes, operflags):
         """
         Use the oper type and prefixes to decide on the tsize for
         the operand.
@@ -118,6 +118,9 @@ class Amd64Disasm(e_i386.i386Disasm):
         sizelist = opcode86.OPERSIZE.get(opertype, None)
         if sizelist == None:
             raise "OPERSIZE FAIL"
+
+        if operflags & opcode86.OP_64AUTO:
+            mode = MODE_64
 
         # NOTE: REX takes precedence over 66
         # (see section 2.2.1.2 in Intel 2a)
@@ -157,40 +160,41 @@ class Amd64Disasm(e_i386.i386Disasm):
             o.reg += REX_BUMP
         return o
 
-    def ameth_g(self, bytes, offset, tsize, prefixes):
-        osize, oper = e_i386.i386Disasm.ameth_g(self, bytes, offset, tsize, prefixes)
+    def ameth_g(self, bytes, offset, tsize, prefixes, operflags):
+        osize, oper = e_i386.i386Disasm.ameth_g(self, bytes, offset, tsize, prefixes, operflags)
         if oper.tsize == 4 and oper.reg != REG_RIP:
             oper.reg += RMETA_LOW32
         if prefixes & PREFIX_REX_R:
             oper.reg += REX_BUMP
         return osize, oper
 
-    def ameth_c(self, bytes, offset, tsize, prefixes):
-        osize, oper = e_i386.i386Disasm.ameth_c(self, bytes, offset, tsize, prefixes)
+    def ameth_c(self, bytes, offset, tsize, prefixes, operflags):
+        osize, oper = e_i386.i386Disasm.ameth_c(self, bytes, offset, tsize, prefixes, operflags)
         if prefixes & PREFIX_REX_R:
             oper.reg += REX_BUMP
         return osize,oper
 
-    def ameth_d(self, bytes, offset, tsize, prefixes):
-        osize, oper = e_i386.i386Disasm.ameth_d(self, bytes, offset, tsize, prefixes)
+    def ameth_d(self, bytes, offset, tsize, prefixes, operflags):
+        osize, oper = e_i386.i386Disasm.ameth_d(self, bytes, offset, tsize, prefixes, operflags)
         if prefixes & PREFIX_REX_R:
             oper.reg += REX_BUMP
         return osize,oper
 
-    def ameth_v(self, bytes, offset, tsize, prefixes):
-        osize, oper = e_i386.i386Disasm.ameth_v(self, bytes, offset, tsize, prefixes)
+    def ameth_v(self, bytes, offset, tsize, prefixes, operflags):
+        osize, oper = e_i386.i386Disasm.ameth_v(self, bytes, offset, tsize, prefixes, operflags)
         if prefixes & PREFIX_REX_R:
             oper.reg += REX_BUMP
         return osize,oper
 
     # NOTE: The ones below are the only ones to which REX.X or REX.B can apply (besides ameth_0)
-    def _dis_rex_exmodrm(self, oper, prefixes):
+    def _dis_rex_exmodrm(self, oper, prefixes, operflags):
         # REMEMBER: all extended mod RM reg fields come from the r/m part.  If it
         #           were actually just the reg part, it'd be in one of the above
         #           addressing modes...
         if getattr(oper, "index", None) != None:
             if oper.tsize == 4:
                 oper.index += RMETA_LOW32
+
             if prefixes & PREFIX_REX_X:
                 oper.index += REX_BUMP
             # Adjust the size if needed
@@ -204,26 +208,17 @@ class Amd64Disasm(e_i386.i386Disasm):
             if prefixes & PREFIX_REX_B:
                 oper.reg += REX_BUMP
 
-    def ameth_e(self, bytes, offset, tsize, prefixes):
-        osize, oper = e_i386.i386Disasm.ameth_e(self, bytes, offset, tsize, prefixes)
-        self._dis_rex_exmodrm(oper, prefixes)
+    def ameth_e(self, bytes, offset, tsize, prefixes, operflags):
+        osize, oper = e_i386.i386Disasm.ameth_e(self, bytes, offset, tsize, prefixes, operflags)
+        self._dis_rex_exmodrm(oper, prefixes, operflags)
         return osize, oper
 
-    def ameth_w(self, bytes, offset, tsize, prefixes):
-        osize, oper = e_i386.i386Disasm.ameth_w(self, bytes, offset, tsize, prefixes)
-        self._dis_rex_exmodrm(oper, prefixes)
+    def ameth_w(self, bytes, offset, tsize, prefixes, operflags):
+        osize, oper = e_i386.i386Disasm.ameth_w(self, bytes, offset, tsize, prefixes, operflags)
+        self._dis_rex_exmodrm(oper, prefixes, operflags)
         return osize,oper
 
-
-
 if __name__ == '__main__':
-    import sys
-    d = Amd64Disasm()
-    b = file(sys.argv[1], 'rb').read()
-    offset = 0
-    va = 0x41414141
-    while offset < len(b):
-        op = d.disasm(b, offset, va+offset)
-        print '0x%.8x %s %s' % (va+offset, b[offset:offset+len(op)].encode('hex').ljust(16), repr(op))
-        offset += len(op)
+    import envi.archs
+    envi.archs.dismain( Amd64Disasm() )
 

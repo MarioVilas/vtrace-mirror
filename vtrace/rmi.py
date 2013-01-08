@@ -2,9 +2,9 @@
 Cobra integration for remote debugging
 """
 # Copyright (C) 2007 Invisigoth - See LICENSE file for details
-import md5
 import os
 import socket
+import hashlib
 
 import vtrace
 import cobra
@@ -27,8 +27,7 @@ class TraceProxyFactory:
     def getTrace(self):
         trace = vtrace.getTrace()
         host,port = cobra.getLocalInfo()
-        unique = md5.md5(os.urandom(20)).hexdigest()
-        vtrace.cobra_daemon.shareObject(trace, unique)
+        unique = vtrace.cobra_daemon.shareObject(trace)
         trace.proxy = cobra.CobraProxy("cobra://%s:%d/%s" % (host,port,unique))
         return unique
 
@@ -74,8 +73,7 @@ def getCallbackProxy(trace, notifier):
     host, nothing = trace._cobra_getsock().getSockName()
     unique = callback_daemon.getSharedName(notifier)
     if unique == None:
-        unique = md5.md5(os.urandom(20)).hexdigest()
-        callback_daemon.shareObject(notifier, unique)
+        unique = callback_daemon.shareObject(notifier)
     return cobra.CobraProxy("cobra://%s:%d/%s" % (host, port, unique))
 
 def getCallbackPort():

@@ -747,7 +747,7 @@ class i386Disasm:
         return (size, scale, index, base, imm)
 
 
-    def _dis_calc_tsize(self, opertype, prefixes):
+    def _dis_calc_tsize(self, opertype, prefixes, operflags):
         """
         Use the oper type and prefixes to decide on the tsize for
         the operand.
@@ -858,7 +858,7 @@ class i386Disasm:
 
             #print "ADDRTYPE: %.8x OPERTYPE: %.8x" % (addrmeth, opertype)
 
-            tsize = self._dis_calc_tsize(opertype, prefixes)
+            tsize = self._dis_calc_tsize(opertype, prefixes, operflags)
 
             #print hex(opertype),hex(addrmeth)
 
@@ -878,7 +878,7 @@ class i386Disasm:
                 # NOTE: Depending on your addrmethod you may get beginning of operands, or offset
                 try:
                     if addrmeth == opcode86.ADDRMETH_I or addrmeth == opcode86.ADDRMETH_J:
-                        osize, oper = ameth(bytes, offset+operoffset, tsize, prefixes)
+                        osize, oper = ameth(bytes, offset+operoffset, tsize, prefixes, operflags)
 
                         # If we are a sign extended immediate and not the same as the other operand,
                         # do the sign extension during disassembly so nothing else has to worry about it..
@@ -888,7 +888,7 @@ class i386Disasm:
                             oper.tsize = otsize
 
                     else:
-                        osize, oper = ameth(bytes, offset, tsize, prefixes)
+                        osize, oper = ameth(bytes, offset, tsize, prefixes, operflags)
 
                 except struct.error, e:
                     # Catch struct unpack errors due to insufficient data length
@@ -898,6 +898,7 @@ class i386Disasm:
                 # This is a filty hack for now...
                 oper._dis_regctx = self._dis_regctx
                 operands.append(oper)
+
             operoffset += osize
 
         # Pull in the envi generic instruction flags
@@ -924,97 +925,86 @@ class i386Disasm:
             return i386ImmOper(operval, tsize)
         raise Exception("Unknown ameth_0! operflags: 0x%.8x" % operflags)
 
-    def ameth_a(self, bytes, offset, tsize, prefixes):
+    def ameth_a(self, bytes, offset, tsize, prefixes, operflags):
         imm = e_bits.parsebytes(bytes, offset, tsize)
         seg = e_bits.parsebytes(bytes, offset+tsize, 2)
         # THIS BEING GHETTORIGGED ONLY EFFECTS callf jmpf
         #print "FIXME: envi.intel.ameth_a skipping seg prefix %d" % seg
         return (tsize+2, i386ImmOper(imm, tsize))
 
-    def ameth_e(self, bytes, offset, tsize, prefixes):
+    def ameth_e(self, bytes, offset, tsize, prefixes, operflags):
         return self.extended_parse_modrm(bytes, offset, tsize)
 
-    def ameth_n(self, bytes, offset, tsize, prefixes):
+    def ameth_n(self, bytes, offset, tsize, prefixes, operflags):
         mod,reg,rm = self.parse_modrm(ord(bytes[offset]))
         return (1, i386RegOper(rm + self.ROFFSETMMX, tsize))
 
-    def ameth_q(self, bytes, offset, tsize, prefixes):
+    def ameth_q(self, bytes, offset, tsize, prefixes, operflags):
         mod,reg,rm = self.parse_modrm(ord(bytes[offset]))
         if mod == 3:
             return (1, i386RegOper(rm + self.ROFFSETMMX, tsize))
         return self.extended_parse_modrm(bytes, offset, tsize)
 
-    def ameth_w(self, bytes, offset, tsize, prefixes):
+    def ameth_w(self, bytes, offset, tsize, prefixes, operflags):
         mod,reg,rm = self.parse_modrm(ord(bytes[offset]))
         if mod == 3:
             return (1, i386RegOper(rm + self.ROFFSETSIMD, tsize))
         return self.extended_parse_modrm(bytes, offset, tsize)
 
-    def ameth_i(self, bytes, offset, tsize, prefixes):
+    def ameth_i(self, bytes, offset, tsize, prefixes, operflags):
         # FIXME sign extend here if opflags has OP_SIGNED
         imm = e_bits.parsebytes(bytes, offset, tsize)
         return (tsize, i386ImmOper(imm, tsize))
 
-    def ameth_j(self, bytes, offset, tsize, prefixes):
+    def ameth_j(self, bytes, offset, tsize, prefixes, operflags):
         imm = e_bits.parsebytes(bytes, offset, tsize, sign=True)
         return (tsize, i386PcRelOper(imm, tsize))
 
-    def ameth_o(self, bytes, offset, tsize, prefixes):
+    def ameth_o(self, bytes, offset, tsize, prefixes, operflags):
         # NOTE: displacement *stays* 32 bit even with REX
         # (but 16 bit should probably be supported)
         imm = e_bits.parsebytes(bytes, offset, 4, sign=False)
         return (4, i386ImmMemOper(imm, tsize))
 
-    def ameth_g(self, bytes, offset, tsize, prefixes):
+    def ameth_g(self, bytes, offset, tsize, prefixes, operflags):
         mod,reg,rm = self.parse_modrm(ord(bytes[offset]))
         if tsize == 1: reg = self.byteRegOffset(reg)
         elif tsize == 2: reg += RMETA_LOW16
         return (0, i386RegOper(reg, tsize))
 
-    def ameth_c(self, bytes, offset, tsize, prefixes):
+    def ameth_c(self, bytes, offset, tsize, prefixes, operflags):
         mod,reg,rm = self.parse_modrm(ord(bytes[offset]))
         return (0, i386RegOper(reg+self.ROFFSETCTRL, tsize))
 
-    def ameth_d(self, bytes, offset, tsize, prefixes):
+    def ameth_d(self, bytes, offset, tsize, prefixes, operflags):
         mod,reg,rm = self.parse_modrm(ord(bytes[offset]))
         return (0, i386RegOper(reg+self.ROFFSETDEBUG, tsize))
 
-    def ameth_p(self, bytes, offset, tsize, prefixes):
+    def ameth_p(self, bytes, offset, tsize, prefixes, operflags):
         mod,reg,rm = self.parse_modrm(ord(bytes[offset]))
         return (0, i386RegOper(reg+self.ROFFSETMMX, tsize))
 
-    def ameth_s(self, bytes, offset, tsize, prefixes):
+    def ameth_s(self, bytes, offset, tsize, prefixes, operflags):
         mod,reg,rm = self.parse_modrm(ord(bytes[offset]))
         return (0, i386RegOper(reg+self.ROFFSETSEG, tsize))
 
-    def ameth_u(self, bytes, offset, tsize, prefixes):
+    def ameth_u(self, bytes, offset, tsize, prefixes, operflags):
         mod,reg,rm = self.parse_modrm(ord(bytes[offset]))
         return (0, i386RegOper(reg+self.ROFFSETTEST, tsize))
 
-    def ameth_v(self, bytes, offset, tsize, prefixes):
+    def ameth_v(self, bytes, offset, tsize, prefixes, operflags):
         mod,reg,rm = self.parse_modrm(ord(bytes[offset]))
         return (0, i386RegOper(reg+self.ROFFSETSIMD, tsize))
 
-    def ameth_x(self, bytes, offset, tsize, prefixes):
+    def ameth_x(self, bytes, offset, tsize, prefixes, operflags):
         #FIXME this needs the DS over-ride, but is only for outsb which we don't support
         return (0, i386RegMemOper(REG_ESI, tsize))
 
-    def ameth_y(self, bytes, offset, tsize, prefixes):
+    def ameth_y(self, bytes, offset, tsize, prefixes, operflags):
         #FIXME this needs the ES over-ride, but is only for insb which we don't support
         return (0, i386RegMemOper(REG_ESI, tsize))
 
 
 if __name__ == '__main__':
-
-    # A little helper to make testing easier
-
-    import sys
-    d = i386Disasm()
-    b = file(sys.argv[1], 'rb').read()
-    offset = 0
-    va = 0x41414141
-    while offset < len(b):
-        op = d.disasm(b, offset, va+offset)
-        print '0x%.8x %s %s' % (va+offset, b[offset:offset+len(op)].encode('hex').ljust(16), repr(op))
-        offset += len(op)
-
+    import envi.archs
+    envi.archs.dismain( i386Disasm() )

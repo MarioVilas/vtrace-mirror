@@ -88,7 +88,7 @@ class StalkerBreak(vtrace.Breakpoint):
 
         # Get out of the way
         self.enabled = False
-        self.deactivate(trace)
+        trace._clearBreakpoint(self)
 
         breaks = trace.getMeta('StalkerBreaks')
         h = trace.getMeta('StalkerHits')
@@ -140,7 +140,7 @@ class StalkerBlockBreak(vtrace.Breakpoint):
         h = trace.getMeta('StalkerHits')
         h.append(self.address)
         self.enabled = False
-        self.deactivate(trace)
+        trace._clearBreakpoint(self)
         trace.runAgain()
 
 class StalkerDynBreak(vtrace.Breakpoint):
@@ -165,7 +165,8 @@ class StalkerDynBreak(vtrace.Breakpoint):
 
         trace.runAgain()
 
-        self.deactivate(trace)
+        trace._clearBreakpoint(self)
+
         op = trace.parseOpcode(self.address)
         # Where is the call going?
         dva = op.getOperValue(0, emu=trace)
@@ -185,7 +186,7 @@ class StalkerDynBreak(vtrace.Breakpoint):
             self.lastcnt = 0
             self.enabled = False
         else:
-            self.activate(trace)
+            trace._activBreakpoint(self)
 
 def initStalker(trace):
     if trace.getMeta('StalkerBreaks') == None:

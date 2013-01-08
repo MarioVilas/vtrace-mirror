@@ -373,7 +373,7 @@ def showaslr(vdb, base, libname):
     try:
         p = PE.peFromMemoryObject(t, base)
     except Exception, e:
-        vdb.vprint('Error: %s (0x%.8x) %s' % (name, base, e))
+        vdb.vprint('Error: %s (0x%.8x) %s' % (libname, base, e))
         return
     enabled = False
     c = p.IMAGE_NT_HEADERS.OptionalHeader.DllCharacteristics

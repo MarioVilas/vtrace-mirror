@@ -271,7 +271,10 @@ class Trace(e_mem.IMemory, e_reg.RegisterContext, e_resolv.SymbolResolver, objec
         Additionally, the argument until may be used to cause execution to continue
         until the specified address is reached (internally uses and removes a breakpoint).
         """
+        self.requireAttached()
         self.requireNotRunning()
+        self.requireNotExited()
+
         if self.getMode("SingleStep", False):
             self.steploop()
 
@@ -614,7 +617,6 @@ class Trace(e_mem.IMemory, e_reg.RegisterContext, e_resolv.SymbolResolver, objec
         breakpoint.id = self.nextBpId()
         addr = breakpoint.resolveAddress(self)
 
-
         if addr == None:
             self.bpbyid[breakpoint.id] = breakpoint
             self.deferred.append(breakpoint)
@@ -628,7 +630,7 @@ class Trace(e_mem.IMemory, e_reg.RegisterContext, e_resolv.SymbolResolver, objec
 
         # fastbreaks are always active... (except when they're not...)
         if breakpoint.fastbreak:
-            self._activateBreak(breakpoint)
+            self._activBreakpoint(breakpoint)
 
         return breakpoint.id
             
@@ -639,7 +641,7 @@ class Trace(e_mem.IMemory, e_reg.RegisterContext, e_resolv.SymbolResolver, objec
         self.requireAttached()
         bp = self.bpbyid.pop(id, None)
         if bp != None:
-            bp.deactivate(self)
+            self._clearBreakpoint(bp)
             if bp in self.deferred:
                 self.deferred.remove(bp)
             else:
@@ -702,7 +704,7 @@ class Trace(e_mem.IMemory, e_reg.RegisterContext, e_resolv.SymbolResolver, objec
         if bp == None:
             raise Exception("Breakpoint %d Not Found" % bpid)
         if not enabled: # To catch the "disable" of fastbreaks...
-            bp.deactivate(self)
+            self._clearBreakpoint(bp)
         return bp.setEnabled(enabled)
 
     def setBreakpointCode(self, bpid, pystr):
@@ -1008,6 +1010,10 @@ class Trace(e_mem.IMemory, e_reg.RegisterContext, e_resolv.SymbolResolver, objec
         # FIXME this is depreicated and should die...
         else:
             vs = vstruct.getStructure(sname)
+
+        if vs == None:
+            return None
+
         bytes = self.readMemory(address, len(vs))
         vs.vsParse(bytes)
         return vs
@@ -1219,9 +1225,9 @@ class VtraceExpressionLocals(e_expr.MemoryExpressionLocals):
         })
 
     def __getitem__(self, name):
+
         # Check registers
-        if self.trace.isAttached():
-            self.trace.requireNotRunning()
+        if self.trace.isAttached() and not self.trace.isRunning():
 
             regs = self.trace.getRegisters()
             r = regs.get(name, None)
@@ -1233,6 +1239,7 @@ class VtraceExpressionLocals(e_expr.MemoryExpressionLocals):
         r = locs.get(name, None)
         if r != None:
             return r
+
         return e_expr.MemoryExpressionLocals.__getitem__(self, name)
 
     def go(self):
@@ -1290,11 +1297,18 @@ class VtraceExpressionLocals(e_expr.MemoryExpressionLocals):
         """
         return self.trace.getMeta(name)
 
-def getTrace(plat=None, **kwargs):
+def reqTargOpt(opts, targ, opt, valstr='<value>'):
+    val = opts.get( opt )
+    if val == None:
+        raise Exception('Target "%s" requires option: %s=%s' % (targ, opt, valstr))
+    return val
+
+def getTrace(target=None, **kwargs):
     """
     Return a tracer object appropriate for this platform.
     This is the function you will use to get a tracer object
     with the appropriate ancestry for your host.
+
     ex. mytrace = vtrace.getTrace()
 
 
@@ -1302,34 +1316,54 @@ def getTrace(plat=None, **kwargs):
           is complete.  This releases the tracer thread and allows
           garbage collection to function correctly.
 
-    Some specialized tracers may be constructed by specifying the "plat"
+    Some specialized tracers may be constructed by specifying the "target"
     name from one of the following list.  Additionally, each "specialized"
     tracer may require additional kwargs (which are listed).
 
-    android - Debug android apps through adb (adb must be in your path)
-        avd=<name> (None will let adb decide)
-
-    vmware32  - Debug a 32bit VMWare target.
-        host=<host> - Where is the gdb server listening? (default 127.0.0.1)
-        port=<port> - What port (default: 8832)
-        os=<osname> - On of "Windows", "Linux" (that's all we support now...)
-
-    vmware64  - Debug a 64bit VMWare target.
-        host=<host> - Where is the gdb server listening? (default 127.0.0.1)
-        port=<port> - What port (default: 8864)
-        os=<osname> - On of "Windows", "Linux" (that's all we support now...)
 
     Examples:
-        t = vtrace.getTrace() # A tracer for *this* os
+        # A tracer for *this* os
+        t = vtrace.getTrace()
 
-        t = vtrace.getTrace(plat='android') # The default ADB device
+        # A tracer for the gdbstub debugging a vmware 32bit hypervisor
+        t = vtrace.getTrace(target='vmware32', host='localhost', port=8832)
 
-        t = vtrace.getTrace(plat='vmware32', host='localhost', port=31337)
+    Targets:
+
+    Alpha Targets:
+
+    vmware32    -
+        host=<host>     ( probably 'localhost' )
+        port=<port>     ( probably 8832 )
+
     """
-    # FIXME make "remote" traces use plat="remote"!
-    if plat == 'android':
-        import vtrace.platforms.android as v_android
-        return v_android.getTrace(**kwargs)
+    if target == 'gdbserver':
+
+        host = reqTargOpt(kwargs, 'gdbserver', 'host', '<host>')
+        port = reqTargOpt(kwargs, 'gdbserver', 'port', '<port>')
+        arch = reqTargOpt(kwargs, 'gdbserver', 'arch', '<i386|amd64|arm>')
+        plat = reqTargOpt(kwargs, 'gdbserver', 'plat', '<windows|linux>')
+
+        if arch not in ('i386','amd64','arm'):
+            raise Exception('Invalid arch specified for "gdbserver" target: %s' % arch)
+
+        if plat not in ('windows','linux'):
+            raise Exception('Invalid plat specified for "gdbserver" target: %s' % plat)
+
+    if target == 'vmware32':
+
+        import vtrace.platforms.vmware as vt_vmware
+
+        host = reqTargOpt(kwargs, 'vmware32', 'host', '<host>')
+        port = int( reqTargOpt(kwargs, 'vmware32', 'port', '<port>') )
+
+        plat = 'windows'
+
+        #plat = reqTargOpt(kwargs, 'vmware32', 'plat', '<windows|linux>')
+        #if plat not in ('windows','linux'):
+            #raise Exception('Invalid plat specified for "vmware32" target: %s' % plat)
+
+        return vt_vmware.VMWare32WindowsTrace( host=host, port=port )
 
     if remote: #We have a remote server!
         return getRemoteTrace()

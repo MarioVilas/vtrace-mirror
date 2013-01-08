@@ -125,6 +125,9 @@ EXCEPTION_DATATYPE_MISALIGNMENT      = 0x80000002L
 EXCEPTION_BREAKPOINT                 = 0x80000003L    
 EXCEPTION_SINGLE_STEP                = 0x80000004L    
 DBG_EXCEPTION_NOT_HANDLED         = 0x80010001L    
+STATUS_BUFFER_OVERFLOW               = 0x80000005L
+STATUS_SUCCESS                       = 0x00000000L
+STATUS_INFO_LENGTH_MISMATCH          = 0xC0000004L
 EXCEPTION_ACCESS_VIOLATION           = 0xC0000005L    
 EXCEPTION_IN_PAGE_ERROR              = 0xC0000006L    
 EXCEPTION_INVALID_HANDLE             = 0xC0000008L    
@@ -912,6 +915,7 @@ if sys.platform == "win32":
     ntdll = windll.ntdll
     ntdll.NtQuerySystemInformation.argtypes = [DWORD, LPVOID, DWORD, LPVOID]
     ntdll.NtQueryObject.argtypes = [HANDLE, DWORD, c_void_p, DWORD, LPVOID]
+    ntdll.NtQueryObject.restype = c_ulong
     ntdll.NtQueryInformationProcess.argtypes = [HANDLE, DWORD, c_void_p, DWORD, LPVOID]
     ntdll.NtSystemDebugControl.restype = SIZE_T
 
@@ -1206,9 +1210,17 @@ class WindowsMixin:
         for x in range(hinfo.Count):
             if hinfo.Handles[x].ProcessID != self.pid:
                 continue
+
             hand = hinfo.Handles[x].HandleNumber
             myhand = self.dupHandle(hand)
             typestr = self.getHandleInfo(myhand, ObjectTypeInformation)
+
+            # prevent hanging when accessing special named pipes
+            if hinfo.Handles[x].GrantedAccess == 0x0012019f:
+                namestr = 'unknown, special named pipe with access mask 0x0012019f'
+                ret.append( (hand, htype, "%s: %s" % (typestr, namestr)) )
+                return ret
+
             wait = False
             if typestr == "File":
                 wait = True
@@ -1233,28 +1245,33 @@ class WindowsMixin:
         return hret.value
 
     def getHandleInfo(self, handle, itype=ObjectTypeInformation, wait=False):
+        returnLength = c_ulong(0)
+        objInfo = create_string_buffer(100)
 
-        retSiz = c_uint(0)
-        buf = create_string_buffer(100)
+        retval = ntdll.NtQueryObject(handle,
+                                        itype,
+                                        objInfo,
+                                        sizeof(objInfo),
+                                        addressof(returnLength)
+                                        )
 
-        # Some NtQueryObject calls will hang, lets figgure out which...
-        if wait:
-            if kernel32.WaitForSingleObject(handle, 150) == EXCEPTION_TIMEOUT:
-                return "_TIMEOUT_"
+        if (retval == STATUS_INFO_LENGTH_MISMATCH or
+            retval == STATUS_BUFFER_OVERFLOW):
 
-        x = ntdll.NtQueryObject(handle, itype,
-                buf, sizeof(buf), addressof(retSiz))
-        if x != 0:
-            return 'Error 0x%.8x' % (e_bits.unsigned(x, self.psize))
+            objInfo = create_string_buffer(returnLength.value)
+            retval = ntdll.NtQueryObject(handle,
+                                            itype,
+                                            objInfo,
+                                            sizeof(objInfo),
+                                            addressof(returnLength)
+                                            )
 
-        realbuf = create_string_buffer(retSiz.value)
+        if retval != 0:
+            return 'Error 0x%.8x' % (e_bits.unsigned(retval, self.psize))
 
-        if ntdll.NtQueryObject(handle, itype,
-                realbuf, sizeof(realbuf), addressof(retSiz)) == 0:
+        uString = cast(objInfo, PUNICODE_STRING).contents
 
-            uString = cast(realbuf, PUNICODE_STRING).contents
-            return uString.Buffer
-        return "Unknown"
+        return uString.Buffer
 
     def getHandles(self):
 
@@ -1322,7 +1339,7 @@ class WindowsMixin:
         # Do the crazy "can't supress exceptions from detach" dance.
         if ((not self.exited) and
             self.getCurrentBreakpoint() != None):
-            self._cleanupBreakpoints()
+            self._clearBreakpoints()
             self.platformContinue()
             self.platformSendBreak()
             self.platformWait()
@@ -1491,10 +1508,10 @@ class WindowsMixin:
            self.thandles[ThreadId] = event.u.CreateProcessInfo.Thread
 
            tobj = self.getStruct("ntdll.TEB", teb)
-           peb = tobj.ProcessEnvironmentBlock
-
-           self.setMeta("PEB", peb)
-           self.setVariable("peb", peb)
+           if tobj != None:
+               peb = tobj.ProcessEnvironmentBlock
+               self.setMeta("PEB", peb)
+               self.setVariable("peb", peb)
 
            eventdict["ImageName"] = ImageName
            eventdict["StartAddress"] = event.u.CreateProcessInfo.StartAddress
@@ -1659,8 +1676,10 @@ class WindowsMixin:
             raiseWin32Error()
 
     def platformParseBinary(self, filename, baseaddr, normname):
-        if dbghelp != None:
+
+        if dbghelp != None and os.path.isfile( filename ):
             self.parseWithDbgHelp(filename, baseaddr, normname)
+
         else:
             self.parseWithPE(filename, baseaddr, normname)
 

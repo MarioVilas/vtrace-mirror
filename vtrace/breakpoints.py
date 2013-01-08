@@ -21,10 +21,8 @@ class Breakpoint:
     bpcodeobj = {} # Cache compiled code objects on the class def
 
     def __init__(self, address, expression=None):
-        self.saved = None
         self.resonce = False
         self.address = address
-        self.breakinst = None
         self.enabled = True
         self.active = False
         self.fastbreak = False
@@ -63,40 +61,12 @@ class Breakpoint:
         added to the tracer object.  This should be used instead of activate
         for initialization time infoz to save on time per activate call...
         '''
-        self.breakinst = trace.archGetBreakInstr()
 
     def resolvedaddr(self, trace, addr):
         '''
         An initialization callback which will be executed when the
         actual address for this breakpoint has been resolved.
         '''
-        self.saved = trace.readMemory(addr, len(self.breakinst))
-
-    def activate(self, trace):
-        """
-        Actually store off and replace memory for this process.  This
-        is caried out by the trace object itself when it begins
-        running or stops.  You probably never need to call this
-        (see isEnabled() setEnabled() for boolean enable/disablle)
-        """
-        trace.requireAttached()
-        if not self.active:
-            if self.address != None:
-                trace.writeMemory(self.address, self.breakinst)
-                self.active = True
-        return self.active
-
-    def deactivate(self, trace):
-        """
-        Repair the process for continued execution.  this does NOT
-        make a breakpoint *inactive*, but removes it's "0xcc" from mem
-        (see isEnabled() setEnabled() for boolean enable/dissable)
-        """
-        trace.requireAttached()
-        if self.active:
-            self.active = False
-            trace.writeMemory(self.address, self.saved)
-        return self.active
 
     def resolveAddress(self, trace):
         """

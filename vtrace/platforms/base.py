@@ -56,6 +56,7 @@ class TracerBase(vtrace.Notifier):
         # Set if we are RunForever until a thread exit...
         self._join_thread = None
         self._break_after_bp = True     # Do we stop on the instruction *after* the bp?
+        self._bp_saved = {}             # Store the saved bytes from breakpoint mem writes
 
         self.vsbuilder = vs_builder.VStructBuilder()
 
@@ -125,9 +126,6 @@ class TracerBase(vtrace.Notifier):
 
     def _doRun(self):
         # Exists to avoid recursion from loop in doWait
-        self.requireAttached()
-        self.requireNotRunning()
-        self.requireNotExited()
 
         fastbreak = False
         if self.curbp:
@@ -139,11 +137,11 @@ class TracerBase(vtrace.Notifier):
             self.fireNotifiers(vtrace.NOTIFY_CONTINUE)
 
         # Step past a breakpoint if we are on one.
-        self._checkForBreak()
+        self._checkForBreakpoint()
 
         # Throw down and activate breakpoints...
         if not fastbreak:
-            self._throwdownBreaks()
+            self._activBreakpoints()
 
         self.running = True
         self.runagain = False
@@ -190,17 +188,29 @@ class TracerBase(vtrace.Notifier):
         self.setMeta('ExitCode', ecode)
         self.fireNotifiers(vtrace.NOTIFY_EXIT_THREAD)
 
-    def _activateBreak(self, bp):
-        # NOTE: This is special cased by hardware debuggers etc...
-        if bp.isEnabled():
-            try:
-                bp.activate(self)
-            except Exception, e:
-                traceback.print_exc()
-                print "WARNING: bpid %d activate failed (deferring): %s" % (bp.id, e)
-                self.deferred.append(bp)
+    def _activBreakpoint(self, bp):
 
-    def _throwdownBreaks(self):
+        if not bp.active:
+            self.archActivBreakpoint(bp.address)
+            bp.active = True
+
+    def _clearBreakpoint(self, bp):
+        if bp.active:
+            self.archClearBreakpoint(bp.address)
+            bp.active = False
+
+    def _clearBreakpoints(self):
+        '''
+        Cleanup all breakpoints (if the current bp is "fastbreak" this routine
+        will not be called...
+        '''
+        for bp in self.breakpoints.itervalues():
+            if bp.active:
+                # only effects active breaks
+                self._clearBreakpoint(bp)
+
+    def _activBreakpoints(self):
+
         """
         Run through the breakpoints and setup
         the ones that are enabled.
@@ -217,7 +227,8 @@ class TracerBase(vtrace.Notifier):
                 self.breakpoints[addr] = bp
 
         for bp in self.breakpoints.values():
-            self._activateBreak(bp)
+            if bp.isEnabled():
+                self._activBreakpoint(bp)
 
     def _syncRegs(self):
         """
@@ -242,7 +253,7 @@ class TracerBase(vtrace.Notifier):
             self.regcache[threadid] = ret
         return ret
 
-    def _checkForBreak(self):
+    def _checkForBreakpoint(self):
         """
         Check to see if we've landed on a breakpoint, and if so
         deactivate and step us past it.
@@ -255,12 +266,13 @@ class TracerBase(vtrace.Notifier):
         bp = self.curbp
         if bp != None and bp.isEnabled():
             if bp.active:
-                bp.deactivate(self)
+                self._clearBreakpoint(bp)
             orig = self.getMode("FastStep")
             self.setMode("FastStep", True)
             self.stepi()
             self.setMode("FastStep", orig)
-            bp.activate(self)
+            self._activBreakpoint(bp)
+
         self.curbp = None
 
     def shouldRunAgain(self):
@@ -369,14 +381,6 @@ class TracerBase(vtrace.Notifier):
                 print "WARNING: Notifier exception for",repr(notifier)
                 traceback.print_exc()
 
-    def _cleanupBreakpoints(self):
-        '''
-        Cleanup all breakpoints (if the current bp is "fastbreak" this routine
-        will not be called...
-        '''
-        for bp in self.breakpoints.itervalues():
-            bp.deactivate(self)
-
     def _fireStep(self):
         if self.getMode('FastStep', False):
             return
@@ -385,10 +389,7 @@ class TracerBase(vtrace.Notifier):
     def _fireBreakpoint(self, bp):
 
         self.curbp = bp
-
-        # A breakpoint should be inactive when fired
-        # (even fastbreaks, we'll need to deactivate for stepi anyway)
-        bp.deactivate(self)
+        self._clearBreakpoint(bp)
 
         try:
             bp.notify(vtrace.NOTIFY_BREAK, self)
@@ -449,8 +450,9 @@ class TracerBase(vtrace.Notifier):
 
         if bp:
             addr = bp.getAddress()
-            # Step back one instruction to account break
-            self.setProgramCounter(addr)
+            if self._break_after_bp:
+                # Step back one instruction to account break
+                self.setProgramCounter(addr)
             self._fireBreakpoint(bp)
             return True
 
@@ -495,7 +497,7 @@ class TracerBase(vtrace.Notifier):
         elif event == vtrace.NOTIFY_DETACH:
             for tid in self.sus_threads.keys():
                 self.resumeThread(tid)
-            self._cleanupBreakpoints()
+            self._clearBreakpoints()
 
         elif event == vtrace.NOTIFY_EXIT:
             self.setMode("RunForever", False)
@@ -506,7 +508,7 @@ class TracerBase(vtrace.Notifier):
             self.runagain = False
 
         else:
-            self._cleanupBreakpoints()
+            self._clearBreakpoints()
 
     def delLibraryBase(self, baseaddr):
 
@@ -543,22 +545,21 @@ class TracerBase(vtrace.Notifier):
         if self.getSymByName(normname) != None:
             normname = "%s_%.8x" % (normname,address)
 
+        self.getMeta("LibraryPaths")[address] = libname
+        self.getMeta("LibraryBases")[normname] = address
+        self.setMeta("LatestLibrary", libname)
+        self.setMeta("LatestLibraryNorm", normname)
+
         # Only actually do library work with a file or force
         if os.path.exists(libname) or always:
-
-            self.getMeta("LibraryPaths")[address] = libname
-            self.getMeta("LibraryBases")[normname] = address
-            self.setMeta("LatestLibrary", libname)
-            self.setMeta("LatestLibraryNorm", normname)
 
             width = self.arch.getPointerSize()
             sym = e_resolv.FileSymbol(normname, address, 0, width=width)
             sym.casesens = self.casesens
             self.addSymbol(sym)
 
-            self.libpaths[normname] = libname
-
-            self.fireNotifiers(vtrace.NOTIFY_LOAD_LIBRARY)
+        self.libpaths[normname] = libname
+        self.fireNotifiers(vtrace.NOTIFY_LOAD_LIBRARY)
 
     def normFileName(self, libname):
         basename = os.path.basename(libname)
@@ -720,6 +721,19 @@ class TracerBase(vtrace.Notifier):
         return None
         """
         pass
+
+    def archActivBreakpoint(self, addr):
+        '''
+        Default implementation simply uses archGetBreakInstr() and writes it
+        to memory ( and saves off the old bytes ).
+        '''
+        b = self.archGetBreakInstr()
+        self._bp_saved[ addr ] = self.readMemory( addr, len(b) )
+        self.writeMemory( addr, b )
+
+    def archClearBreakpoint(self, addr):
+        b = self._bp_saved.pop( addr )
+        self.writeMemory( addr, b )
 
     def archGetRegCtx(self):
         """

@@ -16,6 +16,5 @@ class BasicTest(v_testmods.VtracePythonTest):
 if __name__ == '__main__':
 
     import sys
-    #time.sleep(1)
     sys.exit(30)
 
