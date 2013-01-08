@@ -105,6 +105,13 @@ class EnviCli(Cmd):
         self.extcmds["do_%s" % func.__name__] = CliExtMeth(self, func)
 
     def vprint(self, msg, addnl=True):
+        '''
+        Print output to the CLI's output handler.  This allows routines to
+        print to the terminal or the GUI depending on which mode we're in.
+
+        Example:
+            vprint('hi mom!')
+        '''
         if addnl:
             msg = msg+"\n"
         self.canvas.write(msg)

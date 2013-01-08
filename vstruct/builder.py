@@ -34,6 +34,7 @@ class VStructBuilder:
 
     def __init__(self, defs=(), enums=()):
         self._vs_defs = {}
+        self._vs_ctors = {}
         self._vs_enums = {}
         self._vs_namespaces = {}
         for vsdef in defs:
@@ -46,11 +47,25 @@ class VStructBuilder:
         if ns != None:
             return ns
 
+        # Check if we have an added constructor
+        ctor = self._vs_ctors.get(name)
+        if ctor:
+            return ctor
+
         vsdef = self._vs_defs.get(name)
         if vsdef != None:
             return VStructConstructor(self, name)
 
         raise AttributeError, name
+
+    def getVStructCtorNames(self):
+        return self._vs_ctors.keys()
+
+    def addVStructCtor(self, sname, ctor):
+        self._vs_ctors[ sname ] = ctor
+
+    def delVStructCtor(self, sname):
+        return self._vs_ctors.pop( sname , None)
 
     def addVStructEnumeration(self, enum):
         self._vs_enums[enum[0]] = enum
@@ -69,7 +84,7 @@ class VStructBuilder:
 
     def getVStructNames(self, namespace=None):
         if namespace == None:
-            return self._vs_defs.keys()
+            return self._vs_defs.keys() + self._vs_ctors.keys()
         nsmod = self._vs_namespaces.get(namespace)
         ret = []
         for name in dir(nsmod):
@@ -120,6 +135,10 @@ class VStructBuilder:
                 return cls()
 
             return ns.buildVStruct(parts[1])
+
+        ctor = self._vs_ctors.get(vsname)
+        if ctor != None:
+            return ctor()
 
         vsdef = self._vs_defs.get(vsname)
         if vsdef == None:
@@ -257,7 +276,9 @@ if __name__ == '__main__':
         keys = vsver.getVersionKeys()
         keys.sort()
         for k in keys:
-            val = vsver.getVersionValue(k).encode('ascii','ignore')
+            val = vsver.getVersionValue(k)
+            if type(val) == unicode:
+                val = val.encode('ascii','ignore')
             print '# %s: %s' % (k,val)
     print builder.genVStructPyCode()
 

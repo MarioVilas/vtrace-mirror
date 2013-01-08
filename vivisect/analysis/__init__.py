@@ -19,11 +19,19 @@ def addAnalysisModules(vw):
         vw.impmod = vw.loadModule('vivisect.impemu.windows') # FIXME this shouldn't be here!
 
         if arch == 'i386':
+
+            #import vivisect.impapi.windows.i386 as api_windows_i386
+            #vw._loadImportApi( api_windows_i386.api )
+
             viv_analysis_i386.addEntrySigs(vw)
             vw.addAnalysisModule("vivisect.analysis.i386.importcalls")
             vw.addStructureModule('ntdll', 'vstruct.defs.windows.win_5_1_i386.ntdll')
 
         elif arch == 'amd64':
+
+            #import vivisect.impapi.windows.amd64 as api_windows_amd64
+            #vw._loadImportApi( api_windows_amd64.api )
+
             vw.addStructureModule('ntdll', 'vstruct.defs.windows.win_6_1_amd64.ntdll')
 
         vw.addConstModule('vstruct.constants.ntstatus')
@@ -43,6 +51,7 @@ def addAnalysisModules(vw):
         # Snap in an architecture specific emulation pass
         if arch == 'i386':
             vw.addFuncAnalysisModule("vivisect.analysis.i386.calling")
+
         elif arch == 'amd64':
             vw.addFuncAnalysisModule("vivisect.analysis.amd64.emulation")
 

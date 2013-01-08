@@ -125,6 +125,9 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
         self.waitlib = None
         self.bpcmds = {}
 
+        self.server = None
+
+        self.runagain = False           # A one-time thing for the cli
         self.windows_jit_event = None
 
         # We hangn on to an opcode renderer instance
@@ -335,6 +338,9 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
 
             else:
                 self.vprint("Thread: %d NOTIFY_BREAK" % tid)
+                if self.runagain: # One-time run-again behavior (for cli option)
+                    trace.runAgain()
+                    self.runagain = False
 
         elif event == vtrace.NOTIFY_EXIT:
             ecode = trace.getMeta('ExitCode')
@@ -364,7 +370,6 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
             if win32:
                 s = win32.get("DebugString", "<unknown>")
             self.vprint("DEBUG PRINT: %s" % s)
-
 
     ###################################################################
     #
@@ -671,6 +676,33 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
             self.trace.suspendThread(tid)
             self.vprint("Suspended Thread: %d" % tid)
 
+    def do_restart(self, line):
+        '''
+        Restart the current process.
+
+        Usage: restart
+
+        NOTE: This only works if the process was exec'd to begin
+        with!
+
+        TODO: Plumb options for persisting bp's etc...
+        '''
+        t = self.trace
+        cmdline = t.getMeta('ExecCommand')
+        if cmdline == None:
+            self.vprint('This trace was not fired with exec! (cannot restart)')
+            return
+
+        if t.isRunning():
+            t.setMode("RunForever", False)
+            t.sendBreak()
+
+        if t.isAttached():
+            t.detach()
+
+        t = self.newTrace()
+        t.execute(cmdline)
+
     def do_resume(self, line):
         """
         Resume a thread.
@@ -971,15 +1003,38 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
 
     def do_server(self, port):
         """
-        Start a vtrace server on the local box
-        optionally specify the port
+        Start a vtrace server on the local box.  If the server
+        is already running, show which processes are being remotely
+        debugged.
 
-        Usage: server [port]
+        Usage: server
         """
         if port:
             vtrace.port = int(port)
 
-        vtrace.startVtraceServer()
+        if self.server == None:
+            self.vprint('Starting vtrace server!')
+            self.server = vtrace.startVtraceServer()
+            return
+
+        self.vprint('Displaying remotely debugged traces:')
+        shared = [ t for (n,t) in self.server.getSharedObjects() if isinstance(t, vtrace.Trace) ]
+        if not shared:
+            self.vprint('None.')
+            return
+
+        for t in shared:
+
+            if not t.isAttached():
+                continue
+
+            runmsg = 'stopped'
+            if t.isRunning():
+                runmsg = 'running'
+
+            pid = t.getPid()
+            name = t.getMeta('ExeName', 'Unknown')
+            self.vprint('%6d %.8s - %s' % (pid, runmsg, name))
 
     def do_syms(self, line):
         """

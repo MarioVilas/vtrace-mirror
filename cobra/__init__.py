@@ -108,57 +108,14 @@ class CobraMethod:
 
 class CobraSocket:
 
-    def __init__(self, sock, client=False, retrymax=None, timeout=None):
-        self.client = client # Only the client reconnects
-        self.socket = sock
-        self.host,self.port = sock.getpeername()
-        self.retries = 0
-        self.retrymax = retrymax
-        self.timeout = timeout
-        if self.retrymax == None:
-            self.retrymax = cobra_retrymax
+    def __init__(self, socket):
+        self.socket = socket
 
     def getSockName(self):
         return self.socket.getsockname()
 
     def getPeerName(self):
         return self.socket.getpeername()
-
-    def connectSocket(self, host, port):
-        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        if self.timeout is not None:
-            self.socket.settimeout(self.timeout)
-        self.socket.connect( (host, port) )
-        self.retries = 0
-
-    def reConnect(self):
-        """
-        Handle the event where we need to reconnect
-        """
-        while self.retrymax is None or self.retries < self.retrymax:
-            if verbose: sys.stderr.write("COBRA: Reconnection Attempt\n")
-            try:
-                self.connectSocket(self.host, self.port)
-                return
-            except Exception, e:
-                time.sleep(2 ** self.retries)
-                self.retries += 1
-        raise CobraRetryException()
-
-    def cobraTransaction(self, mtype, objname, data):
-        """
-        This is an API for clients to use.  It will retransmit
-        a sendMessage() automagically on recpt of an exception
-        in recvMessage()
-        """
-        while True:
-            try:
-                self.sendMessage(mtype, objname, data)
-                return self.recvMessage()
-            except CobraClosedException, e:
-                self.reConnect()
-            except socket.error, e:
-                self.reConnect()
 
     def sendMessage(self, mtype, objname, data):
         """
@@ -171,18 +128,7 @@ class CobraSocket:
         except pickle.PickleError, e:
             raise CobraPickleException("The arguments/attributes must be pickleable: %s" % e)
 
-        while True:
-            try:
-                #self.sendExact(struct.pack("<IIIss", mtype, len(objname), len(buf), objname, buf))
-                self.sendExact(struct.pack("<III", mtype, len(objname), len(buf)) + objname + buf)
-                return
-            except socket.error, e:
-                if e.args[0] == errno.EPIPE:
-                    if not self.client:
-                        raise CobraClosedException
-                elif not self.client:
-                    raise
-                self.reConnect()
+        self.sendExact(struct.pack("<III", mtype, len(objname), len(buf)) + objname + buf)
 
     def recvMessage(self):
         """
@@ -212,14 +158,128 @@ class CobraSocket:
     def sendExact(self, buf):
         self.socket.sendall(buf)
 
+class SocketBuilder:
+    '''
+    For internal use by CobraClientSocket
+    '''
+
+    def __init__(self, scheme, host, port, timeout, kwargs):
+        self.scheme = scheme
+        self.host = host
+        self.port = port
+        self.timeout = timeout
+        self.kwargs = kwargs
+
+    def __call__(self):
+
+        host = self.host
+        port = self.port
+        if verbose: print "CONNECTING TO:",self.host,self.port
+        timeout = self.timeout
+
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        if self.timeout is not None:
+            sock.settimeout(self.timeout)
+
+        if self.scheme == 'cobrassl':
+            # A cobra SSL socket can take a few keywords in the
+            # CobraProxy constructor...
+            import ssl
+            sslkwargs = {}
+            sslca = self.kwargs.get('sslca')
+            if sslca != None:
+                sslkwargs['ca_certs'] = sslca
+                sslkwargs['cert_reqs']=ssl.CERT_REQUIRED
+
+            # Check for specified client certificate info
+            sslkey = self.kwargs.get('sslkey')
+            if sslkey:
+                sslkwargs['keyfile'] = sslkey
+
+            sslcrt = self.kwargs.get('sslcrt')
+            if sslcrt:
+                sslkwargs['certfile'] = sslcrt
+
+            sock = ssl.wrap_socket(sock, **sslkwargs)
+
+        sock.connect((self.host, self.port))
+        if verbose:'CONNECTED!'
+        return sock
+
+
+class CobraClientSocket(CobraSocket):
+
+    def __init__(self, sockctor, retrymax=None):
+        CobraSocket.__init__(self, sockctor())
+        self.sockctor = sockctor
+        self.retries = 0
+        self.retrymax = retrymax
+        if self.retrymax == None:
+            self.retrymax = cobra_retrymax
+
+    def reConnect(self):
+        """
+        Handle the event where we need to reconnect
+        """
+        while self.retrymax is None or self.retries < self.retrymax:
+            if verbose: sys.stderr.write("COBRA: Reconnection Attempt\n")
+            try:
+                self.socket = self.sockctor()
+                return
+            except Exception, e:
+                time.sleep(2 ** self.retries)
+                self.retries += 1
+        raise CobraRetryException()
+
+    def cobraTransaction(self, mtype, objname, data):
+        """
+        This is an API for clients to use.  It will retransmit
+        a sendMessage() automagically on recpt of an exception
+        in recvMessage()
+        """
+        while True:
+            try:
+                self.sendMessage(mtype, objname, data)
+                return self.recvMessage()
+            except CobraClosedException, e:
+                self.reConnect()
+            except socket.error, e:
+                self.reConnect()
+
 class CobraDaemon(ThreadingTCPServer):
 
-    def __init__(self, host="", port=COBRA_PORT):
+    def __init__(self, host="", port=COBRA_PORT, sslcrt=None, sslkey=None, sslca=None):
+        '''
+        Construct a cobra daemon object.
+
+        Parameters:
+        host        - Optional hostname/ip to bind the service to (default: inaddr_any)
+        port        - The port to bind (Default: COBRA_PORT)
+
+        # SSL Options
+        sslcrt / sslkey     - Specify sslcrt and sslkey to enable SSL server side
+        sslca               - Specify an SSL CA key to use validating client certs
+
+        '''
         self.shared = {}
         self.host = host
         self.port = port
         self.reflock = RLock()
         self.refcnts = {}
+
+        # SSL Options
+        self.sslca = sslca
+        self.sslcrt = sslcrt
+        self.sslkey = sslkey
+
+        if sslcrt and not os.path.isfile(sslcrt):
+            raise Exception('CobraDaemon: sslcrt param must be a file!')
+
+        if sslkey and not os.path.isfile(sslkey):
+            raise Exception('CobraDaemon: sslkey param must be a file!')
+
+        if sslca and not os.path.isfile(sslca):
+            raise Exception('CobraDaemon: sslca param must be a file!')
 
         self.allow_reuse_address = True
         ThreadingTCPServer.__init__(self, (host, port), CobraRequestHandler)
@@ -236,6 +296,16 @@ class CobraDaemon(ThreadingTCPServer):
 
     def getSharedObject(self, name):
         return self.shared.get(name, None)
+
+    def getSharedObjects(self):
+        '''
+        Return a list of (name, obj) for the currently shared objects.
+
+        Example:
+            for name,obj in daemon.getSharedObjects():
+                print('%s: %r' % (name,obj))
+        '''
+        return self.shared.items()
 
     def getSharedName(self, obj):
         '''
@@ -331,7 +401,24 @@ class CobraConnectionHandler:
         peer = self.socket.getpeername()
         me = self.socket.getsockname()
         if verbose: print "GOT A CONNECTIONN",peer
-        csock = CobraSocket(self.socket)
+
+        sock = self.socket
+        if self.daemon.sslkey:
+            import ssl
+            sslca = self.daemon.sslca
+            keyfile = self.daemon.sslkey
+            certfile = self.daemon.sslcrt
+            sslreq = ssl.CERT_NONE
+            # If they specify a CA key, require valid client certs
+            if sslca:
+                sslreq=ssl.CERT_REQUIRED
+
+            sock = ssl.wrap_socket(sock,
+                                     keyfile=keyfile, certfile=certfile,
+                                     ca_certs=sslca, cert_reqs=sslreq,
+                                     server_side=True)
+
+        csock = CobraSocket(sock)
         setCallerInfo(peer)
         setLocalInfo(me)
 
@@ -442,8 +529,18 @@ def isCobraUri(uri):
 class CobraProxy:
     """
     A proxy object for remote objects shared with Cobra
+
+    Additional keyword arguments may depend on protocol.
+
+    cobra://
+        Only the standard args
+
+    cobrassl://
+        sslca           - File path to a CA certs file.  Causes server validation.
+        sslcrt / sslkey - Client side cert info
+
     """
-    def __init__(self, URI, retrymax=None, timeout=None):
+    def __init__(self, URI, retrymax=None, timeout=None, **kwargs):
         port = COBRA_PORT
         req = urllib2.Request(URI)
         scheme = req.get_type()
@@ -463,9 +560,20 @@ class CobraProxy:
         self._cobra_scheme = scheme
         self._cobra_host = host
         self._cobra_port = port
+        self._cobra_slookup = (host,port)
         self._cobra_name = name
         self._cobra_retrymax = retrymax
         self._cobra_timeout = timeout
+        self._cobra_kwargs = kwargs
+
+        if kwargs.get('sslkey') and not os.path.isfile(kwargs.get('sslkey')):
+            raise Exception('CobraProxy: sslkey must be a file!')
+
+        if kwargs.get('sslcrt') and not os.path.isfile(kwargs.get('sslcrt')):
+            raise Exception('CobraProxy: sslcrt must be a file!')
+
+        if kwargs.get('sslca') and not os.path.isfile(kwargs.get('sslca')):
+            raise Exception('CobraProxy: sslca must be a file!')
 
         csock = self._cobra_getsock()
         mtype,rver,data = csock.cobraTransaction(COBRA_HELLO, name, "")
@@ -485,32 +593,23 @@ class CobraProxy:
             tsocks = {}
             thr.cobrasocks = tsocks
 
-        host = self._cobra_host
-        port = self._cobra_port
-        sock = tsocks.get((host,port), None)
+        sock = tsocks.get(self._cobra_slookup)
         if not sock:
             sock = self._cobra_newsock()
-            tsocks[(host,port)] = sock
+            tsocks[self._cobra_slookup] = sock
         return sock
 
     def _cobra_newsock(self):
         """
         This is only used by *clients*
         """
-        host = self._cobra_host
-        port = self._cobra_port
-        if verbose: print "CONNECTING TO:",host,port
-        timeout = self._cobra_timeout
         retrymax = self._cobra_retrymax
-
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        if timeout is not None:
-            sock.settimeout(timeout)
-
-        sock.connect((host, port))
-        if verbose:'CONNECTED!'
-
-        return CobraSocket(sock, client=True, retrymax=retrymax, timeout=timeout)
+        builder = SocketBuilder(    self._cobra_scheme,
+                                    self._cobra_host,
+                                    self._cobra_port,
+                                    self._cobra_timeout,
+                                    self._cobra_kwargs)
+        return CobraClientSocket(builder, retrymax=retrymax)
 
     def __getstate__(self):
         return self.__dict__

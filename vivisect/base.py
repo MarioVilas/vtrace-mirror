@@ -7,14 +7,17 @@ import envi.memory as e_mem
 import envi.pagelookup as e_page
 import envi.codeflow as e_codeflow
 
+import vstruct.cparse as vs_cparse
+import vstruct.builder as vs_builder
+import vstruct.constants as vs_const
+
 import vivisect.const as viv_const
 import vivisect.analysis as viv_analysis
 
 from envi.threads import firethread
 
-from vivisect.const import *
 from vivisect.exc import *
-
+from vivisect.const import *
 
 """
 Mostly this is a place to scuttle away some of the inner workings
@@ -116,8 +119,14 @@ class VivWorkspaceCore(object):
         self.blockmap = e_page.MapLookup()
         self._mods_loaded = False
 
+        #self._imp_api = {}
+
         self._event_list = []
         self._event_saved = 0 # The index of the last "save" event...
+
+        # Give ourself a structure namespace!
+        self.vsbuilder = vs_builder.VStructBuilder()
+        self.vsconsts  = vs_const.VSConstResolver()
 
     def _snapInAnalysisModules(self):
         '''
@@ -257,10 +266,12 @@ class VivWorkspaceCore(object):
     def _handleSETMETA(self, einfo):
         name,value = einfo
         # See if there's a callback handler for this meta set.
-        mcbname = "_mcb_%s" % name
+        # For "meta namespaces" use the first part to find the
+        # callback name....
+        mcbname = "_mcb_%s" % name.split(':')[0]
         mcb = getattr(self, mcbname, None)
         if mcb != None:
-            mcb(value)
+            mcb(name, value)
         self.metadata[name] = value
 
     def _handleCOMMENT(self, einfo):
@@ -419,14 +430,28 @@ class VivWorkspaceCore(object):
             self.funcmeta[funcva] = {} # His metadata
             self.codeblocks_by_funcva[funcva] = [] # Init code block list
 
+    #def _loadImportApi(self, apidict):
+        #self._imp_api.update( apidict )
+
 #################################################################
 #
 #  setMeta key callbacks
 #
-    def _mcb_Architecture(self, value):
+    def _mcb_Architecture(self, name, value):
         self.arch = envi.getArchModule(value)
         self.psize = self.arch.getPointerSize()
         self.imem_psize = self.psize
+
+    def _mcb_ustruct(self, name, ssrc):
+        # All meta values in the "ustruct" namespace are user defined
+        # structure defintions in C.
+        sname = name.split(':')[1]
+        ctor = vs_cparse.ctorFromCSource( ssrc )
+        self.vsbuilder.addVStructCtor( sname, ctor )
+
+    #def _mcb_impapi(self, name, apidef):
+        #impname = name.split(':')[1].lower()
+        #self._imp_api[ impname ] = apidef
 
 class VivCodeFlowContext(e_codeflow.CodeFlowContext):
 

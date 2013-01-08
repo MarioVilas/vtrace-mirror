@@ -1167,6 +1167,7 @@ class WindowsMixin:
             dbgprivdone = getDebugPrivileges()
 
         self._is_wow64 = False  # 64 bit trace uses this...
+        self._step_suspends = set() # Threads we have suspended for single stepping
 
         # Skip the attach event and plow through to the first
         # injected breakpoint (cause libs are loaded by then)
@@ -1356,6 +1357,16 @@ class WindowsMixin:
     @v_base.threadwrap
     def platformContinue(self):
 
+        # If there is anything in _step_suspends, un-suspend them
+        for thrid in self._step_suspends:
+            kernel32.ResumeThread(thrid)
+
+        self._step_suspends.clear()
+
+        self._continueDebugEvent()
+
+    def _continueDebugEvent(self):
+
         magic = DBG_CONTINUE
 
         if self.getCurrentSignal() != None:
@@ -1364,6 +1375,7 @@ class WindowsMixin:
         if self.flushcache:
             self.flushcache = False
             kernel32.FlushInstructionCache(self.phandle, 0, 0)
+
         if not kernel32.ContinueDebugEvent(self.pid, self.getMeta("StoppedThreadId"), magic):
             raiseWin32Error("ContinueDebugEvent")
 
@@ -1373,8 +1385,33 @@ class WindowsMixin:
         self.setRegisterByName("TF", 1)
         if self.getMode('BlockStep'):
             wrmsr(e_i386.MSR_DEBUGCTL, e_i386.MSR_DEBUGCTL_BTF)
+
         self._syncRegs()
-        self.platformContinue()
+
+        # For single step, suspend all the threads except the current
+        for thrid in self.getThreads().keys():
+
+            # If this thread is the "current thread" don't suspend it
+            if thrid == self.getCurrentThread():
+                # If it was suspended because of stepping another thread
+                # resume it.
+                if thrid in self._step_suspends:
+                    kernel32.ResumeThread(thrid)
+                continue
+
+            # Check for "already suspended"
+            if self.sus_threads.get( thrid ):
+                continue
+
+            # Check if we're returning in a step loop
+            if thrid in self._step_suspends:
+                continue
+
+            # Call suspend thread directly for speed
+            kernel32.SuspendThread(thrid)
+            self._step_suspends.add( thrid )
+
+        self._continueDebugEvent()
 
     def platformWriteMemory(self, address, buf):
         ret = c_ulong(0)
@@ -1391,12 +1428,18 @@ class WindowsMixin:
 
     def platformPs(self):
         ret = []
-        pcount = 128 # Hardcoded limit of 128 processes... oh well..
+        pcount = 1024
         pids = (c_int * pcount)()
         needed = c_int(0)
         hmodule = HANDLE()
 
         psapi.EnumProcesses(addressof(pids), 4*pcount, addressof(needed))
+        if needed.value > pcount:
+            # If the array was too small, lets up the size to needed + 128
+            pcount = needed.value + 128
+            pids = (c_int * pcount)()
+            psapi.EnumProcesses(addressof(pids), 4*pcount, addressof(needed))
+
         for i in range(needed.value/4):
             fname = (c_wchar * 512)()
             phandle = kernel32.OpenProcess(PROCESS_ALL_ACCESS, 0, pids[i])

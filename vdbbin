@@ -43,15 +43,15 @@ if __name__ == "__main__":
 
     parser = optparse.OptionParser(prog='vdbbin')
     parser.add_option('-c', '--cmd', dest='command', default=None, help='Debug a fired command')
-    parser.add_option('-e', '--eventid', dest='eventid', default=None, type='int')
+    parser.add_option('-p', '--process', dest='process', default=None, help='Attach to process by name or pid')
+    parser.add_option('-Q', '--qt', dest='doqt', default=False, action='store_true', help='Run the QT gui')
+    parser.add_option('-R', '--remote', dest='remotehost', default=None, help='Attach to remote VDB server')
+    parser.add_option('-r', '--run', dest='dorunagain', default=False, action='store_true', help='Do not stop on attach')
     parser.add_option('-s', '--snapshot', dest='snapshot', default=None, help='Load a vtrace snapshot file')
     parser.add_option('-S', '--server', dest='doserver', default=False, action='store_true')
     parser.add_option('-v', '--verbose', dest='doverbose', default=False, action='store_true')
-    parser.add_option('-R', '--remote', dest='remotehost', default=None, help='Attach to remote VDB server')
-    parser.add_option('-r', '--run', dest='dorunagain', default=False, action='store_true')
-    parser.add_option('-Q', '--qt', dest='doqt', default=False, action='store_true', help='Run the QT gui')
-    parser.add_option('-p', '--process', dest='process', default=None, help='Attach to process by name or pid')
     parser.add_option('--android', dest='doandroid', default=False, action='store_true', help='Debug Android with ADB!')
+    parser.add_option('-e', '--eventid', dest='eventid', default=None, type='int', help='Used for Windows JIT')
 
     options, argv = parser.parse_args(sys.argv[1:])
 
@@ -106,25 +106,36 @@ if __name__ == "__main__":
             #except Exception ,e:
                 #usage_gdbserver()
 
+    # Handle some options before we even create a trace.
+    vtrace.remote = options.remotehost # None by default
+
     plat=None
     platargs = {}
     if options.doandroid:
         plat = 'android'
 
+    if options.snapshot:
+        print('Loading process snapshot...')
+        trace = vt_snap.loadSnapshot(options.snapshot)
+
     if trace == None:
         trace = vtrace.getTrace(plat=plat, **platargs)
 
     db = vdb.Vdb(trace)
-
     db.runagain = options.dorunagain
     db.windows_jit_event = options.eventid
 
     if options.doqt:
         import vqt.main as vq_main
         import vdb.qt.windows as v_q_windows
+        import vqt.colors as vq_colors
+        #vq_main.startup(css=vq_colors.qt_matrix)
         vq_main.startup()
         qgui = v_q_windows.VdbWindow(db)
         qgui.show()
+
+    if options.doserver:
+        db.do_server('')
 
     if options.process:
         db.do_attach(options.process)

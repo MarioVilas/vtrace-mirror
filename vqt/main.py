@@ -57,9 +57,11 @@ class VQApplication(QtGui.QApplication):
         self.call_proxy_queue.put((callable,args,kwargs))
         self.proxyCall.emit()
 
-def startup():
+def startup(css=None):
     global qapp
     qapp = VQApplication(sys.argv)
+    if css:
+        qapp.setStyleSheet( css )
 
 def main():
     global qapp

@@ -1,12 +1,14 @@
 '''
 Home of some helpers for python interactive stuff.
 '''
+import types
 import traceback
 
 from threading import Thread
 from PyQt4 import QtCore, QtGui
 
 from vqt.main import idlethread
+from vqt.basics import *
 
 @idlethread
 def scripterr(msg, info):
@@ -41,24 +43,18 @@ class VQPythonView(QtGui.QWidget):
 
         self._textWidget = QtGui.QTextEdit(parent=self)
         self._botWidget = QtGui.QWidget(parent=self)
+        self._help_button = QtGui.QPushButton('?', parent=self._botWidget)
         self._run_button = QtGui.QPushButton('Run', parent=self._botWidget)
         self._run_button.clicked.connect(self._okClicked)
+        self._help_button.clicked.connect( self._helpClicked ) 
 
-        hbox = QtGui.QHBoxLayout()
-        hbox.addStretch(1)
-        hbox.addWidget(self._run_button)
-        hbox.setMargin(2)
-        hbox.setSpacing(4)
+        self._help_text = None
 
-        self._botWidget.setLayout(hbox)
+        hbox = HBox( None, self._help_button, self._run_button )
+        self._botWidget.setLayout( hbox )
 
-        vbox = QtGui.QVBoxLayout()
-        vbox.addWidget(self._textWidget)
-        vbox.addWidget(self._botWidget)
-        vbox.setMargin(2)
-        vbox.setSpacing(4)
-
-        self.setLayout(vbox)
+        vbox = VBox( self._textWidget, self._botWidget )
+        self.setLayout( vbox )
 
         self.setWindowTitle('Python Interactive')
 
@@ -67,4 +63,28 @@ class VQPythonView(QtGui.QWidget):
         cobj = compile(pycode, "vqpython_exec.py", "exec")
         sthr = ScriptThread(cobj, self._locals)
         sthr.start()
+
+    def _helpClicked(self):
+        withhelp = []
+        for lname,lval in self._locals.items():
+            if type(lval) in (types.ModuleType, ):
+                continue
+            doc = getattr(lval, '__doc__', '\nNo Documentation\n')
+            if doc == None:
+                doc = '\nNo Documentation\n'
+            withhelp.append( (lname, doc) )
+
+        withhelp.sort()
+
+        txt = 'Objects/Functions in the namespace:\n'
+        for name,doc in withhelp:
+            txt += ( '====== %s\n' % name )
+            txt += ( '%s\n' % doc )
+
+        self._help_text = QtGui.QTextEdit()
+        self._help_text.setReadOnly( True )
+        self._help_text.setWindowTitle('Python Interactive Help')
+        self._help_text.setText( txt )
+        self._help_text.show()
+
 

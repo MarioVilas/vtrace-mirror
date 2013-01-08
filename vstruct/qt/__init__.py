@@ -26,6 +26,10 @@ class VQStructSelectView(vq_tree.VQTreeView):
                 spnode = model.append(('', sname), parent=pnode)
                 spnode.structname = '%s.%s' % (nsname, sname)
 
+        for sname in vsbuilder.getVStructNames():
+            node = model.append( ('', sname ) )
+            node.structname = sname
+
         self.setModel(model)
 
 class VQStructSelectDialog(QtGui.QDialog):

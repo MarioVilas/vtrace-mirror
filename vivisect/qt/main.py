@@ -12,6 +12,7 @@ import vivisect.server as viv_server
 import vivisect.vdbext as viv_vdbext
 import vivisect.qt.views as viv_q_views
 import vivisect.qt.memory as viv_q_memory
+import vivisect.qt.ustruct as viv_q_ustruct
 import vivisect.qt.funcgraph as viv_q_funcgraph
 
 from PyQt4 import QtCore, QtGui
@@ -53,6 +54,8 @@ class VQVivMainWindow(vq_app.VQMainCmdWindow, viv_base.VivEventDist):
         self.vqAddMenuField('&Tools.Code Diff', self._menuToolsCodeDiff)
         self.vqAddMenuField('&Tools.&Debug', self._menuToolsDebug)
         self.vqAddMenuField('&Tools.&Structures.Add Namespace', self._menuToolsStructNames)
+        self.vqAddMenuField('&Tools.&Structures.New', self._menuToolsUStructNew)
+        self.vqAddDynMenu('&Tools.&Structures.&Edit', self._menuToolsUStructEdit)
 
         self.vqAddDynMenu('&Tools.&Va Sets', self._menuToolsVaSets)
 
@@ -67,6 +70,18 @@ class VQVivMainWindow(vq_app.VQMainCmdWindow, viv_base.VivEventDist):
 
         fname = os.path.basename(self.vw.getMeta('StorageName', 'Unknown'))
         self.setWindowTitle('Vivisect: %s' % fname)
+
+    def _menuToolsUStructNew(self):
+        u = viv_q_ustruct.UserStructEditor( self.vw )
+        w = self.vqDockWidget( u, floating=True )
+        w.resize( 600, 600 )
+
+    def _menuToolsUStructEdit(self, name=None):
+        if name == None:
+            return self.vw.getUserStructNames()
+        u = viv_q_ustruct.UserStructEditor( self.vw , name=name)
+        w = self.vqDockWidget( u, floating=True )
+        w.resize( 600, 600 )
 
     def _menuToolsVaSets(self, name=None):
         if name == None:

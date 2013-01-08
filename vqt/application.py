@@ -10,7 +10,8 @@ class VQDockWidget(QtGui.QDockWidget):
     def __init__(self, parent):
         QtGui.QDockWidget.__init__(self, parent)
         self._vq_visible = False
-        self.connect(self,  QtCore.SIGNAL('visibilityChanged(bool)'), self.vqSetVisible)
+        self.visibilityChanged.connect( self.vqSetVisible )
+        #self.connect(self,  QtCore.SIGNAL('visibilityChanged(bool)'), self.vqSetVisible)
         self.setAllowedAreas(QtCore.Qt.AllDockWidgetAreas)
 
     def vqIsVisible(self):
@@ -65,6 +66,7 @@ class VQMainCmdWindow(QtGui.QMainWindow):
 
         self._vq_cli = vq_cli.VQCli(cmd)
         self._vq_cli.loadHistory(self._vq_histfile)
+        self._vq_cli.sigCliQuit.connect( self.close )
 
         self.setCentralWidget(self._vq_cli)
         self.vqRestoreGuiSettings(self._vq_settings)
@@ -143,6 +145,10 @@ class VQMainCmdWindow(QtGui.QMainWindow):
 
     def vqRemoveDockWidget(self, widget):
         self._dock_widgets.remove(widget)
+
+    def vqClearDockWidgets(self):
+        for wid in self._dock_widgets:
+            wid.close()
 
     def vqDockWidget(self, widget, area=QtCore.Qt.TopDockWidgetArea, floating=False):
         d = VQDockWidget(self)

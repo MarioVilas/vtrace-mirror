@@ -43,8 +43,8 @@ class VQTreeItem(object):
     
     def data(self, column):
         if column > len(self.rowdata):
-            return QtCore.QVariant()
-        return QtCore.QVariant(self.rowdata[column])
+            return None
+        return str(self.rowdata[column])
 
     def row(self):
         '''
@@ -109,7 +109,7 @@ class VQTreeModel(QtCore.QAbstractItemModel):
 
     def data(self, index, role):
         if not index.isValid():
-            return QtCore.QVariant()
+            return None
 
         item = index.internalPointer()
         if role == QtCore.Qt.DisplayRole:
@@ -118,7 +118,7 @@ class VQTreeModel(QtCore.QAbstractItemModel):
         if role == QtCore.Qt.UserRole:
             return item
 
-        return QtCore.QVariant()
+        return None
 
     def setData(self, index, value, role=QtCore.Qt.EditRole):
 

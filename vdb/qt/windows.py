@@ -6,7 +6,7 @@ from PyQt4 import QtCore, QtGui
 import vdb
 import vtrace
 
-import vqt.cli as vq_cli
+#import vqt.cli as vq_cli
 import vqt.main as vq_main
 import vqt.qpython as vq_python
 import vqt.application as vq_app
@@ -74,6 +74,7 @@ class VdbWindow(vq_app.VQMainCmdWindow, vtrace.Notifier):
         self.vqAddMenuField('&View.&File Descriptors', self.menuViewFileDesc)
         self.vqAddMenuField('&View.&Layouts.&Load', self.menuViewLayoutsLoad)
         self.vqAddMenuField('&View.&Layouts.&Save', self.menuViewLayoutsSave)
+        self.vqAddMenuField('&View.&Layouts.&Clear', self.menuViewLayoutsClear)
         self.vqAddMenuField('&Tools.&Python', self.menuToolsPython)
 
     def vqInitDockWidgetClasses(self):
@@ -107,6 +108,8 @@ class VdbWindow(vq_app.VQMainCmdWindow, vtrace.Notifier):
         if fname == None:
             return
 
+        self.vqClearDockWidgets()
+
         settings = QtCore.QSettings(fname, QtCore.QSettings.IniFormat)
         self.vqRestoreGuiSettings(settings)
 
@@ -117,6 +120,9 @@ class VdbWindow(vq_app.VQMainCmdWindow, vtrace.Notifier):
 
         settings = QtCore.QSettings(fname, QtCore.QSettings.IniFormat)
         self.vqSaveGuiSettings(settings)
+
+    def menuViewLayoutsClear(self):
+        self.vqClearDockWidgets()
 
     def menuFileQuit(self, *args, **kwargs):
         self.close()

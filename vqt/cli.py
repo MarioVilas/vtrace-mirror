@@ -10,12 +10,17 @@ from envi.threads import firethread
 import vqt.colors as vq_colors
 import vqt.shortcut as vq_shortcut
 
+from vqt.basics import *
+from vqt.main import idlethread
+
 class VQCli(QtGui.QWidget):
     '''
     A Qt class to wrap and emulate a Cmd object.
     '''
 
     __canvas_class__ = e_q_memcanvas.VQMemoryCanvas
+
+    sigCliQuit = QtCore.pyqtSignal()
 
     def __init__(self, cli, parent=None):
         QtGui.QWidget.__init__(self, parent=parent)
@@ -35,11 +40,7 @@ class VQCli(QtGui.QWidget):
         self.setStyleSheet( vq_colors.getDefaultColors() )
 
         # Create they vertical layout and add widgets...
-        vbox = QtGui.QVBoxLayout()
-        vbox.addWidget(self.output)
-        vbox.addWidget(self.input)
-        vbox.setMargin(2)
-        vbox.setSpacing(4)
+        vbox = VBox( self.output, self.input )
         self.setLayout(vbox)
 
         self.connect(self.input,  QtCore.SIGNAL('returnPressed()'), self.returnPressedSlot)
@@ -57,7 +58,17 @@ class VQCli(QtGui.QWidget):
         self.input.clear()
         self.addHistory(cmd)
         self.output.addText('> %s\n' % cmd)
-        firethread(self.cli.onecmd)(cmd)
+        firethread(self.onecmd)(cmd)
+
+    def onecmd(self, cmdline):
+        if self.cli.onecmd( cmdline ):
+            self._emit_quit()
+
+    @idlethread
+    def _emit_quit(self):
+        # A way to emit the "quit" signal from threads other than the
+        # qt main thread.
+        self.sigCliQuit.emit()
 
     def useHistory(self, delta):
 

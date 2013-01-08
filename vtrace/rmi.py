@@ -110,3 +110,4 @@ def startVtraceServer():
     startCobraDaemon()
     factory = TraceProxyFactory()
     vtrace.cobra_daemon.shareObject(factory, "TracerFactory")
+    return vtrace.cobra_daemon

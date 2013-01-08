@@ -1,4 +1,3 @@
-
 """
 
 Yay!  It's NOT IDA!!!1!!1!one!
@@ -14,9 +13,12 @@ import struct
 import weakref
 import traceback
 import threading
-from ConfigParser import ConfigParser
+
 from StringIO import StringIO
 from collections import deque
+from ConfigParser import ConfigParser
+
+import vivisect.contrib # This should go first
 
 # The envi imports...
 import envi
@@ -28,10 +30,8 @@ import envi.resolver as e_resolv
 import envi.codeflow as e_codeflow
 
 import vstruct
-import vstruct.builder as vs_builder
-import vstruct.constants as vs_const
+import vstruct.cparse as vs_cparse
 import vstruct.primitives as vs_prims
-
 
 import vivisect.base as viv_base
 import vivisect.impemu as viv_imp
@@ -41,8 +41,8 @@ import vivisect.parsers as viv_parsers
 import vivisect.impemu.emufunc as viv_emufunc
 import vivisect.impemu.impmagic as viv_impmagic
 
-from vivisect.const import *
 from vivisect.exc import *
+from vivisect.const import *
 
 class VivWorkspace(e_mem.MemoryObject, viv_base.VivWorkspaceCore):
 
@@ -66,10 +66,6 @@ class VivWorkspace(e_mem.MemoryObject, viv_base.VivWorkspaceCore):
 
         self.config = e_config.EnviConfig()
         self.config.readstr( viv_conf.defaults )
-
-        # Give ourself a structure namespace!
-        self.vsbuilder = vs_builder.VStructBuilder()
-        self.vsconsts  = vs_const.VSConstResolver()
 
         # Ideally, *none* of these are modified except by _handleFOO funcs...
         self.segments = []
@@ -262,6 +258,15 @@ class VivWorkspace(e_mem.MemoryObject, viv_base.VivWorkspaceCore):
             dl = []
         dl.append(libname)
         self.setMeta("DepLibs", dl)
+
+    def getLibraryDependancies(self):
+        '''
+        Retrieve the list of *normalized* library dependancies.
+        '''
+        dl = self.getMeta("DepLibs", None)
+        if dl == None:
+            return []
+        return list(dl)
 
     def getOption(self, section, option, default=None):
         """
@@ -1180,14 +1185,13 @@ class VivWorkspace(e_mem.MemoryObject, viv_base.VivWorkspaceCore):
         Inform the workspace that a given function is considered a "thunk" to another.
         This allows the workspace to process argument inheritance and several other things.
 
-        Usage: vw.makeThunk(0xvavavava, "kernel32.CreateProcessA")
-
+        Usage: vw.makeFunctionThunk(0xvavavava, "kernel32.CreateProcessA")
         """
         self.setFunctionMeta(funcva, "Thunk", thname)
         n = self.getName(funcva)
-        if n.find("sub_") == 0:
-            base = thname.split(".")[-1]
-            self.makeName(funcva, "%s_%.8x" % (base,funcva))
+
+        base = thname.split(".")[-1]
+        self.makeName(funcva, "%s_%.8x" % (base,funcva))
 
         # Steal the calling convention and args from real target
         # function if we manage to resolve it
@@ -1198,6 +1202,34 @@ class VivWorkspace(e_mem.MemoryObject, viv_base.VivWorkspaceCore):
             for i in range(efunc.argc):
                 fargs.append((efunc.argt[i], efunc.argn[i]))
             self.setFunctionArgs(funcva, fargs)
+
+
+        # FIXME not yet... impapi
+        #apidef = self.getImportApi( thname )
+        #if apidef:
+            ## We have the API defined!
+            #(rtype, rname), callconv, fname, argv = apidef
+            #self.setFunctionMeta(funcva, 'CallingConvention', callconv)
+            #self.setFunctionArgs(funcva, argv)
+
+    def getImportCallName(self, targva):
+        '''
+        Based on the given target virtual address, return the name
+        of an import entry if this is a call to an import, *or* a call
+        to a known import thunk.  Returns None if not.
+        '''
+        if self.isFunction( targva ):
+            return self.getFunctionMeta(targva, 'Thunk')
+
+        loc = self.getLocation( targva )
+        if loc == None:
+            return None
+
+        lva, lsize, ltype, linfo = loc
+        if ltype == LOC_IMPORT:
+            return linfo
+
+        return None
 
     def getCallers(self, va):
         '''
@@ -1549,6 +1581,45 @@ class VivWorkspace(e_mem.MemoryObject, viv_base.VivWorkspaceCore):
 
         return s
 
+    def getUserStructNames(self):
+        '''
+        Retrive the list of the existing user-defined structure
+        names.
+
+        Example:
+            for name in vw.getUserStructNames():
+                print 'Structure Name: %s' % name
+        '''
+        return self.vsbuilder.getVStructCtorNames()
+
+    def getUserStructSource(self, sname):
+        '''
+        Get the source code (as a string) for the given user
+        defined structure.
+
+        Example:
+            ssrc = vw.getUserStructSource('MyStructureThing')
+        '''
+        return self.getMeta('ustruct:%s' % sname)
+
+    def setUserStructSource(self, ssrc):
+        '''
+        Save the input string as a C structure definition for the
+        workspace.  User-defined structures may then be applied
+        to locations, or further edited in the future.
+
+        Example:
+            src = "struct woot { int x; int y; };"
+            vw.saveUserStructureSource( src )
+        '''
+        # First, we make sure it compiles...
+        ctor = vs_cparse.ctorFromCSource( ssrc )
+        # Then, build one to get the name from it...
+        vs = ctor()
+        cname = vs.vsGetTypeName()
+        self.setMeta('ustruct:%s' % cname, ssrc)
+        return cname
+
     def asciiStringSize(self, va):
         """
         Return the size (in bytes) of the ascii string
@@ -1581,7 +1652,7 @@ class VivWorkspace(e_mem.MemoryObject, viv_base.VivWorkspaceCore):
         self._fireEvent(VWE_ADDLOCATION, ltup)
         return ltup
 
-    def getLocations(self, ltype=None):
+    def getLocations(self, ltype=None, linfo=None):
         """
         Return a list of location objects from the workspace
         of a particular type.
@@ -1589,12 +1660,10 @@ class VivWorkspace(e_mem.MemoryObject, viv_base.VivWorkspaceCore):
         if ltype == None:
             return list(self.loclist)
 
-        ret = []
-        for loc in self.loclist:
-            lva, lsize, xtype, linfo = loc
-            if xtype == ltype:
-                ret.append(loc)
-        return ret
+        if linfo == None:
+            return [ loc for loc in self.loclist if loc[2] == ltype ]
+
+        return [ loc for loc in self.loclist if (loc[2] == ltype and loc[3] == linfo) ]
 
     def isLocation(self, va, range=False):
         """

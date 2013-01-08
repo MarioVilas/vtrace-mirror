@@ -189,6 +189,7 @@ class Trace(e_mem.IMemory, e_reg.RegisterContext, e_resolv.SymbolResolver, objec
 
         pid = self.platformExec(cmdline)
         self._justAttached(pid)
+        self.setMeta('ExecCommand', cmdline)
         self.wait()
 
     def getCurrentSignal(self):
@@ -1228,11 +1229,14 @@ class VtraceExpressionLocals(e_expr.MemoryExpressionLocals):
 
     def __getitem__(self, name):
         # Check registers
-        if self.trace.isAttached() and not self.trace.isRunning():
+        if self.trace.isAttached():
+            self.trace.requireNotRunning()
+
             regs = self.trace.getRegisters()
             r = regs.get(name, None)
             if r != None:
                 return r
+
         # Check local variables
         locs = self.trace.getVariables()
         r = locs.get(name, None)
