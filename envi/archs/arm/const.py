@@ -152,7 +152,6 @@ IENC_UNCOND_CPS     = ((IENC_UNCOND << 8) + 1) << 8
 IENC_UNCOND_SETEND  = ((IENC_UNCOND << 8) + 2) << 8
 IENC_UNCOND_PLD     = ((IENC_UNCOND << 8) + 3) << 8
 IENC_UNCOND_BLX     = ((IENC_UNCOND << 8) + 4) << 8
-IENC_UNCOND_RFE     = ((IENC_UNCOND << 8) + 5) << 8
 
 
 # The supported types of operand shifts (by the 2 bit field)

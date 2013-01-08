@@ -43,17 +43,11 @@ macho_magics = (
 def guessFormat(bytes):
     if bytes.startswith("MZ"):
         return 'pe'
-
     if bytes.startswith("\x7fELF"):
         return 'elf'
-
     bytemagic = struct.unpack('<I', bytes[:4])[0]
     if bytemagic in macho_magics:
         return 'macho'
-
-    if bytes[0] == ':':
-        return 'ihex'
-
     return 'blob'
 
 def getParserModule(fmt):

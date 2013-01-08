@@ -21,10 +21,7 @@ class ExpressionHelper:
         self.d['mem'] = self
 
     def parseExpression(self, expr):
-        ret = eval(expr, globals(), self)
-        if type(ret) in (int,long):
-            return Const(ret)
-        return ret
+        return eval(expr, globals(), self)
 
     def __getitem__(self, name):
         r = self.d.get(name)
@@ -33,9 +30,6 @@ class ExpressionHelper:
         return Var(name)
 
     def __getslice__(self, symaddr, symsize):
-        return Mem(symaddr, symsize)
-
-    def __call__(self, symaddr, symsize):
         return Mem(symaddr, symsize)
 
 t = ExpressionHelper()
@@ -141,11 +135,7 @@ class SymbolikBase:
     def __pow__(self, other):
         return o_pow(self, other)
 
-    def __hash__(self):
-        return hash(self.solve())
-
     def __eq__(self, other):
-
         if other == None:
             return False
 
@@ -354,56 +344,15 @@ class Var(SymbolikBase):
         name = self.name
         if emu != None:
             # Is this really the only one that uses the emu?
-            name += emu.getRandomSeed()
+            name = name + emu.getRandomSeed()
 
-        return hash(hashlib.md5(name).hexdigest()) & self.mask
+        return hash(hashlib.md5(name).hexdigest()) & 0xffffffff
 
     def update(self, emu):
         ret = emu.getSymVariable(self.name, create=False)
         if ret != None:
             return ret
         return Var(self.name, width=self.width)
-
-    def reduce(self, emu=None):
-        return self
-
-    def getWidth(self):
-        return self.width
-
-    def isDiscrete(self, emu=None):
-        return False
-
-class Arg(SymbolikBase):
-    '''
-    An "Arg" is a special kind of variable used to facilitate cross
-    function boundary solving.
-    '''
-    def __init__(self, idx, width=4):
-        SymbolikBase.__init__(self)
-        self.idx = idx
-        self.width = width
-        self.mask = e_bits.u_maxes[width]
-
-    def __repr__(self):
-        return 'Arg(%d,width=%d)' % (self.idx,self.width)
-
-    def __str__(self):
-        return 'arg%d' % self.idx
-
-    def walkTree(self, cb, ctx=None):
-        pass # No symbolic children
-
-    def solve(self, emu=None):
-
-        name = 'arg%d' % self.idx
-
-        if emu != None:
-            name += emu.getRandomSeed()
-
-        return hash(hashlib.md5(name).hexdigest()) & self.mask
-
-    def update(self, emu):
-        return Arg(self.idx, width=self.width)
 
     def reduce(self, emu=None):
         return self
@@ -828,75 +777,3 @@ class o_pow(Operator):
         v2 = self._v2.solve(emu=emu)
         return v1 ** v2
 
-class o_sextend(SymbolikBase):      # introduce the concept of a modifier?  or keep this an operator?
-
-    def __init__(self, cursz, tgtsz, v1):
-        SymbolikBase.__init__(self)
-
-        self._v1    = frobSymbol(v1)
-        self._cursz = frobSymbol(cursz)
-        self._tgtsz = frobSymbol(tgtsz)
-
-    def __repr__(self):
-        return '%s(%s, %s, %s)' % (self.__class__.__name__, repr(self._cursz), repr(self._tgtsz), repr(self._v1))
-
-    def __str__(self):
-        operstr = 'signextend( %s, %s, %s )'
-        return operstr % (str(self._cursz), str(self._tgtsz), str(self._v1))
-
-    def walkTree(self, cb, ctx=None):
-
-        self._v1.walkTree(cb, ctx=ctx)      # do we really want to walk the sizes?
-        self._cursz.walkTree(cb, ctx=ctx)
-        self._tgtsz.walkTree(cb, ctx=ctx)
-
-        self._v1 = cb(self._v1, ctx)        # do we really want to call the callback on sizes?
-        self._cursz = cb(self._cursz, ctx)
-        self._tgtsz = cb(self._tgtsz, ctx)
-
-    def solve(self, emu=None):
-        v1 = self._v1.solve(emu=emu)
-        cursz = self._cursz.solve(emu=emu)
-        tgtsz = self._tgtsz.solve(emu=emu)
-        return e_bits.sign_extend( v1, cursz, tgtsz )
-
-    def reduce(self, emu=None):
-
-        v1 = self._v1.reduce(emu=emu)
-        v1val = v1.solve(emu=emu)
-
-        cursz = self._cursz.reduce(emu=emu)
-        curszval = cursz.solve(emu=emu)
-
-        tgtsz = self._tgtsz.reduce(emu=emu)
-        tgtszval = tgtsz.solve(emu=emu)
-
-        # All operators should check for discrete...
-
-        if v1.isDiscrete() and cursz.isDiscrete() and tgtsz.isDiscrete():
-            return Const(self.solve(emu=emu))
-
-        ret = self._op_reduce(v1, v1val, cursz, curszval, tgtsz, tgtszval, emu)
-        if ret != None:
-            return ret
-
-        self._v1 = v1
-        self._cursz = cursz
-        self._tgtsz = tgtsz
-        return self
-
-    def update(self, emu):
-        v1 = self._v1.update(emu)
-        cursz = self._cursz.update(emu)
-        tgtsz = self._tgtsz.update(emu)
-        return self.__class__(cursz, tgtsz, v1)
-
-    def _op_reduce(self, v1, v1val, cursz, curszval, tgtsz, tgtszval, emu=None):
-        # Override this to do per operator special reduction
-        return None
-
-    def reverse(self):
-        return m_shrink(self._tgtsz, self._cursz, self._v1)
-
-    def isDiscrete(self, emu=None):
-        return self._v1.isDiscrete(emu=emu) and self._cursz.isDiscrete(emu=emu) and self._tgtsz.isDiscrete(emu=emu)

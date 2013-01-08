@@ -179,7 +179,7 @@ class VS_VERSIONINFO:
         if vinfosig != 'VS_VERSION_INFO':
             Exception('Invalid VS_VERSION_INFO signature!: %s' % repr(vinfosig))
 
-        if valsize and valsize >= len(vs_pe.VS_FIXEDFILEINFO()):
+        if valsize:
             ffinfo = vs_pe.VS_FIXEDFILEINFO()
             ffinfo.vsParse(bytes[offset:offset+valsize])
 
@@ -239,8 +239,6 @@ class VS_VERSIONINFO:
         mysize, valsize, valtype = struct.unpack('<HHH', bytes[xoffset:xoffset+6])
         xoffset += 6
         xoffset, varname = self._eatStringAndAlign(bytes, xoffset)
-        if xoffset + 4 > len(bytes):
-            return offset+size
         varval = struct.unpack('<I', bytes[xoffset:xoffset+4])[0]
         xoffset += 4
         self._version_info[varname] = varval
@@ -254,9 +252,6 @@ class VS_VERSIONINFO:
         xoffset, hexcpage = self._eatStringAndAlign(bytes, xoffset)
         while xoffset < xmax:
             xoffset = self._stringData(bytes, xoffset)
-            if xoffset == -1:
-                break
-
             xmod = xoffset % 4
             if xmod:
                 xoffset += (4 - xmod)
@@ -269,8 +264,7 @@ class VS_VERSIONINFO:
         xoffset = offset
         mysize, valsize, stype = struct.unpack('<HHH', bytes[offset:offset+6])
 
-        if mysize == 0:
-            return -1 
+        if mysize == 0: raise Exception()
 
         xoffset += 6
         xoffset, strkey = self._eatStringAndAlign(bytes, xoffset)
@@ -331,14 +325,9 @@ class ResourceDirectory:
         typedir = self._rsrc_subdirs.get(restype)
         if typedir == None:
             return None
-
         datadir = typedir._rsrc_subdirs.get(name_id)
         if datadir == None:
             return None
-
-        if len(datadir._rsrc_data) == 0:
-            return None
-
         # The first entry in the datadir's data is the one
         return datadir._rsrc_data[0]
 
@@ -354,13 +343,8 @@ class PE(object):
         """
         object.__init__(self)
         self.inmem = inmem
-        self.filesize = None
 
-        if not inmem:
-            fd.seek(0, os.SEEK_END)
-            self.filesize = fd.tell()
-            fd.seek(0)
-
+        fd.seek(0)
         self.fd = fd
 
         self.pe32p = False
@@ -454,18 +438,13 @@ class PE(object):
         if check and not self.checkRva(rva, size=slen):
             return None
         bytes = self.readAtRva(rva, len(s))
-        if not bytes:
-            return None
-
         s.vsParse(bytes)
         return s
 
     def readStructAtOffset(self, offset, structname):
         s = vstruct.getStructure(structname)
         sbytes = self.readAtOffset(offset, len(s))
-        if not sbytes:
-            return None
-
+        #print "%s: %s" % (structname, bytes.encode('hex'))
         s.vsParse(sbytes)
         return s
 
@@ -547,13 +526,8 @@ class PE(object):
                 if dirent.Name & 0x80000000: # If high bit is set, it's a string!
                     namerva = dresc.VirtualAddress + (dirent.Name & 0x7fffffff)
                     namelen_bytes = self.readAtRva(namerva, 2)
-                    if not namelen_bytes:
-                        continue
                     namelen = struct.unpack('<H', namelen_bytes)[0]
                     name_id = self.readAtRva(namerva + 2, namelen * 2).decode('utf-16le', 'ignore')
-                    if not name_id:
-                        name_id = dirent.Name
-
                 else:
                     name_id = dirent.Name
                 
@@ -561,9 +535,7 @@ class PE(object):
                 if dirent.OffsetToData & 0x80000000:
                     # This points to a subdirectory
                     subdir = rsdirobj.addRsrcDirectory(name_id)
-                    offset = dirent.OffsetToData & 0x7fffffff
-                    if offset:
-                        rsrc_todo.append( (dresc.VirtualAddress + offset, subdir) )
+                    rsrc_todo.append( (dresc.VirtualAddress + (dirent.OffsetToData & 0x7fffffff), subdir) )
 
                 else:
                     subdata = self.readStructAtRva( dresc.VirtualAddress + dirent.OffsetToData, 'pe.IMAGE_RESOURCE_DATA_ENTRY')
@@ -596,20 +568,18 @@ class PE(object):
         fbytes = self.readAtRva(rva, size)
         return struct.unpack(fmt, fbytes)
 
-    def readAtRva(self, rva, size, shortok=False):
+    def readAtRva(self, rva, size):
         offset = self.rvaToOffset(rva)
-        return self.readAtOffset(offset, size, shortok)
+        return self.readAtOffset(offset, size)
 
-    def readAtOffset(self, offset, size, shortok=False):
+    def readAtOffset(self, offset, size):
         ret = ""
         self.fd.seek(offset)
         while len(ret) != size:
             rlen = size - len(ret)
             x = self.fd.read(rlen)
             if x == "":
-                if not shortok:
-                    return None
-                return ret
+                raise Exception("EOF In readAtOffset()")
             ret += x
         return ret
 
@@ -660,7 +630,7 @@ class PE(object):
             if maxsize and maxsize <= len(ret):
                 break
             x = self.readAtRva(rva, 1)
-            if x == '\x00' or x == None:
+            if x == '\x00':
                 break
             ret += x
             rva += 1
@@ -696,9 +666,6 @@ class PE(object):
             while True:
 
                 arrayoff = self.psize * idx
-                if self.filesize != None and arrayoff > self.filesize:
-                    self.imports = [] # we probably put grabage in  here..
-                    return
 
                 ibn_rva = self.readPointerAtRva(imp_by_name+arrayoff)
                 if ibn_rva == 0:
@@ -715,13 +682,8 @@ class PE(object):
                     diff = self.getMaxRva() - ibn_rva - 2
                     ibn = vstruct.getStructure("pe.IMAGE_IMPORT_BY_NAME")
                     ibn.vsGetField('Name').vsSetLength( min(diff, 128) )
-                    bytes = self.readAtRva(ibn_rva, len(ibn), shortok=True)
-                    if not bytes:
-                        break
-                    try: 
-                        ibn.vsParse(bytes)
-                    except:
-                        continue
+                    bytes = self.readAtRva(ibn_rva, len(ibn))
+                    ibn.vsParse(bytes)
 
                     funcname = ibn.Name
 
@@ -802,8 +764,6 @@ class PE(object):
             return
 
         self.IMAGE_EXPORT_DIRECTORY = self.readStructAtOffset(poff, "pe.IMAGE_EXPORT_DIRECTORY")
-        if not self.IMAGE_EXPORT_DIRECTORY:
-            return
 
         funcoff = self.rvaToOffset(self.IMAGE_EXPORT_DIRECTORY.AddressOfFunctions)
         funcsize = 4 * self.IMAGE_EXPORT_DIRECTORY.NumberOfFunctions
@@ -815,7 +775,6 @@ class PE(object):
         
         # RP BUG FIX - sanity check the exports before reading
         if not funcoff or not ordoff and not nameoff or funcsize > 0x7FFF:
-            self.IMAGE_EXPORT_DIRECTORY = None
             return
     
         funcbytes = self.readAtOffset(funcoff, funcsize)
@@ -833,9 +792,6 @@ class PE(object):
 
             ord = ordlist[i]
             nameoff = self.rvaToOffset(namelist[i])
-            if ord > len(funclist):
-                self.IMAGE_EXPORT_DIRECTORY = None
-                return
 
             funcoff = funclist[ord]
             ffoff = self.rvaToOffset(funcoff)
@@ -843,123 +799,15 @@ class PE(object):
             name = None
 
             if nameoff != 0:
-                name = self.readAtOffset(nameoff, 256, shortok=True).split("\x00", 1)[0]
+                name = self.readAtOffset(nameoff, 256).split("\x00", 1)[0]
             else:
                 name = "ord_%.4x" % ord
 
-            # RP BUG FIX - Export forwarding range check is done using RVA's 
-            if funcoff >= edir.VirtualAddress and funcoff < edir.VirtualAddress + edir.Size:
-                fwdname = self.readAtRva(funcoff, 260, shortok=True).split("\x00", 1)[0]
+            if ffoff >= poff and ffoff < poff + edir.Size:
+                fwdname = self.readAtOffset(ffoff, 260).split("\x00", 1)[0]
                 self.forwarders.append((funclist[ord],name,fwdname))
             else:
                 self.exports.append((funclist[ord], ord, name))
-
-    def getSignature(self):
-        '''
-        Returns the SignatureEntry vstruct if the pe has an embedded
-        certificate, None if the magic bytes are NOT set in the security
-        directory entry AND the size of the signature entry is less than 0.
-        '''
-        ds = self.getDataDirectory(IMAGE_DIRECTORY_ENTRY_SECURITY)
-
-        va = ds.VirtualAddress
-        size = ds.Size
-        if size <= 0:
-            return None
-
-        bytez = self.readAtOffset(va, size)
-
-        se = vstruct.getStructure('pe.SignatureEntry')
-        se.vsParse(bytez)
-
-        if se.magic != "\x00\x02\x02\x00":
-            return None
-
-        return se
-
-    def getSignCertInfo(self):
-
-        sig = self.getSignature()
-
-        if sig == None:
-            return ()
-
-        # Runtime import these so they are optional dependancies
-        import pyasn1.type.univ
-        import pyasn1.type.namedtype
-        import pyasn1.codec.der.decoder
-        import pyasn1.codec.der.encoder
-        import pyasn1_modules.rfc2315
-
-        substrate = sig.pkcs7
-        contentInfo, rest = pyasn1.codec.der.decoder.decode(substrate, asn1Spec=pyasn1_modules.rfc2315.ContentInfo())
-
-        if rest: substrate = substrate[:-len(rest)]
-
-        contentType = contentInfo.getComponentByName('contentType')
-
-        contentInfoMap = {
-            (1, 2, 840, 113549, 1, 7, 1): pyasn1_modules.rfc2315.Data(),
-            (1, 2, 840, 113549, 1, 7, 2): pyasn1_modules.rfc2315.SignedData(),
-            (1, 2, 840, 113549, 1, 7, 3): pyasn1_modules.rfc2315.EnvelopedData(),
-            (1, 2, 840, 113549, 1, 7, 4): pyasn1_modules.rfc2315.SignedAndEnvelopedData(),
-            (1, 2, 840, 113549, 1, 7, 5): pyasn1_modules.rfc2315.DigestedData(),
-            (1, 2, 840, 113549, 1, 7, 6): pyasn1_modules.rfc2315.EncryptedData()
-            }
-
-        seqTypeMap = {
-
-            (2,5,4,3):          'CN',
-            (2,5,4,7):          'L',
-            (2,5,4,10):         'O',
-            (2,5,4,11):         'OU',
-            (1,2,840,113549,1,9,1): 'E',
-            (2,5,4,6):          'C',
-            (2,5,4,8):          'ST',
-            (2,5,4,9):          'STREET',
-            (2,5,4,12):         'TITLE',
-            (2,5,4,42):         'G',
-            (2,5,4,43):         'I',
-            (2,5,4,4):          'SN',
-            (0,9,2342,19200300,100,1,25):   'DC',
-        }
-
-        content, _ = pyasn1.codec.der.decoder.decode(
-            contentInfo.getComponentByName('content'),
-            asn1Spec=contentInfoMap[contentType]
-            )
-
-        a = content.getComponentByName('certificates')
-
-        certs = []
-        for i in a:
-
-            cbytes = pyasn1.codec.der.encoder.encode( i['certificate'] )
-
-            iparts = []
-            for rdnsequence in i["certificate"]["tbsCertificate"]["issuer"]:
-                for rdn in rdnsequence:
-                    rtype = rdn[0]["type"]
-                    rvalue = rdn[0]["value"][2:]
-                    iparts.append('%s=%s' % ( seqTypeMap.get( rtype, 'UNK'), rvalue))
-
-            issuer = ','.join( iparts )
-
-            sparts = []
-            for rdnsequence in i["certificate"]["tbsCertificate"]["subject"]:
-                for rdn in rdnsequence:
-                    rtype = rdn[0]["type"]
-                    rvalue = rdn[0]["value"][2:]
-                    sparts.append('%s=%s' % ( seqTypeMap.get( rtype, 'UNK'), rvalue))
-
-            subject = ','.join(sparts)
-
-            serial = int(i["certificate"]["tbsCertificate"]["serialNumber"])
-
-            cert = { 'subject':subject, 'issuer':issuer, 'serial':serial, 'bytes':cbytes }
-            certs.append( cert )
-
-        return certs
 
     def __getattr__(self, name):
         """

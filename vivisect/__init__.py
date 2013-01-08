@@ -27,6 +27,7 @@ import envi.memory as e_mem
 import envi.config as e_config
 import envi.bytesig as e_bytesig
 import envi.resolver as e_resolv
+import envi.codeflow as e_codeflow
 
 import vstruct
 import vstruct.cparse as vs_cparse
@@ -118,7 +119,7 @@ class VivWorkspace(e_mem.MemoryObject, viv_base.VivWorkspaceCore):
         self._initEventHandlers()
 
         # Some core meta types that exist
-        self.setMeta('NoReturnApis', {})
+        self.setMeta('NonExiters', {})
         self.setMeta('ImportEmulation', None)
         self.setMeta('SymbolikImportEmulation', None)
 
@@ -127,25 +128,11 @@ class VivWorkspace(e_mem.MemoryObject, viv_base.VivWorkspaceCore):
 
         # There are a few default va sets for use in analysis
         self.addVaSet('EntryPoints', (('va',long),))
-        self.addVaSet('NoReturnCalls', (('va',long),))
         self.addVaSet("Emulation Anomalies", (("va",int),("Message",str)))
         self.addVaSet("Bookmarks", (("va",long),("Bookmark Name", str)))
 
     def vprint(self, msg):
         print msg
-
-    def getVivGui(self):
-        '''
-        Return a reference to the vivisect GUI object for this workspace.  If
-        the GUI is not running (aka, the workspace is being used programatically)
-        this routine returns None.
-
-        Example:
-            vwgui = vw.getVivGui()
-            if vwgui:
-                vwgui.doStuffAndThings()
-        '''
-        return self._viv_gui
 
     def loadWorkspace(self, wsname):
         mname = self.getMeta("StorageModule")
@@ -405,22 +392,23 @@ class VivWorkspace(e_mem.MemoryObject, viv_base.VivWorkspaceCore):
         offset, bytes = self.getByteDef(va)
         return self.sigtree.isSignature(bytes, offset=offset)
 
-    def addNoReturnApi(self, funcname):
+    def addNonExiter(self, funcname):
         """
         Inform vivisect code-flow disassembly that any call target
         which matches the specified name ("funcname" or "libname.funcname"
         for imports) does *not* exit and code-flow should be stopped...
         """
-        funcname = funcname.lower()
-        m = self.getMeta('NoReturnApis', {})
-        m[funcname] = True
-        self.setMeta('NoReturnApis', m)
+        #FIXME these should be vtrace style "libname.funcname"
+        #FIXME this will break for remote
+        self.getMeta("NonExiters")[funcname] = True
 
-        # If we already have an import entry, we need to update codeflow
-        for lva,lsize,ltype,linfo in self.getImports():
-            if linfo.lower() != funcname:
-                continue
-            self.cfctx.addNoReturnAddr( lva )
+    def isNonExiter(self, targva):
+        """
+        If the target va is a function or an import, return True
+        if the function/import does NOT exit.
+        """
+        targname = self.getName(targva)
+        return self.getMeta("NonExiters").get(targname, False)
 
     def addAnalysisModule(self, modname):
         """
@@ -674,6 +662,7 @@ class VivWorkspace(e_mem.MemoryObject, viv_base.VivWorkspaceCore):
         if self.verbose: self.vprint('...analyzing exports.')
 
         starttime = time.time()
+
         for eva in self.getEntryPoints():
             if self.isFunction(eva):
                 continue
@@ -717,8 +706,7 @@ class VivWorkspace(e_mem.MemoryObject, viv_base.VivWorkspaceCore):
         """
         Add an import entry.
         """
-        if libname != '*':
-            libname = self.normFileName(libname)
+        libname = self.normFileName(libname)
         tinfo = "%s.%s" % (libname, impname)
         self.makeName(va, "%s_%.8x" % (tinfo, va))
         return self.addLocation(va, self.psize, LOC_IMPORT, tinfo=tinfo)
@@ -756,9 +744,8 @@ class VivWorkspace(e_mem.MemoryObject, viv_base.VivWorkspaceCore):
 
         for mva, msize, mperm, mname in self.getMemoryMaps():
 
+            maxsize = msize - size
             offset, bytes = self.getByteDef(mva)
-            maxsize = len(bytes) - size
-
             while offset + size < maxsize:
                 va = mva + offset
                 loctup = self.getLocation(va)
@@ -975,6 +962,9 @@ class VivWorkspace(e_mem.MemoryObject, viv_base.VivWorkspaceCore):
             return
 
         calls_from = self.cfctx.addCodeFlow(va)
+
+        for callva in calls_from:
+            self.cfctx.addEntryPoint(callva)
 
     def parseOpcode(self, va):
         """
@@ -1213,6 +1203,34 @@ class VivWorkspace(e_mem.MemoryObject, viv_base.VivWorkspaceCore):
                 fargs.append((efunc.argt[i], efunc.argn[i]))
             self.setFunctionArgs(funcva, fargs)
 
+
+        # FIXME not yet... impapi
+        #apidef = self.getImportApi( thname )
+        #if apidef:
+            ## We have the API defined!
+            #(rtype, rname), callconv, fname, argv = apidef
+            #self.setFunctionMeta(funcva, 'CallingConvention', callconv)
+            #self.setFunctionArgs(funcva, argv)
+
+    def getImportCallName(self, targva):
+        '''
+        Based on the given target virtual address, return the name
+        of an import entry if this is a call to an import, *or* a call
+        to a known import thunk.  Returns None if not.
+        '''
+        if self.isFunction( targva ):
+            return self.getFunctionMeta(targva, 'Thunk')
+
+        loc = self.getLocation( targva )
+        if loc == None:
+            return None
+
+        lva, lsize, ltype, linfo = loc
+        if ltype == LOC_IMPORT:
+            return linfo
+
+        return None
+
     def getCallers(self, va):
         '''
         Get the va for all the callers of the given function/import.
@@ -1277,7 +1295,10 @@ class VivWorkspace(e_mem.MemoryObject, viv_base.VivWorkspaceCore):
             return ret
         if rtype == None:
             return xrefs
-        return [ xtup for xtup in xrefs if xtup[XR_RTYPE] == rtype ]
+        for xtup in xrefs:
+            if xtup[XR_RTYPE] == rtype:
+                ret.append(xtup)
+        return ret
 
     def getXrefsTo(self, va, rtype=None):
         """
@@ -1291,7 +1312,10 @@ class VivWorkspace(e_mem.MemoryObject, viv_base.VivWorkspaceCore):
             return ret
         if rtype == None:
             return xrefs
-        return [ xtup for xtup in xrefs if xtup[XR_RTYPE] == rtype ]
+        for xtup in xrefs:
+            if xtup[XR_RTYPE] == rtype:
+                ret.append(xtup)
+        return ret
 
     def addMemoryMap(self, va, perms, fname, bytes):
         """
@@ -1338,9 +1362,6 @@ class VivWorkspace(e_mem.MemoryObject, viv_base.VivWorkspaceCore):
         are at all logical branches and have more in common with a logical
         graph view than function chunks.
         """
-        loc = self.getLocation( va )
-        if loc == None:
-            raise Exception('Adding Codeblock on *non* location?!?: 0x%.8x' % va)
         self._fireEvent(VWE_ADDCODEBLOCK, (va,size,funcva))
 
     def getCodeBlock(self, va):
@@ -1953,8 +1974,6 @@ class VivWorkspace(e_mem.MemoryObject, viv_base.VivWorkspaceCore):
         Add an entry point to the definition for the given file.  This
         will hint the analysis system to create functions when analysis
         is run.
-
-        NOTE: No analysis is triggered by this function.
         '''
         self.setVaSetRow('EntryPoints', (va,))
 
@@ -2085,18 +2104,6 @@ class VivWorkspace(e_mem.MemoryObject, viv_base.VivWorkspaceCore):
         does not already exist.
         """
         self._fireEvent(VWE_SETVASETROW, (name, rowtup))
-
-    def getVaSetRow(self, name, va):
-        '''
-        Retrieve the va set row for va in the va set named name.
-
-        Example:
-            row = vw.getVaSetRow('WootFunctions', fva)
-        '''
-        vaset = self.vasets.get( name )
-        if vaset == None:
-            return None
-        return vaset.get( va )
 
     def delVaSetRow(self, name, va):
         """

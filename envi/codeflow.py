@@ -19,28 +19,15 @@ class CodeFlowContext(object):
 
     self._cb_function(fva, metadict) - called once for every function
 
-    self._cb_branchtable(tabva, ptrva, destva) - called for switch tables
-        NOTE: Return False to stop iteration of pointers
+    self._cb_branchtable(tabva, destva) - called for switch tables
 
-    Set exptable=True to expand branch tables in this phase
-    Set persist=True to never disasm the same thing twice
-    Set recurse=True to automatically code flow to nested functions
     '''
-    def __init__(self, mem, persist=False, exptable=True, recurse=True):
+    def __init__(self, mem):
 
         self._funcs = {}
-        self._fcalls = {}
+        self._entries = {}
         self._mem = mem
-        self._cf_noret = {}     # noret funcs
-        self._cf_noflow = {}    # va's to stop on
-
-        # A few options to the codeflow object
-        self._cf_persist = None
-        if persist:
-            self._cf_persist = {}
-
-        self._cf_recurse = recurse
-        self._cf_exptable = exptable
+        self._opdone = {}
 
     def _cb_opcode(self, va, op, branches):
         '''
@@ -57,74 +44,43 @@ class CodeFlowContext(object):
         '''
         pass
 
-    def _cb_noflow(self, va, tva):
-        '''
-        Implement this method to receive a callback when a given code
-        branch is skipped due to being in the noflow dictionary.
-        ( likely due to prodedural branch to noreturn address )
-        '''
+    def _cb_branchtable(self, tabva, destva):
         pass
-
-    def _cb_branchtable(self, tableva, ptrva, destva):
-        '''
-        Extend CodeFlowContext and implement this method to receive
-        a callback for every conditional branch in a discovered 
-        "branch table" ( think jump/switch cases ).  
-        tableva     - The base address of the table
-        ptrva       - The address of the pointer for this index
-        destva      - The destination address (deref of ptrva)
-
-        Return False to stop table iteration.
-        '''
-        pass
-
-    def addNoReturnAddr(self, va):
-        '''
-        Add a virtual address to the list of VAs that are non-returning
-        procedural branch targets.
-        '''
-        self._cf_noret[ va ] = True
-
-    def addNoFlow(self, va, destva):
-        '''
-        Add a va->destva no-flow entry which will prevent codeflow from
-        continuing to destva as a result of va ( destva may still be
-        decoded as a result of being reached some other way... )
-        '''
-        self._cf_noflow[ (va, destva) ] = True
 
     def getCallsFrom(self, fva):
-        return self._fcalls.get(fva)
+        return self._funcs.get(fva)
 
     def addFunctionDef(self, fva, calls_from):
         '''
         Add a priori knowledge of a function to the code flow
         stuff...
         '''
-        self._fcalls[fva] = calls_from
 
-    def addCodeFlow(self, va):
+        if self._funcs.get(fva) != None:
+            return
+
+        self._funcs[fva] = calls_from
+
+    def addCodeFlow(self, va, persist=False, exptable=True):
         '''
         Do code flow disassembly from the specified address.  Returnes a list
         of the procedural branch targets discovered during code flow...
 
         Set persist=True to store 'opdone' and never disassemble the same thing twice
+        Set exptable=True to expand branch tables in this phase
         '''
-        opdone = {}
-        if self._cf_persist != None:
-            opdone = self._cf_persist
+
+        opdone = self._opdone
+        if not persist:
+            opdone = {}
 
         calls_from = {}
-        optodo = [(0, va), ]
+        optodo = [va, ]
 
         while len(optodo):
-            todo = optodo.pop()
 
-            if self._cf_noflow.get( todo ):
-                self._cb_noflow( *todo )
-                continue
+            va = optodo.pop()
 
-            pva, va = todo
             if opdone.get(va):
                 continue
 
@@ -134,12 +90,13 @@ class CodeFlowContext(object):
                 op = self._mem.parseOpcode(va)
             except Exception, e:
                 print 'parseOpcodeError at 0x%.8x: %s' % (va,e)
+                # FIXME code block breakage...
                 continue
-
 
             branches = op.getBranches()
             # The opcode callback may filter branches...
             branches = self._cb_opcode(va, op, branches)
+
             while len(branches):
 
                 bva, bflags = branches.pop()
@@ -150,14 +107,13 @@ class CodeFlowContext(object):
 
                 # Handle a table branch by adding more branches...
                 if bflags & envi.BR_TABLE:
-                    if self._cf_exptable:
+                    if exptable:
                         ptrbase = bva
                         bdest = self._mem.readMemoryFormat(ptrbase, '<P')[0]
                         tabdone = {}
                         while self._mem.isValidPointer(bdest):
 
-                            if self._cb_branchtable(bva, ptrbase, bdest) == False:
-                                break
+                            self._cb_branchtable(ptrbase, bdest)
 
                             if not tabdone.get(bdest):
                                 tabdone[bdest] = True
@@ -168,14 +124,12 @@ class CodeFlowContext(object):
 
                     continue
 
+                # FIXME handle conditionals here for block boundary detection!
+
                 if bflags & envi.BR_DEREF:
 
-                    if not self._mem.probeMemory(bva, self._mem.psize, e_mem.MM_READ):
+                    if not self._mem.probeMemory(bva, 1, e_mem.MM_READ):
                         continue
-
-                    # Before we update bva, lets check if its in noret...
-                    if self._cf_noret.get( bva ):
-                        self.addNoFlow( va, va + len(op) )
 
                     bva = self._mem.readMemoryFormat(bva, '<P')[0]
 
@@ -187,48 +141,48 @@ class CodeFlowContext(object):
                     # Record that the current code flow has a call from it
                     # to the branch target...
 
-                    nextva = va + len(op)
-
-                    if bva != nextva: # NOTE: avoid call 0 constructs
-
-                        # Now we decend so we do deepest func callbacks first!
-                        if self._cf_recurse:
-                            self.addEntryPoint( bva )
-
-                        if self._cf_noret.get( bva ):
-                            # then our next va is noflow!
-                            self._cf_noflow[ (va, nextva) ] = True
-
+                    # FIXME intel hack, call 0, pop reg for geteip...
+                    if bva != va + len(op):
                         calls_from[bva] = True
-
                         # We only go up to procedural branches, not across
                         continue
 
                 if not opdone.get(bva):
-                    optodo.append((va, bva))
+                    optodo.append(bva)
 
         return calls_from.keys()
+
+    def _handleFunc(self, va, pth):
+
+        path = []
+
+        # Check if this is already a known function.
+        if self._funcs.get(va) != None:
+            return
+
+        self._funcs[va] = True
+
+        # Check if we have disassembled a loop
+        if va in pth:
+            return
+
+        pth.append(va)
+
+        calls_from = self.addCodeFlow(va)
+
+        for callto in calls_from:
+            self._handleFunc(callto, pth=pth)
+
+        pth.pop()
+
+        # Finally, notify the callback of a new function
+        self._cb_function(va, {'CallsFrom':calls_from})
 
     def addEntryPoint(self, va):
         '''
         Analyze the given procedure entry point and flow downward
         to find all subsequent code blocks and procedure edges.
-
-        Example:
-            cf.addEntryPoint( 0x77c70308 )
-            ... callbacks flow along ...
         '''
-        # Check if this is already a known function.
-        if self._funcs.get(va) != None:
-            return
-
-        # Add this function to known functions
-        self._funcs[va] = True
-
-        calls_from = self.addCodeFlow(va)
-
-        self._fcalls[va] = calls_from
-
-        # Finally, notify the callback of a new function
-        self._cb_function(va, {'CallsFrom':calls_from})
+        self._entries[va] = True
+        return self._handleFunc(va, [])
 

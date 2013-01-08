@@ -13,7 +13,6 @@ import vivisect.base as viv_base
 import vivisect.renderers as viv_rend
 import vivisect.qt.views as viv_q_views
 import vivisect.qt.funcgraph as viv_q_funcgraph
-import vivisect.qt.funcviews as viv_q_funcviews
 
 from PyQt4          import QtCore, QtGui, QtWebKit
 from envi.threads   import firethread
@@ -31,7 +30,6 @@ class VQVivMemoryCanvas(e_mem_canvas.VQMemoryCanvas):
     def __init__(self, *args, **kwargs):
         e_mem_canvas.VQMemoryCanvas.__init__(self, *args, **kwargs)
         self.vw = self.mem
-        self._last_sname = None
 
         self.vqAddHotKey('c', self._hotkey_c)
         self.vqAddHotKey('f', self._hotkey_f)
@@ -40,8 +38,6 @@ class VQVivMemoryCanvas(e_mem_canvas.VQMemoryCanvas):
         self.vqAddHotKey('u', self._hotkey_u)
         self.vqAddHotKey('n', self._hotkey_n)
         self.vqAddHotKey(';', self._hotkey_semi)
-        self.vqAddHotKey('S', self._hotkey_S)
-        self.vqAddHotKey('ctrl+S', self._hotkey_cS)
 
         self.vqAddHotKey('U', self._hotkey_U)
 
@@ -105,15 +101,6 @@ class VQVivMemoryCanvas(e_mem_canvas.VQMemoryCanvas):
         if self._canv_curva:
             self._menuComment(self._canv_curva)
 
-    def _hotkey_S(self, canv, key):
-        if self._canv_curva:
-            self._menuMakeStruct(self._canv_curva)
-
-    def _hotkey_cS(self, canv, key):
-        if self._canv_curva:
-            if self._last_sname != None:
-                self.vw.makeStructure(self._canv_curva, self._last_sname)
-
     def _clearColorMap(self):
         frame = self.page().mainFrame()
         style = frame.findFirstElement('#cmapstyle')
@@ -163,7 +150,6 @@ class VQVivMemoryCanvas(e_mem_canvas.VQMemoryCanvas):
         sname = vs_qt.selectStructure(self.vw.vsbuilder)
         if sname != None:
             self.vw.makeStructure(va, sname)
-            self._last_sname = sname
 
     def _menuFunctionGraph(self, fva):
         #docwid = self.parentWidget().vwqgui.vqBuildDockWidget('VQVivFuncgraphView', floating=True)
@@ -214,28 +200,6 @@ class VQVivMemoryCanvas(e_mem_canvas.VQMemoryCanvas):
             locstr = vw.reprLocation(loc)
         return '%s: %s' % (p, locstr[:32])
 
-    def _menuFuncCallGraph(self, fva):
-        vivgui = self.vw.getVivGui()
-        callview = viv_q_funcviews.FuncCallsView( self.vw )
-        callview.functionSelected( fva )
-        callview.show()
-        vivgui.vqDockWidget( callview, floating=True )
-
-        #blockview = viv_q_funcviews.FunctionBlocksView( self.vw )
-        #blockview.functionSelected( fva )
-        #blockview.show()
-        #vivgui.vqDockWidget( blockview, floating=True )
-
-    def _menuFuncCodeBlocks(self, fva):
-        vivgui = self.vw.getVivGui()
-        #blockview = viv_q_funcviews.FunctionBlocksView( self.vw, parent=vivgui )
-        blockview = viv_q_funcviews.FunctionBlocksView( self.vw )
-        blockview.functionSelected( fva )
-        blockview.show()
-        vivgui.vqDockWidget( blockview, floating=True )
-        #self.testtest.functionSelected( fva )
-        #self.testtest.show()
-
     def _woot(self, *args, **kwargs):
         self.vw.vprint('Still working on it....')
 
@@ -280,8 +244,6 @@ class VQVivMemoryCanvas(e_mem_canvas.VQMemoryCanvas):
                 menu.addField('Function/Emulation/Show Emu State', self._menuFuncEmuShow, (fva,va))
                 menu.addField('Function/Highlight', self._woot, (fva,))
                 menu.addField('Function/Show Callers', self._woot, (fva,))
-                menu.addField('Function/Code Blocks', self._menuFuncCodeBlocks, (fva, ))
-                menu.addField('Function/Call Graph', self._menuFuncCallGraph, (fva, ))
                 # FIXME function code flow to here with highlight
 
             loc = vw.getLocation(va)

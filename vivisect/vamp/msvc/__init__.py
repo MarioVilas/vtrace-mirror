@@ -24,7 +24,6 @@ sigs = [
 
     ('3b0d000000007502f3c3e9', 'ffff00000000ffffffffff','ntdll.security_check_cookie'),
     ('6aff5064a100000000508b44240c64892500000000896c240c8d6c240c50c3',None, 'ntdll.eh_prolog'),
-    ('513d001000008d4c2408721481e9001000002d0010000085013d0010000073ec2bc88bc485018be18b088b400450c3', None, 'ntdll.alloca_probe')
 
 ]
 

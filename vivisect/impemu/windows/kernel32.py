@@ -834,8 +834,8 @@ class CreateProcessW(emufunc.EmuFunc):
 #EMUFUNC:CreateRemoteThread
 class CreateRemoteThread(emufunc.EmuFunc):
     __callconv__ = 'stdcall'
-    __argn__ = ["hProcess", "lpThreadAttributes", "dwStackSize", "lpStartAddress", "lpParameter", "dwCreationFlags", "lpThreadId"]
-    __argt__ = [HANDLE, Pointer, UINT32, FUNCPTR, Pointer, UINT32, Pointer, ]
+    __argn__ = [None, None, None, None, None, None, None]
+    __argt__ = [Unknown, Unknown, Unknown, Unknown, Unknown, Unknown, Unknown, ]
 #EMUFUNCDONE
 
 #EMUFUNC:CreateSemaphoreA

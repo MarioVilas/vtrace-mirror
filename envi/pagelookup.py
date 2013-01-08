@@ -3,12 +3,9 @@ A home for the page lookup construct.  Basically it is a
 python object which implements a similar lookup mechanism
 to the i386 page table lookups...
 '''
-import collections
 
 # FIXME move functions in here too so there is procedural "speed" way
 # and objecty pythonic way...
-def pagedict():
-    return collections.defaultdict( lambda: [None] * 0xffff )
 
 class PageLookup:
     '''
@@ -18,21 +15,27 @@ class PageLookup:
     '''
 
     def __init__(self):
-        #self._page_dict = {}
-        self._page_dict = pagedict()
+        self._page_dict = {}
 
     def getPageLookup(self, va):
-        page = self._page_dict.get( va >> 16 )
+        base = va >> 16
+        offs = va & 0xffff
+        page = self._page_dict.get(base)
         if page == None:
             return None
-        return page[ va & 0xffff ]
+        return page[offs]
 
     def setPageLookup(self, va, size, obj):
         vamax = va+size
-
-        p = self._page_dict
-        # Super ugly, *very* fast speed hack
-        [ p[ va >> 16 ].__setitem__( va & 0xffff, obj ) for va in range(va, vamax) ]
+        while va < vamax:
+            base = va >> 16
+            offs = va & 0xffff
+            page = self._page_dict.get(base)
+            if page == None:
+                page = [None] * 0xffff
+                self._page_dict[base] = page
+            page[offs] = obj
+            va += 1
 
     # __getitem__
     # __getslice__
@@ -57,14 +60,16 @@ class MapLookup:
         for mva, mvamax, marray in self._maps_list:
             if va >= mva and va < mvamax:
                 off = va - mva
-                marray[off:off+size] = [obj] * size
+                s = [obj] * size
+                marray[off:off+size] = s
                 return
         raise Exception('Address (0x%.8x) not in maps!' % va)
 
     def getMapLookup(self, va):
         for mva, mvamax, marray in self._maps_list:
             if va >= mva and va < mvamax:
-                return marray[ va - mva ]
+                off = va - mva
+                return marray[off]
         return None
 
     def __getslice__(self, start, end):

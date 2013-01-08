@@ -20,27 +20,29 @@ def addAnalysisModules(vw):
 
         if arch == 'i386':
 
-            vw.addImpApi('windows','i386')
+            #import vivisect.impapi.windows.i386 as api_windows_i386
+            #vw._loadImportApi( api_windows_i386.api )
 
             viv_analysis_i386.addEntrySigs(vw)
+            vw.addAnalysisModule("vivisect.analysis.i386.importcalls")
             vw.addStructureModule('ntdll', 'vstruct.defs.windows.win_5_1_i386.ntdll')
 
         elif arch == 'amd64':
 
-            vw.addImpApi('windows','amd64')
+            #import vivisect.impapi.windows.amd64 as api_windows_amd64
+            #vw._loadImportApi( api_windows_amd64.api )
+
             vw.addStructureModule('ntdll', 'vstruct.defs.windows.win_6_1_amd64.ntdll')
 
         vw.addConstModule('vstruct.constants.ntstatus')
 
+        vw.addAnalysisModule("vivisect.analysis.generic.funcentries")
         vw.addAnalysisModule("vivisect.analysis.generic.relocations")
         vw.addAnalysisModule("vivisect.analysis.generic.pointertables")
 
         vw.addAnalysisModule("vivisect.analysis.ms.vftables")
 
         vw.addAnalysisModule("vivisect.analysis.generic.emucode")
-        # run imports after emucode
-        if arch == 'i386':
-            vw.addAnalysisModule("vivisect.analysis.i386.importcalls")
 
         vw.addFuncAnalysisModule("vivisect.analysis.generic.codeblocks")
         vw.addFuncAnalysisModule("vivisect.analysis.ms.hotpatch")
@@ -57,7 +59,6 @@ def addAnalysisModules(vw):
         vw.addAnalysisModule('vivisect.analysis.ms.localhints')
         # Find import thunks
         vw.addFuncAnalysisModule("vivisect.analysis.generic.thunks")
-        vw.addAnalysisModule("vivisect.analysis.generic.funcentries")
 
     elif fmt == 'elf': # ELF ########################################################
 
@@ -114,16 +115,6 @@ def addAnalysisModules(vw):
         vw.addAnalysisModule("vivisect.analysis.generic.funcentries")
         vw.addAnalysisModule("vivisect.analysis.generic.relocations")
         vw.addAnalysisModule("vivisect.analysis.generic.pointertables")
-        vw.addAnalysisModule("vivisect.analysis.generic.emucode")
-
-        vw.addFuncAnalysisModule("vivisect.analysis.generic.codeblocks")
-        vw.addFuncAnalysisModule("vivisect.analysis.generic.thunks")
-
-    elif fmt == 'ihex': # BLOB ######################################################
-
-        vw.addAnalysisModule("vivisect.analysis.generic.funcentries")
-        vw.addAnalysisModule("vivisect.analysis.generic.relocations")
-        #vw.addAnalysisModule("vivisect.analysis.generic.pointertables")
         vw.addAnalysisModule("vivisect.analysis.generic.emucode")
 
         vw.addFuncAnalysisModule("vivisect.analysis.generic.codeblocks")

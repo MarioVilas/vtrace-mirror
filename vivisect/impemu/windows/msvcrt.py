@@ -878,15 +878,15 @@ class _beep(emufunc.EmuFunc):
 #EMUFUNC:_beginthread
 class _beginthread(emufunc.EmuFunc):
     __callconv__ = 'cdecl'
-    __argn__ = ["start_address", "stack_size", "arglist"]
-    __argt__ = [FUNCPTR, UINT32, Pointer, ]
+    __argn__ = [None, None, None]
+    __argt__ = [Unknown, Unknown, Unknown, ]
 #EMUFUNCDONE
-        
+
 #EMUFUNC:_beginthreadex
 class _beginthreadex(emufunc.EmuFunc):
     __callconv__ = 'cdecl'
-    __argn__ = ["security", "stack_size", "start_address", "arglist", "initflag", "thrdaddr"]
-    __argt__ = [Pointer, UINT32, FUNCPTR, Pointer, UINT32, UINT32, ]
+    __argn__ = [None, None, None, None, None, None]
+    __argt__ = [Unknown, Unknown, Unknown, Unknown, Unknown, Unknown, ]
 #EMUFUNCDONE
 
 #EMUFUNC:_c_exit

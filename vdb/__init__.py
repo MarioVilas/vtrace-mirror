@@ -130,7 +130,7 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
         self.runagain = False           # A one-time thing for the cli
         self.windows_jit_event = None
 
-        # We hang on to an opcode renderer instance
+        # We hangn on to an opcode renderer instance
         self.opcoderend = None
 
         # If a VdbGui instance is present it will set this.
@@ -238,8 +238,7 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
         return self.trace.parseExpression(exprstr)
 
     def getExpressionLocals(self):
-        trace = vdb.VdbTrace(self)
-        r = vtrace.VtraceExpressionLocals(trace)
+        r = vtrace.VtraceExpressionLocals(self.trace)
         r['db'] = self
         r['vprint'] = self.vprint
         return r
@@ -392,10 +391,8 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
             self.vprint("\nKnown Structures (from %s):" % line)
             plist = self.trace.getStructNames(namespace=line)
 
-        plist.sort()
         for n in plist:
             self.vprint(str(n))
-
         self.vprint("\n")
 
     def do_dis(self, line):
@@ -776,20 +773,6 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
             final.append(("%12s:0x%.8x (%d)" % (r,val,val)))
         self.columnize(final)
 
-    def complete_reg(self, text, line, bigidx, endidx):
-
-        if '=' in line:
-            return []
-
-        regs = self.trace.getRegisters().keys()
-        if not text:
-            return regs
-
-        if text in regs:
-            return [ text + '=' ]
-
-        return [ i for i in regs if i.startswith(text) ]
-
     def do_stepi(self, line):
         """
         Single step the target tracer.
@@ -800,17 +783,15 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
         -C <count> - Step <count> instructions
         -R         - Step to return from this function
         -V         - Show operand values during single step (verbose!)
-        -U         - Remainder of args is "step until" expression (stop on True)
 
         """
         t = self.trace
         argv = e_cli.splitargs(line)
         try:
-            opts,args = getopt(argv, "A:BC:RVU")
+            opts,args = getopt(argv, "A:BC:RV")
         except Exception, e:
             return self.do_help("stepi")
 
-        until = None
         count = None
         taddr = None
         toret = False
@@ -818,7 +799,6 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
         showop = False
 
         for opt, optarg in opts:
-
             if opt == '-A':
                 taddr = t.parseExpression(optarg)
 
@@ -834,12 +814,8 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
             elif opt == '-V':
                 showop = True
 
-            elif opt == '-U':
-                until = ' '.join(args)
-
         if ( count == None 
              and taddr == None
-             and until == None
              and toret == False 
              and tobrn == False):
             count = 1
@@ -888,9 +864,6 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
                 tid = t.getCurrentThread()
 
                 t.stepi()
-
-                if until and t.parseExpression(until):
-                    break
 
                 # If we get an event from a different thread, get out!
                 if t.getCurrentThread() != tid:
@@ -988,14 +961,8 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
         if self.gui != None:
             self.vprint('Gui already running!')
             return
-
-        import vqt.main as vq_main
-        import vdb.qt.windows as v_q_windows
-        import vqt.colors as vq_colors
-
-        vq_main.startup()
-        qgui = v_q_windows.VdbWindow(self)
-        qgui.show()
+        import vdb.gui
+        vdb.gui.main(self)
 
     def do_waitlib(self, line):
         '''
@@ -1224,17 +1191,6 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
 
         self.vprint("Attaching to %d" % pid)
         self.newTrace().attach(pid)
-
-    def complete_attach(self, text, line, begidx, endidx):
-        procs = self.trace.ps()
-        pidlist = [ str(x) for x,y in procs ]
-        proclist = [ y for x,y in procs ]
-        if not text:
-            return proclist
-        if text.isdigit():
-            return [ i for i in pidlist if i.startswith(text) ]
-
-        return [ i for i in proclist if i.find(text) != -1 ]
 
     def do_autocont(self, line):
         """
@@ -1507,11 +1463,8 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
 
         self.vprint(" [ Breakpoints ]")
         for bp in self.trace.getBreakpoints():
-            self._print_bp(bp)
-
-    def _print_bp(self, bp):
-        cmdstr = self.bpcmds.get(bp.id, '')
-        self.vprint("%s enabled: %s fast: %s %s" % (bp, bp.isEnabled(), bp.fastbreak, cmdstr))
+            cmdstr = self.bpcmds.get(bp.id, '')
+            self.vprint("%s enabled: %s fast: %s %s" % (bp, bp.isEnabled(), bp.fastbreak, cmdstr))
 
     def do_fds(self, args):
         """
@@ -1833,9 +1786,3 @@ class Vdb(e_cli.EnviMutableCli, v_notif.Notifier, v_util.TraceManager):
         vtrace.remote = line
         # FIXME how do we re-init the debugger?
 
-    # Some helper functions for tab completion
-    def _complete_libname(self, text, line, begidx, endidx):
-        libnames = self.trace.getNormalizedLibNames()
-        if not text:
-            return libnames
-        return [ i for i in libnames if i.startswith( text ) ]

@@ -145,9 +145,7 @@ class dylib_command(vstruct.VStruct):
         retoff = vstruct.VStruct.vsParse(self, bytes, offset=offset)
         # Grab the name from the inline data...
         name = bytes[ offset + self.name : offset + self.cmdsize ]
-        name = name.split('\x00', 1)[0]
-        self.vsGetField('namedata').vsSetLength(len(name))
-        self.namedata = name
+        self.namedata = name.split('\x00', 1)[0]
         return retoff
 
 class sub_framework_command(vstruct.VStruct):

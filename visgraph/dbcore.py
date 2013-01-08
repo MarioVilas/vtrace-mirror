@@ -3,7 +3,7 @@ Visgraph supports backing the graph objects with a postgres db.
 '''
 
 import psycopg2
-import collections
+
 import visgraph.graphcore as vg_graphcore
 
 init_db = '''
@@ -79,13 +79,8 @@ class DbGraphStore:
     the DBGraphStore.
     '''
     def __init__(self, dbinfo=None):
-
-        if dbinfo == False:
-            return
-
         if dbinfo == None:
             dbinfo = default_dbinfo
-
         self.dbinfo = dbinfo
         self.db = psycopg2.connect(**dbinfo)
         self.autocommit = True
@@ -95,12 +90,11 @@ class DbGraphStore:
         For now, a fetchall based select wrapper.
         '''
         c = self.db.cursor()
-        c.execute(query, args)
-        res = c.fetchall()
-        c.close()
-        if self.autocommit:
-            self.db.commit()
-        return res
+        try:
+            c.execute(query, args)
+            return c.fetchall()
+        finally:
+            c.close()
 
     def _doInsert(self, query, *args):
         '''
@@ -137,18 +131,6 @@ class DbGraphStore:
         if self.autocommit:
             self.db.commit()
         return hid
-
-    def _doInsertRetIds(self, query, *args):
-        '''
-        Insert with a returning list of IDs.
-        '''
-        c = self.db.cursor()
-        c.execute(query, args)
-        rows = c.fetchall()
-        c.close()
-        if self.autocommit:
-            self.db.commit()
-        return [ r[0] for r in rows ]
 
     def _doCommit(self):
         self.db.commit()
@@ -196,50 +178,10 @@ class DbGraphStore:
 
         NOTE: this will delete any edges which go to or from nid!
         '''
-
-        # Delete edge properties to and from
-        q = '''
-        DELETE FROM
-            vg_edge_props
-        USING
-            vg_edges
-        WHERE 
-            vg_edges.n1 = %s
-          AND
-            vg_edges.eid = vg_edge_props.eid
-        '''
-        self._doInsert(q, nid)
-
-        q = '''
-        DELETE FROM
-            vg_edge_props
-        USING
-            vg_edges
-        WHERE 
-            vg_edges.n2 = %s
-          AND
-            vg_edges.eid = vg_edge_props.eid
-        '''
-        self._doInsert(q, nid)
-
-        # Delete edges to and from
-        q = '''
-        DELETE FROM
-            vg_edges
-        WHERE
-            vg_edges.n1 = %s
-        '''
-        self._doInsert(q, nid)
-
-        q = '''
-        DELETE FROM
-            vg_edges
-        WHERE
-            vg_edges.n2 = %s
-        '''
-        self._doInsert(q, nid)
-
-        # Delete from node properties
+        for eid,n1,n2,einfo in self.getRefsFrom(nid):
+            self.delEdge(eid)
+        for eid,n1,n2,einfo in self.getRefsTo(nid):
+            self.delEdge(eid)
         q = '''
         DELETE FROM
             vg_node_props
@@ -256,17 +198,12 @@ class DbGraphStore:
         self._doInsert(q, nid)
 
     def setNodeInfo(self, nid, pname, value):
-
-        if isinstance(value, bool):
-            value = int(value)
-
         if isinstance(value, int) or isinstance(value, long):
-            q = 'UPDATE vg_node_props SET intval=%s,created=NOW() WHERE nid=%s and pname=%s RETURNING nid'
+            q = 'UPDATE vg_node_props SET intval=%s WHERE nid=%s and pname=%s RETURNING nid'
             q1 = 'INSERT INTO vg_node_props (nid, pname, intval) VALUES (%s,%s,%s)'
         else:
-            q = 'UPDATE vg_node_props SET strval=%s,created=NOW() WHERE nid=%s and pname=%s RETURNING nid'
+            q = 'UPDATE vg_node_props SET strval=%s WHERE nid=%s and pname=%s RETURNING nid'
             q1 = 'INSERT INTO vg_node_props (nid, pname, strval) VALUES (%s,%s,%s)'
-
         # return a value to see if we actually did the update...
         res = self._doSelect(q, value, nid, pname)
         if len(res) == 0:
@@ -297,16 +234,6 @@ class DbGraphStore:
             else:
                 ret[pname] = strval
         return ret
-
-    def getNodesProps(self, nids):
-        ret = collections.defaultdict(dict)
-        q = 'SELECT nid,pname,intval,strval FROM vg_node_props WHERE nid IN %s' 
-        for nid,pname,intval,strval in self._doSelect(q, tuple(nids)):
-            if intval != None:
-                ret[nid][pname] = intval
-            else:
-                ret[nid][pname] = strval
-        return ret.items()
 
     def addEdge(self, fromid, toid, eid=None, einfo=None):
         if eid != None:
@@ -387,10 +314,6 @@ class DbGraphStore:
         return refs.values()
 
     def setEdgeInfo(self, eid, pname, value):
-
-        if isinstance(value, bool):
-            value = int(value)
-
         if isinstance(value, int) or isinstance(value, long):
             q = 'UPDATE vg_edge_props SET intval=%s WHERE eid=%s and pname=%s RETURNING eid'
             q1 = 'INSERT INTO vg_edge_props (eid, pname, intval) VALUES (%s,%s,%s)'
@@ -411,30 +334,6 @@ class DbGraphStore:
         if intval != None:
             return intval
         return strval
-
-    def getEdge(self, eid):
-        '''
-        Get the edge tuple ( eid, n1, n2, nprops ) for the given edge by id.
-        '''
-        q = 'SELECT eid,n1,n2 FROM vg_edges WHERE eid=%s'
-        res = self._doSelect( q, eid )
-        if not res:
-            raise Exception('Invalid Edge Id: %s' % eid)
-        e,n1,n2 = res[0]
-        return (eid, n1, n2, self.getEdgeProps( eid ) )
-
-    def getEdgeProps(self, eid):
-        '''
-        Retrieve the properties dictionary for the given edge id.
-        '''
-        ret = {}
-        q = 'SELECT pname,intval,strval FROM vg_edge_props WHERE eid=%s'
-        for pname,intval,strval in self._doSelect(q, eid):
-            if intval != None:
-                ret[pname] = intval
-            else:
-                ret[pname] = strval
-        return ret
 
     def searchNodes(self, propname, propval=None):
         '''

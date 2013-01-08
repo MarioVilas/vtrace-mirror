@@ -277,7 +277,6 @@ class EnviCli(Cmd):
         """
         if not line:
             return self.do_help("eval")
-
         value = self.parseExpression(line)
 
         self.canvas.addText("%s = " % line)

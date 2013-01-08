@@ -53,7 +53,8 @@ class PosixMixin:
         self.sendSignal(signal.SIGTRAP) # FIXME maybe change to SIGSTOP
 
     def platformWait(self):
-        return os.waitpid(self.pid,0)
+        pid, status = os.waitpid(self.pid,0)
+        return status
 
     def handleAttach(self):
         self.fireNotifiers(vtrace.NOTIFY_ATTACH)
@@ -64,24 +65,23 @@ class PosixMixin:
         self.runAgain(False) # Clear this, if they want BREAK to run, it will
         self.fireNotifiers(vtrace.NOTIFY_BREAK)
 
-    def platformProcessEvent(self, event):
-        pid,status = event
+    def platformProcessEvent(self, status):
+
         if os.WIFEXITED(status):
             tid = self.getMeta("ThreadId", -1)
-            exitcode = os.WEXITSTATUS(status)
             if tid != self.getPid():
                 # Set the selected thread ID to the pid cause
                 # the old one's invalid
                 if tid in self.pthreads:
                     self.pthreads.remove(tid)
                 self.setMeta("ThreadId", self.getPid())
-                self._fireExitThread(tid, exitcode)
-
+                self._fireExitThread(tid, os.WEXITSTATUS(status))
             else:
-                self._fireExit( exitcode )
+                self._fireExit(os.WEXITSTATUS(status))
 
         elif os.WIFSIGNALED(status):
-            self._fireExit( os.WTERMSIG( status ) )
+            self.setMeta("ExitCode", os.WTERMSIG(status))
+            self.fireNotifiers(vtrace.NOTIFY_EXIT)
 
         elif os.WIFSTOPPED(status):
             sig = os.WSTOPSIG(status)
@@ -179,14 +179,9 @@ def ptrace(code, pid, addr, data):
     """
     global libc
     if not libc:
-        if os.getenv('ANDROID_ROOT'):
-            cloc = '/system/lib/libc.so'
-
-        else:
-            cloc = cutil.find_library("c")
-            if not cloc:
-                raise Exception("ERROR: can't find C library on posix system!")
-
+        cloc = cutil.find_library("c")
+        if not cloc:
+            raise Exception("ERROR: can't find C library on posix system!")
         libc = CDLL(cloc)
         libc.ptrace.restype = c_size_t
         libc.ptrace.argtypes = [c_int, c_uint32, c_size_t, c_size_t]

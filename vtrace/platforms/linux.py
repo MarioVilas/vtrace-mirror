@@ -3,32 +3,24 @@ Linux Platform Module
 """
 # Copyright (C) 2007 Invisigoth - See LICENSE file for details
 import os
-import time
 import struct
 import signal
 import traceback
 import platform
 
-import envi.cli as e_cli
 import envi.memory as e_mem
 import envi.registers as e_reg
 
 import vtrace
-
-import vtrace.archs.arm as v_arm
 import vtrace.archs.i386 as v_i386
 import vtrace.archs.amd64 as v_amd64
-
 import vtrace.platforms.base as v_base
 import vtrace.platforms.posix as v_posix
 
 from ctypes import *
 import ctypes.util as cutil
 
-if os.getenv('ANDROID_ROOT'):
-    libc = CDLL('/system/lib/libc.so')
-else:
-    libc = CDLL(cutil.find_library("c"))
+libc = CDLL(cutil.find_library("c"))
 
 libc.lseek64.restype = c_ulonglong
 libc.lseek64.argtypes = [c_uint, c_ulonglong, c_uint]
@@ -79,68 +71,6 @@ PT_EVENT_EXIT       = 6
 # Used to tell some of the additional events apart
 SIG_LINUX_SYSCALL = signal.SIGTRAP | 0x80
 SIG_LINUX_CLONE = signal.SIGTRAP | (PT_EVENT_CLONE << 8)
-
-#following from Pandaboard ES (OMAP4460) Armv7a (cortex-a9)
-class user_regs_arm(Structure):
-    _fields_ = (
-            ("r0", c_ulong),
-            ("r1", c_ulong),
-            ("r2", c_ulong),
-            ("r3", c_ulong),
-            ("r4", c_ulong),
-            ("r5", c_ulong),
-            ("r6", c_ulong),
-            ("r7", c_ulong),
-            ("r8", c_ulong),
-            ("r9", c_ulong),
-            ("r10", c_ulong), #aka 'sl' ?
-            ("fp", c_ulong),
-            ("ip", c_ulong),
-            ("sp", c_ulong),
-            ("lr", c_ulong),
-            ("pc", c_ulong),
-            ("cpsr", c_ulong),
-            ("orig_r0", c_ulong),
-    )
-
-class fp_reg_arm(Structure):
-    _fields_ = (
-            ("sign1", c_long, 1),
-            ("unused", c_long, 15),
-            ("sign2", c_long, 1),
-            ("exponent", c_long, 14),
-            ("j", c_long, 1),
-            ("mantissa1", c_long, 31),
-            ("mantissa0", c_long, 32),
-    )
-
-class user_fpregs_arm(Structure):
-    _fields_ = (
-            ("fpregs", fp_reg_arm*8),
-            ("fpsr", c_ulong, 32),
-            ("fpcr", c_ulong, 32),
-            ("ftype", c_ubyte*8),
-            ("init_flag", c_ulong),
-    )
-
-class USER_arm(Structure):
-    _fields_ = (
-        ("regs",       user_regs_arm),
-        ("u_fpvalid",  c_long),
-        ("u_tsize",    c_ulong),
-        ("u_dsize",    c_ulong),
-        ("u_ssize",    c_ulong),
-        ("start_code", c_ulong),
-        ("start_stack",c_ulong),
-        ("signal",     c_long),
-        ("reserved",   c_long),
-        ("u_ar0",      c_void_p),
-        ("magic",      c_ulong),
-        ("u_comm",     c_char*32),
-        ("u_debugreg", c_long*8),
-        ("fpregs",     user_fpregs_arm),
-        ("u_fp0",      c_void_p)
-    )
 
 class user_regs_i386(Structure):
     _fields_ = (
@@ -228,7 +158,8 @@ class user_regs_amd64(Structure):
         ('gs',       c_uint64),
     ]
 
-intel_dbgregs = (0,1,2,3,6,7)
+# Modern linux only lets us write to these...
+dbgregs = (0,1,2,3,6,7)
 
 class LinuxMixin(v_posix.PtraceMixin, v_posix.PosixMixin):
     """
@@ -240,13 +171,20 @@ class LinuxMixin(v_posix.PtraceMixin, v_posix.PosixMixin):
         # Wrap reads from proc in our worker thread
         v_posix.PtraceMixin.__init__(self)
         v_posix.PosixMixin.__init__(self)
+        self.nptlinit = False
         self.memfd = None
-        self._stopped_cache = {}
-        self._stopped_hack = False
 
         self.fireTracerThread()
 
         self.initMode("Syscall", False, "Break On Syscalls")
+
+    @v_base.threadwrap
+    def platformExec(self, cmdline):
+        print 'FIXME: known bug with thread create events from execd linux trace!'
+        pid = v_posix.PtraceMixin.platformExec(self, cmdline)
+        self.pthreads = [pid,]
+        self.setMeta("ExeName",self._findExe(pid))
+        return pid
 
     def setupMemFile(self, offset):
         """
@@ -256,6 +194,60 @@ class LinuxMixin(v_posix.PtraceMixin, v_posix.PosixMixin):
             self.memfd = libc.open("/proc/%d/mem" % self.pid, O_RDWR | O_LARGEFILE, 0755)
 
         x = libc.lseek64(self.memfd, offset, 0)
+
+    @v_base.threadwrap
+    def platformAllocateMemory(self, size, perms=e_mem.MM_RWX, suggestaddr=0):
+        #FIXME this is intel specific and should probably go in with the regs
+        sp = self.getStackCounter()
+        pc = self.getProgramCounter()
+
+        # Xlate perms (mmap is backward)
+        realperm = 0
+        if perms & e_mem.MM_READ:
+            realperm |= 1
+        if perms & e_mem.MM_WRITE:
+            realperm |= 2
+        if perms & e_mem.MM_EXEC:
+            realperm |= 4
+
+        #mma is struct of mmap args for linux syscall
+        mma = struct.pack("<6L", suggestaddr, size, realperm, MAP_ANONYMOUS|MAP_PRIVATE, 0, 0)
+
+        regsave = self.getRegisters()
+
+        stacksave = self.readMemory(sp, len(mma))
+        ipsave = self.readMemory(pc, 2)
+
+        SYS_mmap = 90
+
+        self.writeMemory(sp, mma)
+        self.writeMemory(pc, "\xcd\x80")
+        self.setRegisterByName("eax", SYS_mmap)
+        self.setRegisterByName("ebx", sp)
+        self._syncRegs()
+
+        try:
+            # Step over our syscall instruction
+            tid = self.getMeta("ThreadId", 0)
+            self.platformStepi()
+            os.waitpid(tid, 0)
+            eax = self.getRegisterByName("eax")
+            if eax & 0x80000000:
+                raise Exception("Linux mmap syscall error: %d" % eax)
+            return eax
+
+        finally:
+            # Clean up all our fux0ring
+            self.writeMemory(sp, stacksave)
+            self.writeMemory(pc, ipsave)
+            self.setRegisters(regsave)
+
+    def posixCreateThreadHack(self):
+        for tid in self.threadsForPid(self.pid):
+            if tid == self.pid:
+                continue
+            self.attachThread(tid)
+        v_posix.PosixMixin.posixCreateThreadHack(self)
 
     @v_base.threadwrap
     def platformReadMemory(self, address, size):
@@ -300,34 +292,12 @@ class LinuxMixin(v_posix.PtraceMixin, v_posix.PosixMixin):
         return exe
 
     @v_base.threadwrap
-    def platformExec(self, cmdline):
-        # Very similar to posix, but not
-        # quite close enough...
-        self.execing = True
-        cmdlist = e_cli.splitargs(cmdline)
-        os.stat(cmdlist[0])
-        pid = os.fork()
-
-        if pid == 0:
-            v_posix.ptrace(v_posix.PT_TRACE_ME, 0, 0, 0)
-            # Make sure our parent gets some cycles
-            time.sleep(0.1)
-            os.execv(cmdlist[0], cmdlist)
-            sys.exit(-1)
-
-        if v_posix.ptrace(PT_ATTACH, pid, 0, 0) != 0:
-            raise Exception("PT_ATTACH failed! linux platformExec")
-
-        self.pthreads = [pid,]
-        self.setMeta("ExeName", self._findExe(pid))
-        return pid
-
-    @v_base.threadwrap
     def platformAttach(self, pid):
         self.pthreads = [pid,]
         self.setMeta("ThreadId", pid)
         if v_posix.ptrace(PT_ATTACH, pid, 0, 0) != 0:
             raise Exception("PT_ATTACH failed!")
+        self.setupPtraceOptions(pid)
         self.setMeta("ExeName", self._findExe(pid))
 
     def platformPs(self):
@@ -343,12 +313,6 @@ class LinuxMixin(v_posix.PtraceMixin, v_posix.PosixMixin):
             except:
                 pass # Permissions...  quick process... whatev.
         return pslist
-
-    def _simpleCreateThreads(self):
-        for tid in self.threadsForPid( self.pid ):
-            if tid == self.pid:
-                continue
-            self.attachThread( tid )
 
     def attachThread(self, tid, attached=False):
         self.doAttachThread(tid,attached=attached)
@@ -372,7 +336,11 @@ class LinuxMixin(v_posix.PtraceMixin, v_posix.PosixMixin):
                     os.waitpid(tid, 0x40000002)
                 except Exception, e:
                     print "WARNING TID is invalid %d %s" % (tid,e)
-        return pid,status
+        return status
+
+    # If it's linux 2.4 we must threadwrap wait...
+    if platform.release().startswith("2.4"):
+        platformWait = v_base.threadwrap(platformWait)
 
     @v_base.threadwrap
     def platformContinue(self):
@@ -385,8 +353,7 @@ class LinuxMixin(v_posix.PtraceMixin, v_posix.PosixMixin):
             sig = 0
         # Only deliver signals to the main thread
         if v_posix.ptrace(cmd, pid, 0, sig) != 0:
-            libc.perror('ptrace PT_CONTINUE failed for pid %d' % pid)
-            raise Exception("ERROR ptrace failed for pid %d" % pid)
+            raise Exception("ERROR ptrace failed for tid %d" % pid)
 
         for tid in self.pthreads:
             if tid == pid:
@@ -417,26 +384,21 @@ class LinuxMixin(v_posix.PtraceMixin, v_posix.PosixMixin):
         if not attached:
             if v_posix.ptrace(PT_ATTACH, tid, 0, 0) != 0:
                 raise Exception("ERROR ptrace attach failed for thread %d" % tid)
-
-        # We may have already revcieved the stop signal
-        if not self._stopped_cache.pop( tid, None ):
-            os.waitpid(tid, 0x40000002)
-
+        os.waitpid(tid, 0x40000002)
         self.setupPtraceOptions(tid)
         self.pthreads.append(tid)
 
-    @v_base.threadwrap
     def setupPtraceOptions(self, tid):
         """
-        Called per pid/tid to setup proper options
-        for ptrace.
+        Called by doAttachThread to setup ptrace related options.
         """
         opts = PT_O_TRACESYSGOOD
-        if platform.release()[:3] in ('2.6','3.0','3.1','3.2'):
+        if platform.release().startswith("2.6"):
             opts |= PT_O_TRACECLONE
         x = v_posix.ptrace(PT_SETOPTIONS, tid, 0, opts)
         if x != 0:
             libc.perror('ptrace PT_SETOPTION failed for thread %d' % tid)
+            #print "WARNING ptrace SETOPTIONS failed for thread %d (%d)" % (tid,x)
 
     def threadsForPid(self, pid):
         ret = []
@@ -446,76 +408,18 @@ class LinuxMixin(v_posix.PtraceMixin, v_posix.PosixMixin):
                 ret.append(int(pidstr))
         return ret
 
-    def platformProcessEvent(self, event):
+    def platformProcessEvent(self, status):
         # Skim some linux specific events before passing to posix
-        tid, status = event
+        tid = self.getMeta("ThreadId", -1)
         if os.WIFSTOPPED(status):
-            sig = status >> 8 # Cant use os.WSTOPSIG() here...
-            #print('STOPPED: %d %d %.8x %d' % (self.pid, tid, status, sig))
-
-            # Ok... this is a crazy little state engine that tries
-            # to account for the discrepancies in how linux posts
-            # signals to the debugger...
-
-            # Thread Creation:
-            # In each case below, the kernel may deliver
-            # any of the 3 signals in any order...  ALSO
-            # (and more importantly) *if* the kernel sends
-            # SIGSTOP to the thread first, the debugger
-            # will get a SIGSTOP *instead* of SIG_LINUX_CLONE
-            # ( this will go back and forth on *ONE BOX* with
-            #   the same kernel version... Finally squished it
-            #   because it presents more frequently ( 1 in 10 )
-            #   on my new ARM linux dev board. WTF?!1?!one?!? )
-            #
-            # Case 1 (SIG_LINUX_CLONE):
-            #     debugger gets SIG_LINUX CLONE as expected
-            #     and can then use ptrace(PT_GETEVENTMSG)
-            #     to get new TID and attach as normal
-            # Case 2 (SIGSTOP delivered to thread)
-            #     Thread is already stoped and attached but
-            #     parent debugger doesn't know yet.  We add
-            #     the tid to the stopped_cache so when the
-            #     kernel gets around to telling the debugger
-            #     we don't wait on him again.
-            # Case 3 (SIGSTOP delivered to debugger)
-            #     In both case 2 and case 3, this will cause
-            #     the SIG_LINUX_CLONE to be skipped.  Either
-            #     way, we should head down into thread attach.
-            #     ( The thread may be already stopped )
+            sig = status >> 8
             if sig == SIG_LINUX_SYSCALL:
                 self.fireNotifiers(vtrace.NOTIFY_SYSCALL)
 
             elif sig == SIG_LINUX_CLONE:
                 # Handle a new thread here!
                 newtid = self.getPtraceEvent()
-                #print('CLONE (new tid: %d)' % newtid)
                 self.attachThread(newtid, attached=True)
-
-            elif sig == signal.SIGSTOP and tid != self.pid:
-                #print('OMG IM THE NEW THREAD! %d' % tid)
-                # We're not even a real event right now...
-                self.runAgain()
-                self._stopped_cache[tid] = True
-
-            elif sig == signal.SIGSTOP:
-                # If we are still 'exec()'ing, we havent hit the SIGTRAP
-                # yet ( so our process info is still python, lets skip it )
-                if self.execing:
-                    self._stopped_hack = True
-                    self.setupPtraceOptions(tid)
-                    self.runAgain()
-
-                elif self._stopped_hack:
-                    newtid = self.getPtraceEvent(tid)
-                    #print("WHY DID WE GET *ANOTHER* STOP?: %d" % tid)
-                    #print('PTRACE EVENT: %d' % newtid)
-                    self.attachThread(newtid, attached=True)
-
-                else: # on first attach...
-                    self._stopped_hack = True
-                    self.setupPtraceOptions(tid)
-                    self.handlePosixSignal(sig)
 
             #FIXME eventually implement child catching!
             else:
@@ -523,17 +427,16 @@ class LinuxMixin(v_posix.PtraceMixin, v_posix.PosixMixin):
 
             return
 
-        v_posix.PosixMixin.platformProcessEvent(self, event)
+        v_posix.PosixMixin.platformProcessEvent(self, status)
 
     @v_base.threadwrap
-    def getPtraceEvent(self, tid=None):
+    def getPtraceEvent(self):
         """
         This *thread wrapped* function will get any pending GETEVENTMSG
         msgs.
         """
         p = c_ulong(0)
-        if tid == None:
-            tid = self.getMeta("ThreadId", -1)
+        tid = self.getMeta("ThreadId", -1)
         if v_posix.ptrace(PT_GETEVENTMSG, tid, 0, addressof(p)) != 0:
             raise Exception('ptrace PT_GETEVENTMSG failed!')
         return p.value
@@ -603,6 +506,12 @@ class LinuxMixin(v_posix.PtraceMixin, v_posix.PosixMixin):
             raise Exception("Error: ptrace(PT_GETREGS...) failed!")
 
         ctx._rctx_Import(u)
+
+        for i in dbgregs:
+            offset = self.user_dbg_offset + (self.psize * i)
+            r = v_posix.ptrace(v_posix.PT_READ_U, tid, offset, 0)
+            ctx.setRegister(self.dbgidx+i, r & self.reg_val_mask)
+
         return ctx
 
     @v_base.threadwrap
@@ -617,14 +526,12 @@ class LinuxMixin(v_posix.PtraceMixin, v_posix.PosixMixin):
         if v_posix.ptrace(PT_SETREGS, tid, 0, addressof(u)) == -1:
             raise Exception("Error: ptrace(PT_SETREGS...) failed!")
 
-        """
-        for i in intel_dbgregs:
+        for i in dbgregs:
             val = ctx.getRegister(self.dbgidx + i)
             offset = self.user_dbg_offset + (self.psize * i)
             if v_posix.ptrace(v_posix.PT_WRITE_U, tid, offset, val) != 0:
                 libc.perror('PT_WRITE_U failed for debug%d' % i)
                 #raise Exception("PT_WRITE_U for debug%d failed!" % i)
-        """
 
 class Linuxi386Trace(
         vtrace.Trace,
@@ -632,6 +539,7 @@ class Linuxi386Trace(
         v_i386.i386Mixin,
         v_posix.ElfMixin,
         v_base.TracerBase):
+
 
     user_reg_struct = user_regs_i386
     user_dbg_offset = 252
@@ -646,71 +554,6 @@ class Linuxi386Trace(
 
         # Pre-calc the index of the debug regs
         self.dbgidx = self.archGetRegCtx().getRegisterIndex("debug0")
-
-    @v_base.threadwrap
-    def platformGetRegCtx(self, tid):
-        ctx = LinuxMixin.platformGetRegCtx( self, tid )
-        for i in intel_dbgregs:
-            offset = self.user_dbg_offset + (self.psize * i)
-            r = v_posix.ptrace(v_posix.PT_READ_U, tid, offset, 0)
-            ctx.setRegister(self.dbgidx+i, r & self.reg_val_mask)
-        return ctx
-
-    @v_base.threadwrap
-    def platformSetRegCtx(self, tid, ctx):
-        LinuxMixin.platformSetRegCtx( self, tid, ctx )
-        for i in intel_dbgregs:
-            val = ctx.getRegister(self.dbgidx + i)
-            offset = self.user_dbg_offset + (self.psize * i)
-            if v_posix.ptrace(v_posix.PT_WRITE_U, tid, offset, val) != 0:
-                libc.perror('PT_WRITE_U failed for debug%d' % i)
-
-    @v_base.threadwrap
-    def platformAllocateMemory(self, size, perms=e_mem.MM_RWX, suggestaddr=0):
-        sp = self.getStackCounter()
-        pc = self.getProgramCounter()
-
-        # Xlate perms (mmap is backward)
-        realperm = 0
-        if perms & e_mem.MM_READ:
-            realperm |= 1
-        if perms & e_mem.MM_WRITE:
-            realperm |= 2
-        if perms & e_mem.MM_EXEC:
-            realperm |= 4
-
-        #mma is struct of mmap args for linux syscall
-        mma = struct.pack("<6L", suggestaddr, size, realperm, MAP_ANONYMOUS|MAP_PRIVATE, 0, 0)
-
-        regsave = self.getRegisters()
-
-        stacksave = self.readMemory(sp, len(mma))
-        ipsave = self.readMemory(pc, 2)
-
-        SYS_mmap = 90
-
-        self.writeMemory(sp, mma)
-        self.writeMemory(pc, "\xcd\x80")
-        self.setRegisterByName("eax", SYS_mmap)
-        self.setRegisterByName("ebx", sp)
-        self._syncRegs()
-
-        try:
-            # Step over our syscall instruction
-            tid = self.getMeta("ThreadId", 0)
-            self.platformStepi()
-            os.waitpid(tid, 0)
-            eax = self.getRegisterByName("eax")
-            if eax & 0x80000000:
-                raise Exception("Linux mmap syscall error: %d" % eax)
-            return eax
-
-        finally:
-            # Clean up all our fux0ring
-            self.writeMemory(sp, stacksave)
-            self.writeMemory(pc, ipsave)
-            self.setRegisters(regsave)
-
 
 class LinuxAmd64Trace(
         vtrace.Trace,
@@ -731,92 +574,4 @@ class LinuxAmd64Trace(
         LinuxMixin.__init__(self)
 
         self.dbgidx = self.archGetRegCtx().getRegisterIndex("debug0")
-
-    @v_base.threadwrap
-    def platformGetRegCtx(self, tid):
-        ctx = LinuxMixin.platformGetRegCtx( self, tid )
-        for i in intel_dbgregs:
-            offset = self.user_dbg_offset + (self.psize * i)
-            r = v_posix.ptrace(v_posix.PT_READ_U, tid, offset, 0)
-            ctx.setRegister(self.dbgidx+i, r & self.reg_val_mask)
-        return ctx
-
-    @v_base.threadwrap
-    def platformSetRegCtx(self, tid, ctx):
-        LinuxMixin.platformSetRegCtx( self, tid, ctx )
-        for i in intel_dbgregs:
-            val = ctx.getRegister(self.dbgidx + i)
-            offset = self.user_dbg_offset + (self.psize * i)
-            if v_posix.ptrace(v_posix.PT_WRITE_U, tid, offset, val) != 0:
-                libc.perror('PT_WRITE_U failed for debug%d' % i)
-
-arm_break_be = 'e7f001f0'.decode('hex')
-arm_break_le = 'f001f0e7'.decode('hex')
-
-class LinuxArmTrace(
-        vtrace.Trace,
-        LinuxMixin,
-        v_arm.ArmMixin,
-        v_posix.ElfMixin,
-        v_base.TracerBase):
-
-    user_reg_struct = user_regs_arm
-    reg_val_mask = 0xffffffff
-
-    def __init__(self):
-        vtrace.Trace.__init__(self)
-        v_base.TracerBase.__init__(self)
-        v_posix.ElfMixin.__init__(self)
-        v_arm.ArmMixin.__init__(self)
-        LinuxMixin.__init__(self)
-
-        self._break_after_bp = False
-        self._step_cleanup = []
-
-    def _fireStep(self):
-        # See notes below about insanity...
-        if self._step_cleanup != None:
-            [ self.writeMemory( bva, bytes ) for (bva,bytes) in self._step_cleanup ]
-            self._step_cleanup = None
-        return v_base.TracerBase._fireStep( self )
-
-    def archGetBreakInstr(self):
-        return arm_break_le
-        #return 'FIXME'
-
-    @v_base.threadwrap
-    def platformStepi(self):
-        # This is a total rediculous hack to account
-        # for the fact that the arm platform couldn't
-        # be bothered to implement single stepping in
-        # the stupid hardware...
-
-        self.stepping = True
-
-        pc = self.getProgramCounter()
-        op = self.parseOpcode( pc )
-
-        branches = op.getBranches( self )
-        if not branches:
-            raise Exception('''
-                    The branches for the instruction %r were not decoded correctly.  This means that
-                    we cant properly predict the possible next instruction executions in a way that allows us
-                    to account for the STUPID INSANE FACT THAT THERE IS NO HARDWARE SINGLE STEP CAPABILITY ON
-                    ARM (non-realtime or JTAG anyway).  We *would* have written invalid instructions to each
-                    of those locations and cleaned them up before you ever knew anything was amiss... which is
-                    how we pretend arm can single step... even though IT CANT. (please tell visi...)
-            ''' % op)
-
-        # Save the memory at the branches for later
-        # restoration in the _fireStep callback.
-
-        self._step_cleanup = []
-        for bva,bflags in op.getBranches( self ):
-            self._step_cleanup.append( (bva, self.readMemory( bva, 4 )) )
-            self.writeMemory( bva, arm_break_le )
-
-        tid = self.getMeta('ThreadId')
-
-        if v_posix.ptrace(v_posix.PT_CONTINUE, tid, 0, 0) != 0:
-            raise Exception("ERROR ptrace failed for tid %d" % tid)
 

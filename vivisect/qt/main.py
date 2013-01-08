@@ -13,7 +13,6 @@ import vivisect.vdbext as viv_vdbext
 import vivisect.qt.views as viv_q_views
 import vivisect.qt.memory as viv_q_memory
 import vivisect.qt.ustruct as viv_q_ustruct
-import vivisect.extensions as viv_extensions
 import vivisect.qt.funcgraph as viv_q_funcgraph
 
 from PyQt4 import QtCore, QtGui
@@ -189,7 +188,7 @@ class VQVivMainWindow(vq_app.VQMainCmdWindow, viv_base.VivEventDist):
         self.vqBuildDockWidget('VQVivStringsView', area=QtCore.Qt.RightDockWidgetArea)
 
     def _menuViewStructs(self):
-        self.vqBuildDockWidget('VQVivStructsView', area=QtCore.Qt.RightDockWidgetArea)
+        self.vqBuildDockWidget('VQVivStringsView', area=QtCore.Qt.RightDockWidgetArea)
 
     def _menuViewSegments(self):
         self.vqBuildDockWidget('VQVivSegmentsView', area=QtCore.Qt.RightDockWidgetArea)
@@ -224,7 +223,6 @@ def main(vw):
     vq_main.startup()
     mw = VQVivMainWindow(vw)
     mw.show()
-    viv_extensions.loadExtensions( vw, mw )
     vq_main.main()
 
 if __name__ == '__main__':

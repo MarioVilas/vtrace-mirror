@@ -20,15 +20,9 @@ class Symbol:
 
     def __coerce__(self, value):
         t = type(value)
-
         if t == types.NoneType:
             return (True, False)
-
-        if t in (int,long):
-            return (t(self.value), value)
-
-        if isinstance( value, Symbol ):
-            return ( long(self.value), long(value.value) )
+        return (value, t(self.value))
 
     def __hash__(self):
         return hash(long(self))
@@ -119,7 +113,7 @@ class SymbolResolver:
             subres = self.symnames.get(sym.fname)
 
         # Potentially add it to the sub resolver's namespace
-        if isinstance(subres, SymbolResolver):
+        if subres != None:
             subres.addSymbol(sym)
 
         # Otherwise add it to our namespace

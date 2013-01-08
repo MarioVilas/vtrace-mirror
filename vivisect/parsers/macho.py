@@ -79,7 +79,6 @@ def _loadMacho(vw, filebytes, filename=None):
     hash = "unknown hash"
     if os.path.exists(filename):
         hash = viv_parsers.md5File(filename)
-
     fname = vw.addFile(filename, baseaddr, hash)
 
     # Add the memory maps and segments from the macho definition

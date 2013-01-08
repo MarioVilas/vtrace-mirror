@@ -288,143 +288,6 @@ class v_ptr32(v_ptr):
 class v_ptr64(v_ptr):
     _vs_builder = True
     _vs_length = 8
-    
-float_fmts = {
-    (True,4):'>f',
-    (True,8):'>d',
-    (False,4):'<f',
-    (False,8):'<d',
-}
-
-class v_float(v_prim):
-    _vs_length = 4
-    
-    def __init__(self, value=0.0, bigend=False):
-        v_prim.__init__(self)
-        self._vs_bigend = bigend
-        self._vs_value = value
-        self._vs_length = self.__class__._vs_length
-        self._vs_fmt = float_fmts.get( (bigend, self._vs_length) )
-
-    def vsSetValue(self, value):
-        """
-        Assure that the value is float() able for all numeric types.
-        """
-        self._vs_value = float(value)
-
-    def vsGetValue(self):
-        return self._vs_value
-
-    def vsParse(self, fbytes, offset=0):
-        '''
-        Parse the given numeric type from the given bytes...
-        '''
-        sizeoff = offset + self._vs_length
-
-        if self._vs_fmt != None:
-            b = fbytes[ offset : sizeoff ]
-            self._vs_value = struct.unpack(self._vs_fmt, b)[0]
-
-        else:
-            r = []
-            for i in range(self._vs_length):
-                r.append( ord( fbytes[ offset + i ] ) )
-
-            if not self._vs_bigend:
-                r.reverse()
-
-            self._vs_value = 0
-            for x in r:
-                self._vs_value = (self._vs_value << 8) + x
-
-        return sizeoff
-
-    def vsEmit(self):
-        '''
-        Emit the bytes for this numeric type...
-        '''
-        if self._vs_fmt != None:
-            return struct.pack(self._vs_fmt, self._vs_value)
-
-        r = []
-        for i in range(self._vs_length):
-            r.append( chr( (self._vs_value >> (i*8)) & 0xff) )
-
-        if self._vs_bigend:
-            r.reverse()
-
-        return ''.join(r)
-
-    def __int__(self):
-        return int(self._vs_value)
-
-    def __long__(self):
-        return long(self._vs_value)
-
-    def __add__(self, other): return double(self) + double(other)
-    def __sub__(self, other): return double(self) - double(other)
-    def __mul__(self, other): return double(self) * double(other)
-    def __div__(self, other): return double(self) / double(other)
-    def __floordiv__(self, other): return double(self) // double(other)
-    def __mod__(self, other): return double(self) % double(other)
-    def __divmod__(self, other): return divmod(double(self), double(other))
-    def __pow__(self, other, modulo=None): return pow(double(self), double(other), modulo)
-    def __lshift__(self, other): return double(self) << double(other)
-    def __rshift__(self, other): return double(self) >> double(other)
-    def __and__(self, other): return double(self) & double(other)
-    def __xor__(self, other): return double(self) ^ double(other)
-    def __or__(self, other): return double(self) | double(other)
-
-    # Operator swapped variants
-    def __radd__(self, other): return double(other) + double(self)
-    def __rsub__(self, other): return double(other) - double(self)
-    def __rmul__(self, other): return double(other) * double(self)
-    def __rdiv__(self, other): return double(other) / double(self)
-    def __rfloordiv__(self, other): return double(other) // double(self)
-    def __rmod__(self, other): return double(other) % double(self)
-    def __rdivmod__(self, other): return divmod(double(other), double(self))
-    def __rpow__(self, other, modulo=None): return pow(double(other), double(self), modulo)
-    def __rlshift__(self, other): return double(other) << double(self)
-    def __rrshift__(self, other): return double(other) >> double(self)
-    def __rand__(self, other): return double(other) & double(self)
-    def __rxor__(self, other): return double(other) ^ double(self)
-    def __ror__(self, other): return double(other) | double(self)
-
-    # Inplace variants
-    def __iadd__(self, other): self.vsSetValue(self+other); return self
-    def __isub__(self, other): self.vsSetValue(self - other); return self
-    def __imul__(self, other): self.vsSetValue(self*other); return self
-    def __idiv__(self, other): self.vsSetValue(self/other); return self
-    def __ifloordiv__(self, other): self.vsSetValue(self // other); return self
-    def __imod__(self, other): self.vsSetValue(self % other); return self
-    def __ipow__(self, other, modulo=None): self.vsSetValue(pow(self, other, modulo)); return self
-    def __ilshift__(self, other): self.vsSetValue(self << other); return self
-    def __irshift__(self, other): self.vsSetValue(self >> other); return self
-    def __iand__(self, other): self.vsSetValue(self & other); return self
-    def __ixor__(self, other): self.vsSetValue(self ^ other); return self
-    def __ior__(self, other): self.vsSetValue(self | other); return self
-
-    # operator helpers
-    def __neg__(self): return -(double(self))
-    def __pos__(self): return +(double(self))
-    def __abs__(self): return abs(double(self))
-    def __invert__(self): return ~(double(self))
-
-    # index use helper
-    def __index__(self): return double(self)
-
-    def __coerce__(self, other):
-        try:
-            return double(self),double(other)
-        except Exception, e:
-            return NotImplemented
-
-    # Print helpers
-    def __hex__(self): return hex(double(self))
-    def __oct__(self): return oct(double(self))
-
-class v_double(v_float):
-    _vs_length = 8
 
 class v_bytes(v_prim):
 
@@ -441,7 +304,6 @@ class v_bytes(v_prim):
         self._vs_length = len(vbytes)
         self._vs_value = vbytes
         self._vs_align = 1
-        self._vs_fmt = '%ds' % self._vs_length
 
     def vsSetValue(self, val):
         if len(val) != self._vs_length:
@@ -459,7 +321,6 @@ class v_bytes(v_prim):
     def vsSetLength(self, size):
         size = int(size)
         self._vs_length = size
-        self._vs_fmt = '%ds' % size
         # Either chop or expand my string...
         b = self._vs_value[:size]
         self._vs_value = b.ljust(size, '\x00')
@@ -479,7 +340,6 @@ class v_str(v_prim):
     def __init__(self, size=4, val=''):
         v_prim.__init__(self)
         self._vs_length = size
-        self._vs_fmt = '%ds' % size
         self._vs_value = val.ljust(size, '\x00')
         self._vs_align = 1
 
@@ -501,7 +361,6 @@ class v_str(v_prim):
     def vsSetLength(self, size):
         size = int(size)
         self._vs_length = size
-        self._vs_fmt = '%ds' % size
         # Either chop or expand my string...
         b = self._vs_value[:size]
         self._vs_value = b.ljust(size, '\x00')
@@ -599,7 +458,7 @@ class GUID(v_prim):
 
     def vsParse(self, fbytes, offset=0):
         offend = offset + self._vs_length
-        self._guid_fields = struct.unpack("<IHH8B", fbytes[offset:offend])
+        self._guid_fields = struct.unpack("<IHH8B", bytes[offset:offend])
         return offend
 
     def vsEmit(self):

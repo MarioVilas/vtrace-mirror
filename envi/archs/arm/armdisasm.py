@@ -1006,8 +1006,7 @@ def p_uncond(opval, va):
             )
             opcode = IENC_UNCOND_SRS
             return (opcode, mnem, olist, flags)
-
-        elif (opval & 0xfe500f00) == 0xf8100000:
+        elif (opval & 0xfe500f00) == 0xf8100a00:
             #rfe
             pu = (opval>>23) & 3
             mnem = "rfe"

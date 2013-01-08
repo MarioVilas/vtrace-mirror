@@ -19,7 +19,7 @@ class NodeColumn(QtGui.QGraphicsItem):
 
         offset = 0
         for nid,nprops in nodes:
-            txt = QGraphNode(vg, self, nid, nprops, scene=scene)
+            txt = QGraphNode(self, nid, nprops, scene=scene)
             txt.setY( offset )
             offset += txt.boundingRect().height()
 
@@ -75,8 +75,10 @@ class NodeColumn(QtGui.QGraphicsItem):
         colpos = colnode.scenePos()
         colrect = colnode.boundingRect()
 
-        ecolor = self._v_vg.getMeta('edgecolor', '#000')
-        pen = QtGui.QPen( QtGui.QColor( ecolor ) )
+        pen = None
+        ecolor = self._v_vg.getMeta('edgecolor')
+        if ecolor:
+            pen = QtGui.QPen( QtGui.QColor( ecolor) )
 
         for item in self.childItems():
             itpos = item.scenePos()
@@ -101,8 +103,10 @@ class NodeColumn(QtGui.QGraphicsItem):
         colpos = colnode.scenePos()
         colrect = colnode.boundingRect()
 
-        ecolor = self._v_vg.getMeta('edgecolor', '#000')
-        pen = QtGui.QPen( QtGui.QColor( ecolor ) )
+        pen = None
+        ecolor = self._v_vg.getMeta('edgecolor')
+        if ecolor:
+            pen = QtGui.QPen( QtGui.QColor( ecolor) )
 
         for item in self.childItems():
             itpos = item.scenePos()
@@ -160,19 +164,16 @@ class NodeColumn(QtGui.QGraphicsItem):
 
 class QGraphNode(QtGui.QGraphicsSimpleTextItem):
 
-    def __init__(self, vg, column, nid, nprops, scene=None):
-
+    def __init__(self, column, nid, nprops, scene=None):
         QtGui.QGraphicsSimpleTextItem.__init__(self, nprops.get('repr', 'node:%d' % nid), scene=scene, parent=column)
 
-        self._v_vg = vg
         self._v_nid = nid
         self._v_nprops = nprops
 
-        color = vg.getMeta('nodecolor', 'green')
-        color = nprops.get('color', color)
-
-        brush = QtGui.QBrush( QtGui.QColor( color ) )
-        self.setBrush( brush )
+        color = nprops.get('color')
+        if color != None:
+            brush = QtGui.QBrush( QtGui.QColor( color ) )
+            self.setBrush( brush )
 
     # TODO mouseDoubleClickEvent to take over center of view.
 
@@ -193,17 +194,11 @@ class QGraphTreeView(QtGui.QGraphicsView):
     def __init__(self, vg, nodes, parent=None):
         QtGui.QGraphicsView.__init__(self, parent=parent)
         scene = QtGui.QGraphicsScene(parent=self)
-
         self.setScene( scene )
         self._v_nodecol = NodeColumn(vg, nodes, scene)
         self._v_vg = vg
 
     def loadNewGraph(self, vg, nodes):
-
-        # setup default meta colors
-        color = vg.getMeta('bgcolor', '#000000')
-        self.scene().setBackgroundBrush( QtGui.QBrush( QtGui.QColor( color ) ) )
-
         self._v_nodecol._removeLeft()
         self._v_nodecol._removeRight()
         self._v_nodecol.removeColumn()

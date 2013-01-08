@@ -158,8 +158,5 @@ class Elf64Symbol(vstruct.VStruct):
         self.st_size  = v_uint64()
 
 class Elf64Dynamic(Elf32Dynamic):
-    def __init__(self):
-        vstruct.VStruct.__init__(self)
-        self.d_tag   = v_uint64()
-        self.d_value = v_uint64()
+    pass
 

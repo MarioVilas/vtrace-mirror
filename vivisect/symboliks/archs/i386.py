@@ -82,82 +82,6 @@ class ThisCall(StdCall):
         sdelta = 4 * (len(argv)-1)
         emu.setSymVariable('esp', esp + sdelta)
 
-class MsFastCall(vsym_callconv.SymbolikCallingConvention):
-
-    def setSymbolikArgs(self, emu, argv):
-        for i in xrange(len(argv)):
-            arg = frobSymbol(argv[i])
-            if i == 0:
-                emu.setSymVariable("ecx", arg)
-            elif i == 1:
-                emu.setSymVariable("edx", arg)
-            else:
-                soffset = 4 + (4*(i-2))
-                emu.writeSymMemory(Const(initial_esp+soffset), arg)
-
-    def getSymbolikArgs(self, emu, argv, update=False):
-        argc = len(argv)
-        args = []
-        if argc > 0:
-            args.append( Var('ecx') )
-        if argc > 1:
-            args.append( Var('edx') )
-
-        offsets = [ x*4 for x in range(argc-2) ]
-        esp = Var('esp')
-        for off in offsets:
-            args.append( Mem(esp+off, 4) )
-        if update:
-            args = [ x.update(emu) for x in args ]
-        return args
-
-    def setSymbolikReturn(self, emu, sym, argv):
-        emu.setSymVariable('eax', sym)
-
-    def getSymbolikReturn(self, emu):
-        return emu.getSymVariable('eax')
-
-msfastcall = MsFastCall()
-
-class BFastCall(vsym_callconv.SymbolikCallingConvention):
-
-    def setSymbolikArgs(self, emu, argv):
-        for i in xrange(len(argv)):
-            arg = frobSymbol(argv[i])
-            if i == 0:
-                emu.setSymVariable("ecx", arg)
-            elif i == 1:
-                emu.setSymVariable("edx", arg)
-            else:
-                soffset = 4 + (4*(i-2))
-                emu.writeSymMemory(Const(initial_esp+soffset), arg)
-
-    def getSymbolikArgs(self, emu, argv, update=False):
-        argc = len(argv)
-        args = []
-        if argc > 0:
-            args.append( Var('eax') )
-        if argc > 1:
-            args.append( Var('edx') )
-        if argc > 2:
-            args.append( Var('ecx') )
-
-        offsets = [ x*4 for x in range(argc-3) ]
-        esp = Var('esp')
-        for off in offsets:
-            args.append( Mem(esp+off, 4) )
-        if update:
-            args = [ x.update(emu) for x in args ]
-        return args
-
-    def setSymbolikReturn(self, emu, sym, argv):
-        emu.setSymVariable('eax', sym)
-
-    def getSymbolikReturn(self, emu):
-        return emu.getSymVariable('eax')
-
-bfastcall = BFastCall()
-
 class i386SymbolikFunctionEmulator(vsym_analysis.SymbolikFunctionEmulator):
     '''
     A symbolik function emulator for i386 based code.
@@ -168,8 +92,6 @@ class i386SymbolikFunctionEmulator(vsym_analysis.SymbolikFunctionEmulator):
         self.addCallingConvention('cdecl', Cdecl())
         self.addCallingConvention('stdcall', StdCall())
         self.addCallingConvention('thiscall', ThisCall())
-        self.addCallingConvention('bfastcall', BFastCall())
-        self.addCallingConvention('msfastcall', MsFastCall())
         # FIXME possibly decide this by platform/format?
         self.addCallingConvention(None, Cdecl())
 
@@ -178,9 +100,10 @@ class i386SymbolikFunctionEmulator(vsym_analysis.SymbolikFunctionEmulator):
 
         #self.writeSymMemory( Mem(Var('fs') + 292, 4)
 
-    def _seh3_prolog(self, emu, fname, argv):
+#mem[(mem[(fs + 292):4] + 320):1]
 
-        scopetable, localsize = argv
+    def _seh3_prolog(self, emu, scopetable, localsize):
+
         esp = emu.getSymVariable('esp')
 
         emu.writeSymMemory( esp+4,  emu.getSymVariable('ebp'))
@@ -195,8 +118,7 @@ class i386SymbolikFunctionEmulator(vsym_analysis.SymbolikFunctionEmulator):
 
         return scopetable
 
-    def _seh3_epilog(self, emu, fname, argv):
-        edi, esi, ebx = argv
+    def _seh3_epilog(self, emu, edi, esi, ebx):
         esp = emu.getSymVariable('esp')
         # FIXME do seh restore...
         emu.setSymVariable('edi', edi)
@@ -207,9 +129,11 @@ class i386SymbolikFunctionEmulator(vsym_analysis.SymbolikFunctionEmulator):
         emu.setSymVariable('ebp', savedbp)
         emu.setSymVariable('esp', ebp+4)
 
-    #def getApiModule(self):
-        #if self._sym_vw.getMeta('Platform') == 'Windows':
-            #return self._sym_vw.loadModule('vivisect.impemu.api.windows.i386')
+    def getApiModule(self):
+
+        if self._sym_vw.getMeta('Platform') == 'Windows':
+
+            return self._sym_vw.loadModule('vivisect.impemu.api.windows.i386')
 
     def isLocalMemory(self, symaddr, solvedval=None):
         '''
@@ -229,6 +153,13 @@ class i386SymbolikAnalysisContext(vsym_analysis.SymbolikAnalysisContext):
 
     def getTranslator(self):
         return i386SymbolikTranslator(self.vw)
+
+# These must be declared in the symboliks arch module for
+# function calling glue to work...
+#cdecl = Cdecl()
+#default = Cdecl()
+#stdcall = StdCall()
+#thiscall = ThisCall()
 
 # And the actual translator...
 class i386SymbolikTranslator(vsym_trans.SymbolikTranslator):
@@ -378,9 +309,11 @@ class i386SymbolikTranslator(vsym_trans.SymbolikTranslator):
         self.setOperObj(op, 0, v1 + v2)
 
     def i_call(self, op):
+
         # For now, calling means finding which of our symbols go in
         # and logging what comes out.
         targ = self.getOperObj(op, 0)
+        print repr(targ)
         self.effFofX(targ)
         return
 
@@ -802,8 +735,7 @@ class i386SymbolikTranslator(vsym_trans.SymbolikTranslator):
 
     def i_movsx(self, op):
         dsize = op.opers[0].tsize
-        ssize = op.opers[1].tsize
-        v2 = o_sextend( ssize, dsize, self.getOperObj(op, 1) )
+        v2 = self.getOperObj(op, 1)
         self.setOperObj(op, 0, v2)
 
     def i_movzx(self, op):

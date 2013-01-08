@@ -203,8 +203,6 @@ INS_SZCONV  =    INS_OTHER | 0x03        #/* convert size of operand */
 OP_R=         0x001    
 OP_W=         0x002 
 OP_X=         0x004  
-OP_64AUTO=    0x008     # operand is in 64bit mode with amd64!
-
 OP_UNK=       0x000  
 OP_REG=       0x100   
 OP_IMM=       0x200  
@@ -2002,12 +2000,12 @@ tbl32_F30FC7_rest = [
 """
 tbl32_80 = [
 ( 0, INS_ADD, ADDRMETH_E | OPTYPE_b | OP_W, ADDRMETH_I | OPTYPE_b | OP_SIGNED | OP_R, ARG_NONE, cpu_80386, "add", 0, 0, 0),  
-( 0, INS_OR,  ADDRMETH_E | OPTYPE_b | OP_W, ADDRMETH_I | OPTYPE_b | OP_SIGNED | OP_R, ARG_NONE, cpu_80386, "or", 0, 0, 0),  
+( 0, INS_OR,  ADDRMETH_E | OPTYPE_b | OP_W, ADDRMETH_I | OPTYPE_b | OP_R, ARG_NONE, cpu_80386, "or", 0, 0, 0),  
 ( 0, INS_ADD, ADDRMETH_E | OPTYPE_b | OP_W, ADDRMETH_I | OPTYPE_b | OP_SIGNED | OP_R, ARG_NONE, cpu_80386, "adc", 0, 0, 0),  
 ( 0, INS_SUB, ADDRMETH_E | OPTYPE_b | OP_W, ADDRMETH_I | OPTYPE_b | OP_SIGNED | OP_R, ARG_NONE, cpu_80386, "sbb", 0, 0, 0),  
-( 0, INS_AND, ADDRMETH_E | OPTYPE_b | OP_W, ADDRMETH_I | OPTYPE_b | OP_SIGNED | OP_R, ARG_NONE, cpu_80386, "and", 0, 0, 0),  
+( 0, INS_AND, ADDRMETH_E | OPTYPE_b | OP_W, ADDRMETH_I | OPTYPE_b | OP_R, ARG_NONE, cpu_80386, "and", 0, 0, 0),  
 ( 0, INS_SUB, ADDRMETH_E | OPTYPE_b | OP_W, ADDRMETH_I | OPTYPE_b | OP_SIGNED | OP_R, ARG_NONE, cpu_80386, "sub", 0, 0, 0),  
-( 0, INS_XOR, ADDRMETH_E | OPTYPE_b | OP_W, ADDRMETH_I | OPTYPE_b | OP_SIGNED | OP_R, ARG_NONE, cpu_80386, "xor", 0, 0, 0),  
+( 0, INS_XOR, ADDRMETH_E | OPTYPE_b | OP_W, ADDRMETH_I | OPTYPE_b | OP_R, ARG_NONE, cpu_80386, "xor", 0, 0, 0),  
 ( 0, INS_CMP, ADDRMETH_E | OPTYPE_b | OP_R, ADDRMETH_I | OPTYPE_b | OP_SIGNED | OP_R, ARG_NONE, cpu_80386, "cmp", 0, 0, 0   ) 
 ]
 
@@ -2017,12 +2015,12 @@ tbl32_80 = [
 """
 tbl32_81 = [
 ( 0, INS_ADD, ADDRMETH_E | OPTYPE_v | OP_W, ADDRMETH_I | OPTYPE_z | OP_SIGNED | OP_R, ARG_NONE, cpu_80386, "add", 0, 0, 0),  
-( 0, INS_OR,  ADDRMETH_E | OPTYPE_v | OP_W, ADDRMETH_I | OPTYPE_z | OP_SIGNED | OP_R, ARG_NONE, cpu_80386, "or", 0, 0, 0),  
+( 0, INS_OR,  ADDRMETH_E | OPTYPE_v | OP_W, ADDRMETH_I | OPTYPE_z | OP_R, ARG_NONE, cpu_80386, "or", 0, 0, 0),  
 ( 0, INS_ADD, ADDRMETH_E | OPTYPE_v | OP_W, ADDRMETH_I | OPTYPE_z | OP_SIGNED | OP_R, ARG_NONE, cpu_80386, "adc", 0, 0, 0),  
 ( 0, INS_SUB, ADDRMETH_E | OPTYPE_v | OP_W, ADDRMETH_I | OPTYPE_z | OP_SIGNED | OP_R, ARG_NONE, cpu_80386, "sbb", 0, 0, 0),  
-( 0, INS_AND, ADDRMETH_E | OPTYPE_v | OP_W, ADDRMETH_I | OPTYPE_z | OP_SIGNED | OP_R, ARG_NONE, cpu_80386, "and", 0, 0, 0),  
+( 0, INS_AND, ADDRMETH_E | OPTYPE_v | OP_W, ADDRMETH_I | OPTYPE_z | OP_R, ARG_NONE, cpu_80386, "and", 0, 0, 0),  
 ( 0, INS_SUB, ADDRMETH_E | OPTYPE_v | OP_W, ADDRMETH_I | OPTYPE_z | OP_SIGNED | OP_R, ARG_NONE, cpu_80386, "sub", 0, 0, 0),  
-( 0, INS_XOR, ADDRMETH_E | OPTYPE_v | OP_W, ADDRMETH_I | OPTYPE_z | OP_SIGNED | OP_R, ARG_NONE, cpu_80386, "xor", 0, 0, 0),  
+( 0, INS_XOR, ADDRMETH_E | OPTYPE_v | OP_W, ADDRMETH_I | OPTYPE_z | OP_R, ARG_NONE, cpu_80386, "xor", 0, 0, 0),  
 ( 0, INS_CMP, ADDRMETH_E | OPTYPE_v | OP_R, ADDRMETH_I | OPTYPE_z | OP_SIGNED | OP_R, ARG_NONE, cpu_80386, "cmp", 0, 0, 0   ) 
 ]
 
@@ -2032,12 +2030,12 @@ tbl32_81 = [
 """
 tbl32_82 = [
 ( 0, INS_ADD, ADDRMETH_E | OPTYPE_b | OP_W, ADDRMETH_I | OPTYPE_b | OP_SIGNED | OP_R, ARG_NONE, cpu_80386, "add", 0, 0, 0),  
-( 0, INS_OR,  ADDRMETH_E | OPTYPE_b | OP_W, ADDRMETH_I | OPTYPE_b | OP_SIGNED | OP_R, ARG_NONE, cpu_80386, "or", 0, 0, 0),  
+( 0, INS_OR,  ADDRMETH_E | OPTYPE_b | OP_W, ADDRMETH_I | OPTYPE_b | OP_R, ARG_NONE, cpu_80386, "or", 0, 0, 0),  
 ( 0, INS_ADD, ADDRMETH_E | OPTYPE_b | OP_W, ADDRMETH_I | OPTYPE_b | OP_SIGNED | OP_R, ARG_NONE, cpu_80386, "adc", 0, 0, 0),  
 ( 0, INS_SUB, ADDRMETH_E | OPTYPE_b | OP_W, ADDRMETH_I | OPTYPE_b | OP_SIGNED | OP_R, ARG_NONE, cpu_80386, "sbb", 0, 0, 0),  
-( 0, INS_AND, ADDRMETH_E | OPTYPE_b | OP_W, ADDRMETH_I | OPTYPE_b | OP_SIGNED | OP_R, ARG_NONE, cpu_80386, "and", 0, 0, 0),  
+( 0, INS_AND, ADDRMETH_E | OPTYPE_b | OP_W, ADDRMETH_I | OPTYPE_b | OP_R, ARG_NONE, cpu_80386, "and", 0, 0, 0),  
 ( 0, INS_SUB, ADDRMETH_E | OPTYPE_b | OP_W, ADDRMETH_I | OPTYPE_b | OP_SIGNED | OP_R, ARG_NONE, cpu_80386, "sub", 0, 0, 0),  
-( 0, INS_XOR, ADDRMETH_E | OPTYPE_b | OP_W, ADDRMETH_I | OPTYPE_b | OP_SIGNED | OP_R, ARG_NONE, cpu_80386, "xor", 0, 0, 0),  
+( 0, INS_XOR, ADDRMETH_E | OPTYPE_b | OP_W, ADDRMETH_I | OPTYPE_b | OP_R, ARG_NONE, cpu_80386, "xor", 0, 0, 0),  
 ( 0, INS_CMP, ADDRMETH_E | OPTYPE_b | OP_R, ADDRMETH_I | OPTYPE_b | OP_SIGNED | OP_R, ARG_NONE, cpu_80386, "cmp", 0, 0, 0   ) 
 ]
 
@@ -2050,9 +2048,9 @@ tbl32_83 = [
 ( 0, INS_OR,  ADDRMETH_E | OPTYPE_v | OP_W, ADDRMETH_I | OPTYPE_b | OP_SIGNED | OP_R, ARG_NONE, cpu_80386, "or", 0, 0, 0),  
 ( 0, INS_ADD, ADDRMETH_E | OPTYPE_v | OP_W, ADDRMETH_I | OPTYPE_b | OP_SIGNED | OP_R, ARG_NONE, cpu_80386, "adc", 0, 0, 0),  
 ( 0, INS_SUB, ADDRMETH_E | OPTYPE_v | OP_W, ADDRMETH_I | OPTYPE_b | OP_SIGNED | OP_R, ARG_NONE, cpu_80386, "sbb", 0, 0, 0),  
-( 0, INS_AND, ADDRMETH_E | OPTYPE_v | OP_W, ADDRMETH_I | OPTYPE_b | OP_SIGNED | OP_R, ARG_NONE, cpu_80386, "and", 0, 0, 0),  
+( 0, INS_AND, ADDRMETH_E | OPTYPE_v | OP_W, ADDRMETH_I | OPTYPE_b | OP_R, ARG_NONE, cpu_80386, "and", 0, 0, 0),  
 ( 0, INS_SUB, ADDRMETH_E | OPTYPE_v | OP_W, ADDRMETH_I | OPTYPE_b | OP_SIGNED | OP_R, ARG_NONE, cpu_80386, "sub", 0, 0, 0),  
-( 0, INS_XOR, ADDRMETH_E | OPTYPE_v | OP_W, ADDRMETH_I | OPTYPE_b | OP_SIGNED | OP_R, ARG_NONE, cpu_80386, "xor", 0, 0, 0),  
+( 0, INS_XOR, ADDRMETH_E | OPTYPE_v | OP_W, ADDRMETH_I | OPTYPE_b | OP_R, ARG_NONE, cpu_80386, "xor", 0, 0, 0),  
 ( 0, INS_CMP, ADDRMETH_E | OPTYPE_v | OP_R, ADDRMETH_I | OPTYPE_b | OP_SIGNED | OP_R, ARG_NONE, cpu_80386, "cmp", 0, 0, 0   ) 
 ]
 
@@ -2202,9 +2200,9 @@ tbl32_FE = [
 tbl32_FF = [
 ( 0, INS_INC, ADDRMETH_E | OPTYPE_v | OP_W, ARG_NONE, ARG_NONE, cpu_80386, "inc", 0, 0, 0),  
 ( 0, INS_DEC, ADDRMETH_E | OPTYPE_v | OP_W, ARG_NONE, ARG_NONE, cpu_80386, "dec", 0, 0, 0),  
-( 0, INS_CALL, ADDRMETH_E | OPTYPE_v | OP_X | OP_64AUTO , ARG_NONE, ARG_NONE, cpu_80386, "call", 0, 0, 0),  
+( 0, INS_CALL, ADDRMETH_E | OPTYPE_v | OP_X, ARG_NONE, ARG_NONE, cpu_80386, "call", 0, 0, 0),  
 ( 0, INS_CALL, ADDRMETH_E | OPTYPE_p | OP_X, ARG_NONE, ARG_NONE, cpu_80386, "call", 0, 0, 0),  
-( 0, INS_BRANCH, ADDRMETH_E | OPTYPE_v | OP_X | OP_64AUTO, ARG_NONE, ARG_NONE, cpu_80386, "jmp", 0, 0, 0),  # on amd64 this is jmp rnx
+( 0, INS_BRANCH, ADDRMETH_E | OPTYPE_v | OP_X, ARG_NONE, ARG_NONE, cpu_80386, "jmp", 0, 0, 0),  
 ( 0, INS_BRANCH, ADDRMETH_E | OPTYPE_p | OP_X, ARG_NONE, ARG_NONE, cpu_80386, "jmp", 0, 0, 0),  
 ( 0, INS_PUSH, ADDRMETH_E | OPTYPE_v | OP_R, ARG_NONE, ARG_NONE, cpu_80386, "push", 0, 0, 0),  
 (0, 0, ARG_NONE, ARG_NONE, ARG_NONE, 0, 0, 0, 0, 0   ) 
@@ -3085,6 +3083,6 @@ prefix_table = {
 #MODRM_EA =  1
 #MODRM_reg=  0
 ADDRMETH_MASK =     0x00FF0000
-OPTYPE_MASK   =     0xFF000000
+OPTYPE_MASK   =     0xFF000000L
 OPFLAGS_MASK  =     0x0000FFFF
 

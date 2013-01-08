@@ -373,7 +373,7 @@ def showaslr(vdb, base, libname):
     try:
         p = PE.peFromMemoryObject(t, base)
     except Exception, e:
-        vdb.vprint('Error: %s (0x%.8x) %s' % (libname, base, e))
+        vdb.vprint('Error: %s (0x%.8x) %s' % (name, base, e))
         return
     enabled = False
     c = p.IMAGE_NT_HEADERS.OptionalHeader.DllCharacteristics
@@ -617,7 +617,7 @@ def pe(vdb, line):
         pe -E advapi32
 
         # Show the build timestamp of the PE pointed to by a register
-        pe -t esi
+        pe -t esi+10
 
     """
     #-v      Show PE version information
@@ -683,9 +683,7 @@ def pe(vdb, line):
                     ldeps[lname.lower()] = True
                 lnames = ldeps.keys()
                 lnames.sort()
-                vdb.vprint('0x%.8x - %.30s' % (base, libname))
-                for lname in lnames:
-                    vdb.vprint('    %s' % lname)
+                vdb.vprint('0x%.8x - %.30s %s' % (base, libname, ' '.join(lnames)))
             except Exception, e:
                 vdb.vprint('Import Parser Error On %s: %s' % (libname, e))
 
@@ -739,7 +737,7 @@ def bindiff(mem1, mem2):
         if r != i:
             size = (r-i)
             ret.append((i,size))
-            i+=size
+            i+=r
         i+=1
     return ret
 
@@ -810,11 +808,10 @@ def hooks(vdb, line):
 
         skips = {}
         # Get relocations for skipping
-        r = range( t.getPointerSize() )
+        r = (0,1,2,3)
         for relrva, reltype in pobj.getRelocations():
             for i in r:
                 skips[base+relrva+i] = True
-
         # Add the import entries to skip
         for iva,libname,name in pobj.getImports():
             for i in r:
@@ -827,15 +824,12 @@ def hooks(vdb, line):
                 fileva = filebase + sec.VirtualAddress
                 filebytes = pobj.readAtRva(sec.VirtualAddress, sec.VirtualSize)
                 procbytes = t.readMemory(va, size)
-
                 for off,size in bindiff(filebytes, procbytes):
                     difva = va + off
                     fdifva = fileva + off
-
                     # Check for a relocation covering this...
                     if skips.get(difva):
                         continue
-
                     found = True
                     dmem = procbytes[off:off+size].encode('hex')[:10]
                     dfil = filebytes[off:off+size].encode('hex')[:10]

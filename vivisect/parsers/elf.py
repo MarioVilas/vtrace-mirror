@@ -90,7 +90,6 @@ def loadElfIntoWorkspace(vw, elf, filename=None):
     # FIXME try to determine *which* Elf system...
     #vw.setMeta("ImportEmulation", "vivisect.impemu.posix")
     vw.setMeta("DefaultCall", "cdecl")
-    vw.addNoReturnApi("*.exit")
 
     # Base addr is earliest section address rounded to pagesize
     # NOTE: This is only for prelink'd so's and exe's.  Make something for old style so.

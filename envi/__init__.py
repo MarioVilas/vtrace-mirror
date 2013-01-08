@@ -573,9 +573,6 @@ arch_xlate_32 = {
     'i86pc':'i386', # Solaris
     '':'i386', # Stupid windows...
     'AMD64':'i386', # ActiveState python can say AMD64 in 32 bit install?
-    # Arm!
-    'armv6l':'armv6l',
-    'armv7l':'armv7l',
 }
 
 arch_xlate_64 = {
@@ -626,7 +623,7 @@ def getArchModule(name=None):
         import envi.archs.amd64 as e_amd64
         return e_amd64.Amd64Module()
 
-    elif name in ( 'arm', 'armv6l', 'armv7l' ):
+    elif name == 'arm':
         import envi.archs.arm as e_arm
         return e_arm.ArmModule()
 

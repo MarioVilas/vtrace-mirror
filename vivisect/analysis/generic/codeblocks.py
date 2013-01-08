@@ -7,17 +7,19 @@ module which should be snapped in *very* early by parsers.
 """
 
 #FIXME this belongs in the core disassembler loop!
-import sys
+
 import envi
 import vivisect
 
 from vivisect.const import *
 
 def analyzeFunction(vw, funcva):
-    blocks = {}
+
     done = {}
-    todo = [ funcva, ]
+    todo = [funcva,]
+
     brefs = []
+
     while len(todo):
 
         start = todo.pop()
@@ -27,7 +29,7 @@ def analyzeFunction(vw, funcva):
             continue
 
         done[start] = True
-        blocks[start] = 0
+
         brefs.append( (start, True) )
 
         va = start
@@ -41,7 +43,6 @@ def analyzeFunction(vw, funcva):
             if loc == None:
                 if vw.verbose:
                     vw.vprint("CodeBlock Analysis: hit 0x%.8x (non location) from inside 0x%.8x" % (va,funcva))
-                blocks[start] = va - start
                 brefs.append( (va, False) )
                 break
 
@@ -51,7 +52,6 @@ def analyzeFunction(vw, funcva):
             if ltype != LOC_OP:
                 if vw.verbose:
                     vw.vprint("CodeBlock Analysis: hit 0x%.8x %s (non-opcode location) from inside 0x%.8x" % (va, vw.reprLocation(loc),funcva))
-                blocks[start] = va - start                     
                 brefs.append( (va, False) )
                 break
 
@@ -61,6 +61,7 @@ def analyzeFunction(vw, funcva):
             branch = False
             xrefs = vw.getXrefsFrom(va, REF_CODE)
             for fromva, tova, rtype, rflags in xrefs:
+
                 # We don't handle procedural branches here...
                 if rflags & envi.BR_PROC:
                     continue
@@ -69,44 +70,37 @@ def analyzeFunction(vw, funcva):
                 if rflags & envi.BR_DEREF:
                     continue
 
+                # Add the branch to todo (let him add to brefs after done check)
                 branch = True
-                todo.append(tova )
+                todo.append( tova )
 
             # If it doesn't fall through, terminate (at nextva)
             if linfo & envi.IF_NOFALL:
-                blocks[start] = nextva - start 
                 brefs.append( (nextva, False) )
                 break
 
             # If we hit a branch, we are the end of a block...
             if branch:
-                blocks[start] = nextva - start 
                 todo.append( nextva )
                 break
 
-            if vw.getXrefsTo(nextva, REF_CODE):
-                blocks[start] = nextva - start
-                todo.append( nextva )
-                break
-            
             va = nextva
 
     # we now have an ordered list of block references!
     brefs.sort()
     brefs.reverse()
-    
 
-    
     while len(brefs):
         bva, isbegin = brefs.pop()
         if not isbegin:
             continue
-        
+
         if len(brefs) == 0:
             vw.vprint('OMG: code block start with no end: 0x%.8x' % bva)
             break
 
-        bsize = blocks[bva]
+        nextva, nextbegin = brefs[-1]
+        bsize = nextva - bva
         vw.addCodeBlock(bva, bsize, funcva)
 
     vw.setFunctionMeta(funcva, "InstructionCount", len(done.keys()))

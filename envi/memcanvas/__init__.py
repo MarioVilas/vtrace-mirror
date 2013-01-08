@@ -127,9 +127,7 @@ class MemoryCanvas:
         NOTE: Implementors should probably check _canv_scrolled to
         decide if they should scroll to the end of the view...
         """
-        if sys.stdout.encoding:
-            text = text.encode(sys.stdout.encoding, 'replace')
-        sys.stdout.write(text)
+        sys.stdout.write(text.encode(sys.stdout.encoding,'replace'))
 
     def addNameText(self, text, name=None, typename=None):
         if name == None:
@@ -268,9 +266,6 @@ class MemoryCanvas:
         try:
 
             while va < firstva:
-                if not self.mem.isValidPointer( va ):
-                    va += 1
-                    continue
                 self._beginRenderVa(va)
                 rsize = rend.render(self, va)
                 self._canv_rendvas.append((va,rsize))
@@ -296,9 +291,6 @@ class MemoryCanvas:
         try:
             maxva = va + size
             while va < maxva:
-                if not self.mem.isValidPointer( va ):
-                    va += 1
-                    continue
                 self._beginRenderVa(va)
                 rsize = rend.render(self, va)
                 self._canv_rendvas.append((va,rsize))
@@ -315,46 +307,37 @@ class MemoryCanvas:
 
     def renderMemory(self, va, size, rend=None):
 
-        # if this is not a "scrolled" canvas, clear it.
-        if not self._canv_scrolled:
-            self.clearCanvas()
+            # if this is not a "scrolled" canvas, clear it.
+            if not self._canv_scrolled:
+                self.clearCanvas()
 
-        if rend == None:
-            rend = self.currend
+            if rend == None:
+                rend = self.currend
 
-        self.currend = rend
+            self.currend = rend
 
-        # Set our canvas render tracking variables.
-        self._canv_beginva = va
-        self._canv_endva = va + size
-        self._canv_rendvas = []
+            # Set our canvas render tracking variables.
+            self._canv_beginva = va
+            self._canv_endva = va + size
+            self._canv_rendvas = []
 
-        # A callback for "bulk" rendering (let the canvas cache...)
-        self._beginRenderMemory(va, size, rend)
-        try:
-            maxva = va + size
-            while va < maxva:
-
-                if not self.mem.isValidPointer( va ):
-                    va += 1
-                    continue
-
-                self._beginRenderVa(va)
-                try:
+            # A callback for "bulk" rendering (let the canvas cache...)
+            self._beginRenderMemory(va, size, rend)
+            try:
+                maxva = va + size
+                while va < maxva:
+                    self._beginRenderVa(va)
                     rsize = rend.render(self, va)
                     self._canv_rendvas.append((va,rsize))
                     self._endRenderVa(va)
                     va += rsize
-                except Exception, e:
-                    self.addText("\nRender Exception At %s: %s\n" % (hex(va),e))
-                    self._endRenderVa(va)
-                    break
 
-        except Exception, e:
-            self.addText("\nException At %s: %s\n" % (hex(va),e))
+            except Exception, e:
+                s = traceback.format_exc()
+                self.addText("\nException At %s: %s\n" % (hex(va),s))
 
-        # Canvas callback for render completion (or error...)
-        self._endRenderMemory(va, size, rend)
+            # Canvas callback for render completion (or error...)
+            self._endRenderMemory(va, size, rend)
 
 class StringMemoryCanvas(MemoryCanvas):
 

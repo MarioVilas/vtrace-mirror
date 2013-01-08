@@ -36,6 +36,9 @@ class SvgGraphRenderer(vg_render.GraphRenderer):
         for nid,ninfo in graph.getNodes():
             ninfo['size'] = (10,10)
 
+    def beginRender(self, xsize, ysize):
+        vg_render.GraphRenderer.beginRender(self, xsize, ysize)
+
     def endRender(self):
         # Actually write out the file.
         f = file(self.svgfile,'wb')
@@ -54,7 +57,6 @@ class SvgGraphRenderer(vg_render.GraphRenderer):
 if __name__ == '__main__':
 
     import visgraph.graphcore as vg_graphcore
-    import visgraph.layouts.force as vg_force
     import visgraph.layouts.dynadag as vg_dynadag
     import visgraph.renderers.svgrend as vg_svgrend
 
@@ -78,8 +80,7 @@ if __name__ == '__main__':
     g.addEdge('C','F')
     g.addEdge('C','G')
 
-    #layout = vg_dynadag.DynadagLayout(g)
-    layout = vg_force.ForceLayout(g)
+    layout = vg_dynadag.DynadagLayout(g)
     rend = vg_svgrend.SvgGraphRenderer(g, 'test.svg')
 
     layout.renderGraph(rend)

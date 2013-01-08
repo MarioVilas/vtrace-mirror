@@ -11,41 +11,29 @@ import vtrace
 import vtrace.snapshot as vt_snap
 import cobra
 
-def targetusage():
-    print('''
-    Alternate vdb "targets" include various embedded/hardware/etc debugging
-    capabilities which are not related to your runtime platform....  Some
-    targets may require additional foo=bar style options added to the end
-    of your vdb command.  See details per-target below.
-
-    ======================================================================
-
-    "vmware32" host=<host> port=<port> ( of listening vmware gdb server for 32 bit VM )
-
-        The "vmware32" target enables debugging with a 32bit VMWare Hypervisor using their
-        gdb-server stub.  This allows "hardware debugger" like kernel debugging.
-
-        Add the following lines to your VMX file to enable debugging:
-
-        debugStub.listen.guest32 = "TRUE"
-        debugStub.hideBreakpoints = "FALSE"
-
-        VMWare will be listening on 127.0.0.1 on port 8832 (for the first one... 
-        8833 for the second... etc... )
-
-        NOTE: Only Windows XP currently supported.  TODO: Windows 7 / Linux / Windows 8
-
-    ======================================================================
-
-    In development:
-
-    "vmware64"  - Kernel debug 64 bit VMWare Hypervisors
-    "openocd"   - Debug embedded targets
-
-    ''')
+def usage():
+    print 'Usage: vdb [options]'
+    print '\t-S\t\tServer mode (start a vtrace server)'
+    print '\t-v\t\tVerbose mode'
+    print '\t-G\t\t(depreicated) GTK gui...'
+    print '\t=Q\t\tQT gui!'
+    print '\t-r\t\tRun after attach'
+    print '\t-R <host>\tConnect to remote vdb server.'
+    print '\t-p <pid> \tAttach to the given pid.'
+    print '\t-s <file>\tLoad process snapshot from file'
+    print '\t--gdb-server <server_info>\tAttach to gdbserver! ("--gdb-server help" for more)'
     sys.exit(0)
 
-def main():
+def usage_gdbserver():
+    print 'NOTE: gdbserver is only tested for vmware... (qemu, openocd soon!)'
+    print 'use: --gdb-server <gdb_host>:<gdb_port>:<gdb_arch>'
+    print 'gdb_host - The host running the gdb stub'
+    print 'gdb_port - The port listening on the host (tcp)'
+    print 'gdb_arch - The target arch: i386 amd64 arm'
+    print ''
+    sys.exit(0)
+
+if __name__ == "__main__":
 
     cmd = None
     pidstr = None
@@ -53,7 +41,7 @@ def main():
 
     trace = None
 
-    parser = optparse.OptionParser(prog='vdbbin', usage='vdbbin [options] [platformopt=foo, ...]')
+    parser = optparse.OptionParser(prog='vdbbin')
     parser.add_option('-c', '--cmd', dest='command', default=None, help='Debug a fired command')
     parser.add_option('-p', '--process', dest='process', default=None, help='Attach to process by name or pid')
     parser.add_option('-Q', '--qt', dest='doqt', default=False, action='store_true', help='Run the QT gui')
@@ -62,42 +50,76 @@ def main():
     parser.add_option('-s', '--snapshot', dest='snapshot', default=None, help='Load a vtrace snapshot file')
     parser.add_option('-S', '--server', dest='doserver', default=False, action='store_true')
     parser.add_option('-v', '--verbose', dest='doverbose', default=False, action='store_true')
-    parser.add_option('-t', '--target', dest='target', default=None, help='Activate special vdb target ( -t ? for list )')
     parser.add_option('--android', dest='doandroid', default=False, action='store_true', help='Debug Android with ADB!')
     parser.add_option('-e', '--eventid', dest='eventid', default=None, type='int', help='Used for Windows JIT')
 
     options, argv = parser.parse_args(sys.argv[1:])
 
+    #try:
+        #opts,args = getopt.getopt(sys.argv[1:], "e:QR:vGSp:s:c:r", ['gdb-server=',])
+    #except:
+        #usage()
+
+    #do_qt = False
+    #do_gui = False
+
+    #for opt,optarg in opts:
+
+        #if opt == '-R':
+            #vtrace.remote = optarg
+
+        #elif opt == '-Q':
+            #do_qt = True
+
+        #elif opt == "-c":
+            #cmd = optarg
+
+        #elif opt == '-e':
+            #eventid = int(optarg)
+
+        #elif opt == "-G":
+            #do_gui = True
+
+        #elif opt == "-s":
+            #trace = vt_snap.loadSnapshot(optarg)
+
+        #elif opt == "-S":
+            #vtrace.startVtraceServer()
+
+        #elif opt == "-p":
+            #pidstr = optarg
+
+        #elif opt == "-v":
+            #vtrace.verbose = True
+            #cobra.verbose = True
+
+        #elif opt == '-r':
+            #runagain = True
+
+        #elif opt == '--gdb-server':
+            #import vtrace.platforms.gdbstub as vt_gdbstub
+            #try:
+                #gdbserver, gdbport, gdbarch = optarg.split(':', 2)
+                #trace = vt_gdbstub.GdbStubTrace(gdbarch)
+                #trace.setMeta('GdbServerHost', gdbserver)
+                #trace.setMeta('GdbServerPort', int(gdbport, 0))
+            #except Exception ,e:
+                #usage_gdbserver()
+
     # Handle some options before we even create a trace.
     vtrace.remote = options.remotehost # None by default
 
+    plat=None
     platargs = {}
-
-    for arg in argv:
-
-        if arg.find('=') == -1:
-            continue
-
-        k,v = arg.split('=',1)
-        if v.isdigit():
-            v = int(v)
-
-        platargs[k.lower()] = v
-
     if options.doandroid:
-        import vdb.tools.android as v_utils_android
-        v_utils_android.runVdbOnDroid()
-        return
-
-    if options.target == '?':
-        targetusage()
+        plat = 'android'
 
     if options.snapshot:
         print('Loading process snapshot...')
         trace = vt_snap.loadSnapshot(options.snapshot)
 
     if trace == None:
-        trace = vtrace.getTrace(target=options.target, **platargs)
+        trace = vtrace.getTrace(plat=plat, **platargs)
 
     db = vdb.Vdb(trace)
     db.runagain = options.dorunagain
@@ -143,7 +165,4 @@ def main():
 
             except:
                 traceback.print_exc()
-
-if __name__ == "__main__":
-    sys.exit(main())
 

@@ -61,7 +61,7 @@ class IMAGE_FILE_HEADER(vstruct.VStruct):
         self.PointerToSymbolTable = v_uint32()
         self.NumberOfSymbols      = v_uint32()
         self.SizeOfOptionalHeader = v_uint16()
-        self.Characteristics      = v_uint16()
+        self.Ccharacteristics     = v_uint16()
 
 class IMAGE_IMPORT_DIRECTORY(vstruct.VStruct):
     def __init__(self):
@@ -253,18 +253,3 @@ class IMAGE_RUNTIME_FUNCTION_ENTRY(vstruct.VStruct):
         self.EndAddress = v_uint32()
         self.UnwindInfoAddress = v_uint32()
 
-class SignatureEntry(vstruct.VStruct):
-
-    def __init__(self):
-        vstruct.VStruct.__init__(self)
-
-        self.size = v_int32(bigend=False)
-
-        # should always be 0x00020200
-        self.magic = v_bytes(size=4)
-
-        self.pkcs7 = v_bytes()
-
-    def pcb_size(self):
-        size = self.size
-        self.vsGetField('pkcs7').vsSetLength(size)
